@@ -9,21 +9,6 @@ Please cite the paper in your publications if you find the source code useful fo
 Contributors: Shivani Agrawal, Lisa Wang, Jonathan Malmaud, Lukasz Lew,
 Pouya Dormiani, Phoenix Meadowlark, Oleg Rybakov.
 
-## Installation
-```
-# Install SVN to only download the aqt directory of Google.
-sudo apt install subversion
-
-# Download this directory
-svn export https://github.com/google/aqt
-
-# Upgrade pip
-pip install --user --upgrade pip
-
-# Install the requirements from `requirements.txt`
-pip install --user -r aqt/requirements.txt
-```
-
 ## AQT Quantization Library
 
 `Jax` and `Flax` quantization libraries provides `what you serve is what you train`
