@@ -11,11 +11,11 @@ Pouya Dormiani, Phoenix Meadowlark, Oleg Rybakov.
 
 ## Installation
 ```
-# Install SVN to only download the aqt directory of Google Research.
+# Install SVN to only download the aqt directory of Google.
 sudo apt install subversion
 
 # Download this directory
-svn export https://github.com/google-research/google-research/trunk/aqt
+svn export https://github.com/google/aqt
 
 # Upgrade pip
 pip install --user --upgrade pip
