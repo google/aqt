@@ -22,9 +22,6 @@ import tree
 from google3.third_party.google_research.google_research.aqt.utils import pandas_utils
 from google3.third_party.google_research.google_research.aqt.utils import report_utils
 
-# BEGIN GOOGLE-INTERNAL
-from google3.pyglib.contrib.gpathlib import gpath
-# END GOOGLE-INTERNAL
 
 
 def flatten_with_joined_string_paths(
@@ -84,25 +81,12 @@ def convert_report_to_flat_dict_default(
     # merge dicts
     row_dict = {**row_dict, **flattened_unsmoothed_metrics}
 
-  # BEGIN GOOGLE-INTERNAL
-  # Add XManager ID
-  row_dict['xid'] = report.metadata_corp.xid
-
-  # Add compute / memory cost information if present
-  if report.compute_memory_cost is not None:
-    row_dict['compute_cost'] = int(report.compute_memory_cost['compute_cost'])
-    row_dict['memory_cost'] = int(report.compute_memory_cost['memory_cost'])
-  # END GOOGLE-INTERNAL
 
   # Ignore following fields because they have already been added, or we chose
   # not to include them.
   report_fields_to_ignore = {
       'metrics',
       'unsmoothed_metrics',
-      # BEGIN GOOGLE-INTERNAL
-      'metadata_corp',
-      'compute_memory_cost'
-      # END GOOGLE-INTERNAL
   }
   # Add other report fields.
   for field in dataclasses.fields(report):
@@ -155,146 +139,3 @@ def clickable_link(link: str, display_str: str = 'link') -> str:
 
   """
   return f'<a href="{link}">{display_str}</a>'
-
-
-# BEGIN GOOGLE-INTERNAL
-def generate_diff_link(lhs_file_path: str, rhs_file_path: str) -> str:
-  """Creates internal diff link, diffing the two files.
-
-  Args:
-    lhs_file_path: First file path, e.g. CNS path.
-    rhs_file_path: Second file path, e.g. CNS path.
-
-  Returns:
-    Link to file diff view on internal ocean-diff-viewer tool.
-  """
-
-  def _escape_fwd_slashes(path: str):
-    return path.replace('/', '%2F')
-
-  lhs_file_path = _escape_fwd_slashes(lhs_file_path)
-  rhs_file_path = _escape_fwd_slashes(rhs_file_path)
-  link_prefix = 'https://ocean-diff-viewer.corp.google.com/text?'
-  link = f'{link_prefix}lhs={lhs_file_path}&rhs={rhs_file_path}'
-  return link
-
-
-def convert_tensorboard_id_to_link(tensorboard_id: str) -> str:
-  """Converts tensorboard ID to internal tensorboard link."""
-
-  return f'https://tensorboard.corp.google.com/experiment/{tensorboard_id}/'
-
-
-def get_tensorboard_link_for_experiments_in_df(df: pd.DataFrame) -> str:
-  """Creates a tensorboard comparison link for experiments in dataframe.
-
-  Args:
-    df: A pandas dataframe with tensorboard id column.
-
-  Returns:
-    A tensorboard corp link.
-
-  Raises:
-    ValueError if dataframe does not have tensorboard_id column.
-
-  """
-  if 'tensorboard_id' not in list(df.columns):
-    raise ValueError('Dataframe does not have tensorboard_id column.')
-  tensorboard_ids = list(df.tensorboard_id.unique())
-  tb_link = 'https://tensorboard.corp.google.com/compare/'
-  for i, tid in enumerate(tensorboard_ids):
-    if tid is not None:
-      tb_link += f'{i}:{tid},'
-    else:
-      print('At least one row does not have a tensorboard id.')
-  # Remove comma after last tensorboard id.
-  if tb_link[-1] == ',':
-    tb_link = tb_link[:-1]
-  return tb_link
-
-
-Regex = str
-NewStr = str
-ColumnName = str
-ColumnValue = Any
-OrderAscending = bool
-SingleColumnFilter = Tuple[ColumnName, List[ColumnValue]]
-SingleColumnRegex = Tuple[ColumnName, Regex]
-SingleColumnRegexReplace = Tuple[ColumnName, Regex, Regex]
-ColumnNameRegexReplace = Tuple[Regex, Regex]
-SortBy = Sequence[Tuple[ColumnName, OrderAscending]]
-
-
-def load_report_dataframe_with_filter_drop_rename(
-    report_dir: gpath.GPath,
-    row_filter_args: Optional[Sequence[SingleColumnFilter]] = None,
-    row_regex_filter_args: Optional[Sequence[SingleColumnRegex]] = None,
-    rename_row_value_args: Optional[Sequence[SingleColumnRegexReplace]] = None,
-    drop_columns_by_regex_args: Optional[Sequence[Regex]] = None,
-    rename_column_name_args: Optional[Sequence[ColumnNameRegexReplace]] = None,
-    sort_by_args: Optional[SortBy] = None) -> pd.DataFrame:
-  r"""Creates a report dataframe given directory.
-
-  Optionally, the user can specify how to filter the dataframe rows, which
-  columns to drop, and how to rename columns. For more customized pandas
-  operations, please use report_utils.load_all_reports() to load all reports
-  into a dataframe.
-
-  Usage example:
-    df = analysis_utils.load_report_dataframe_with_filter_drop_rename(
-    report_dir=<dirpath>,
-    row_filter_args=
-      [('xid', [18925472, 18925219, 18925394])],
-    row_regex_filter_args=
-      [('model_dir', '.*4bit.*')],
-    rename_row_value_args=
-      [('experiment_name', r'leaderboard_full_model_(.*)_wanglisa-.*',
-      r'\g<1>')],
-    drop_columns_by_regex_args=['.*unsmoothed.*'],
-    rename_column_name_args=[('_translate--de-en:test', '')],
-    sort_by_args=([('eval/loss', True), ('eval/bleu', False)]),
-  )
-
-  Args:
-    report_dir: Directory where report json files are stored.
-    row_filter_args: List of row filters to be applied sequentially. Each row
-      filter is a tuple of (column_name, filter_list). Each row filter is
-      equivalent to a SQL statement of the form SELECT * WHERE column_name IN
-      filter_list.
-    row_regex_filter_args: Each row filter is a tuple of (column_name, regex).
-      Will select the rows where column values match the regex.
-    rename_row_value_args: Arguments for replacing values in columns. List of
-      tuples (column_name, old_string, new_string).
-    drop_columns_by_regex_args: Drop columns matching the provided regex.
-    rename_column_name_args: Arguments to rename column headers. List of tuples
-      (old_string (can be regex), new_string).
-    sort_by_args: Arguments for df.sort_values(), List of tuples of (by,
-      ascending), where `by` is a column sort by, and `ascending` is a bool
-      indicating whether the column should be sorted in ascending order. First
-      tuple will be used as primary sorting axis, etc. See documentation
-      pandas.DataFrame.sort_values() for more details.
-
-  Returns:
-    A pandas dataframe.
-
-  """
-
-  reports = report_utils.load_all_reports(report_dir, num_threads=100)
-
-  df = convert_reports_to_dataframe(reports,
-                                    convert_report_to_flat_dict_default)
-
-  df = pandas_utils.apply_filter_drop_rename_operations(
-      df,
-      row_filter_args=row_filter_args,
-      row_regex_filter_args=row_regex_filter_args,
-      rename_row_value_args=rename_row_value_args,
-      drop_columns_by_regex_args=drop_columns_by_regex_args,
-      rename_column_name_args=rename_column_name_args,
-      sort_by_args=sort_by_args,
-  )
-
-  return df
-
-
-# END GOOGLE-INTERNAL

@@ -53,18 +53,6 @@ class AnalysisUtilsTest(parameterized.TestCase):
         }
     }
 
-    # BEGIN GOOGLE-INTERNAL
-    metadata_corp = report_utils.MetadataCorp(
-        xid=20578274,
-        wid=None,
-        citc_client_info={
-            'owner': 'user',
-            'workspace_id': 100,
-            'snapshot': 300,
-            'permanent_dir': '/google/src/cloud/user/dir',
-            'sync_changelist': 876543212
-        })
-    # END GOOGLE-INTERNAL
 
     report_query_args = {
         'early_stop_attr': 'loss',
@@ -93,11 +81,6 @@ class AnalysisUtilsTest(parameterized.TestCase):
         eval_freq=10,
         first_nan_step=None,
         tensorboard_id='12345',
-        # BEGIN GOOGLE-INTERNAL
-        hparams_config_path='/cns/model_directory/hparams_config.json',
-        compute_memory_cost=compute_cost_dict,
-        metadata_corp=metadata_corp,
-        # END GOOGLE-INTERNAL
     )
 
   def test_convert_report_to_flat_dict_default(self):
@@ -145,16 +128,6 @@ class AnalysisUtilsTest(parameterized.TestCase):
             'window_size_in_steps': 50,
             'start_step': 100
         },
-        # BEGIN GOOGLE-INTERNAL
-        'xid':
-            20578274,
-        'hparams_config_path':
-            '/cns/model_directory/hparams_config.json',
-        'compute_cost':
-            4,
-        'memory_cost':
-            5,
-        # END GOOGLE-INTERNAL
     }
     self.assertDictEqual(res, exp)
 
@@ -222,30 +195,6 @@ class AnalysisUtilsTest(parameterized.TestCase):
     exp = '<a href="http://test.url">test_link</a>'
     self.assertEqual(res, exp)
 
-  # BEGIN GOOGLE-INTERNAL
-  def test_generate_diff_link(self):
-    lhs_path = '/path/to/first/file'
-    rhs_path = '/path/to/second/file'
-    res = analysis_utils.generate_diff_link(
-        lhs_file_path=lhs_path, rhs_file_path=rhs_path)
-    exp = 'https://ocean-diff-viewer.corp.google.com/text?lhs=%2Fpath%2Fto%2Ffirst%2Ffile&rhs=%2Fpath%2Fto%2Fsecond%2Ffile'
-    self.assertEqual(res, exp)
-
-  def test_convert_tensorboard_id_to_link(self):
-    tb_id = '12345'
-    res = analysis_utils.convert_tensorboard_id_to_link(tensorboard_id=tb_id)
-    exp = 'https://tensorboard.corp.google.com/experiment/12345/'
-    self.assertEqual(res, exp)
-
-  def get_tensorboard_link_for_experiments_in_df(self):
-    df = pd.DataFrame({
-        'tensorboard_id': ['123', '456', '789'],
-    })
-    res = analysis_utils.get_tensorboard_link_for_experiments_in_df(df)
-    exp = 'https://tensorboard.corp.google.com/compare/0:123,1:456,2:789'
-    self.assertEqual(res, exp)
-
-  # END GOOGLE-INTERNAL
 
 
 if __name__ == '__main__':
