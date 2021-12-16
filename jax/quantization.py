@@ -125,7 +125,7 @@ class QuantType(str, enum.Enum):
     # conversion to an int dtype and then  back to a fp dtype happen *within*
     # to_quantized, so that Jax backprop works correctly. Thus
     # counter-intuitively, we need this to return a fp dtype for 'aqt' since the
-    # return type for 'to_quantized' overall is fp. TODO(malmaud): As part of
+    # return type for 'to_quantized' overall is fp. TODO: As part of
     # the refactor of this module, clean this up to eliminate the
     # counter-intuitive behavior.
     if self.value in ['aqt', 'fake_quant']:  # pylint: disable=comparison-with-callable
@@ -228,7 +228,7 @@ class QuantOps:
     else:
       initial_bounds = bounds
       # We set bounds = -1 to indicate no quantization.
-      # TODO(shivaniagrawal): Move away from the hack of setting bound as -1.
+      # TODO: Move away from the hack of setting bound as -1.
       bounds = jnp.asarray(bounds, SCALE_DTYPE)
       if not DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING:
         # to avoid log2(0)
@@ -304,7 +304,7 @@ class QuantOps:
         half_shift=False)  # disable half_shift for positive distribution
 
   def assert_scale_shape_is(self, *, shape: Union[int, Tuple[int, ...]]):
-    # TODO(shivaniagrawal): add option for float scale for fixed bound acts
+    # TODO: add option for float scale for fixed bound acts
     # quantization.
     assert self._scale.shape == shape, (
         'scale shape is unexpected, should be %s but got %s' %
@@ -439,14 +439,14 @@ class QuantOps:
     Returns:
       Quantized and rescaled inputs using fake quant approach.
     """
-    # TODO(yichi): if weight_params.prec is None or weight_binarize flag True:
+    # TODO: if weight_params.prec is None or weight_binarize flag True:
     if weight_params.prec is None or not quantize_weights:
       return w
     ops = cls.create_weights_ops(w, weight_params=weight_params)
     return ops.fake_quant(
         w, quantized_type=quantized_type, fake_dependency=fake_dependency)
 
-  # TODO(malmaud): rename 'input' to activation here and elsewhere in this file.
+  # TODO: rename 'input' to activation here and elsewhere in this file.
   @classmethod
   def create_input_ops(
       cls, inputs: jnp.ndarray, *, hparams: ActHParams,
@@ -462,7 +462,7 @@ class QuantOps:
       Quantized and rescaled inputs using fake quant approach.
     """
 
-    # TODO(shivaniagrawal): investigate why pytype allows types other than
+    # TODO: investigate why pytype allows types other than
     # ActsBoundT.
     if isinstance(hparams.bounds, int):
       hparams.bounds = float(hparams.bounds)
@@ -481,7 +481,7 @@ class QuantOps:
     # will cause clip_bounds will be a tensor of all '-1', which we will check
     # for in a lax.cond call below.
 
-    # TODO(malmaud): Refactor code to separate bounds calculation from tracking
+    # TODO: Refactor code to separate bounds calculation from tracking
     # activation statistics to avoid the need to rely on special bounds values
     # when disabling quantization.
     if isinstance(hparams.bounds, get_bounds.GetBounds.Hyper):
@@ -536,7 +536,7 @@ class QuantOps:
     """
 
     if hparams.bounds is None or hparams.prec is None:
-      # TODO(lew): support bound-clipping without quantization
+      # TODO: support bound-clipping without quantization
       return inputs
 
     ops = cls.create_input_ops(
@@ -551,7 +551,7 @@ class QuantOps:
   # collect activation statistics, we have GetBounds return a clip_bounds
   # tensor to all '-1' values as a signal that quantization shoulnd't be
   # applied. See comment on the call to 'GetBounds' above.
-  # TODO(malmaud): Find a less hacky way to do this.
+  # TODO: Find a less hacky way to do this.
   def should_quantize(self) -> jnp.ndarray:
     """Return whether QuantOps should quantize."""
     # We return a scalar jnp.ndarray of dtype bool instead of a Python bool
@@ -677,7 +677,7 @@ def quantized_dot(*,
       dot_precision=dot_precision)
 
 
-# TODO(shivaniagrawal): extend it for generic dot_dimenson_numbers
+# TODO: extend it for generic dot_dimenson_numbers
 def quantized_dot_general(
     *,
     w: jnp.ndarray,
@@ -768,7 +768,7 @@ def quantized_dot_general(
       is_act_quantized = act_op.should_quantize()
       # Quantize activation matrix by computing RoundAndClip(w*s)
 
-      # TODO(malmaud): We have to cast quantized activations to an fp format
+      # TODO: We have to cast quantized activations to an fp format
       # instead of int8 since int8 matmul with int32 accumulation is not yet
       # supported in XLA (and therefore in Jax). See b/170293520. We keep
       # 'act_quantized' in whatever it's original fp format was, typically bf16
@@ -797,7 +797,7 @@ def quantized_dot_general(
       # Now we calculate s^-1 * w.
       w_scaled_rows = ((1 / act_scale) * w).astype(input_dtype)
 
-      # TODO(shivaniagrawal): This section repeats code from the 'else' block.
+      # TODO: This section repeats code from the 'else' block.
       # The code is repeated twice because quantization can either be disabled
       # dynamically by setting the clipping bound to -1 (see comments on
       # 'should_quantize'), or statically by setting the 'prec' hyperparameter
@@ -833,7 +833,7 @@ def quantized_dot_general(
           weight_scale = weight_scale.reshape(weight_scale_shape)
 
       # Quantize weight matrix by calculating RoundAndClip(s^-1 * w * t)
-      # TODO(malmaud): See comment on 'act_op.to_quantized' above, which applies
+      # TODO: See comment on 'act_op.to_quantized' above, which applies
       # here as well.
       weight_quantized = weight_op.to_quantized(
           w_scaled_rows, dtype=input_dtype)
@@ -857,7 +857,7 @@ def quantized_dot_general(
     # We also do not use int8_to_int32_dot if activation has positive
     # distribution and prec=8, since we would not be able to fit uint8 range in
     # int8.
-    # TODO(shivaniagrawal): A proper solution for this would be to have mixed
+    # TODO: A proper solution for this would be to have mixed
     # dot(uint8, int8) -> int32 in XLA.
     weight_fits_in_int8 = is_weight_quantized and (weight_prec is not None and
                                                    weight_prec <= 8)
@@ -883,7 +883,7 @@ def quantized_dot_general(
           use_int8_to_int32_dot=use_int8_to_int32_dot)
 
     # Scale the columns of the matmul output by computing `matmul(...) * t^-1`
-    # TODO(malmaud): Make it possible to return an unquantized matmul to support
+    # TODO: Make it possible to return an unquantized matmul to support
     # disabling quantization during initial phase of training.
     #
     # We convert the return value back to input_dtype to ensure the output
@@ -909,7 +909,7 @@ def quantized_dot_general(
         quantized_type=quantized_type,
         fake_dependency=fake_dependency)
 
-    # TODO(shivaniagrawal): HParams currently allows act_hparams to be NONE.
+    # TODO: HParams currently allows act_hparams to be NONE.
     # Going forward we can change act_hparams to be required field where if
     # either `prec` or `bounds` is None will result in No activation
     # quantization.
@@ -942,7 +942,7 @@ class QuantizedDot(nn.Module):
   prefer_int8_to_int32_dot: bool
   dot_precision: Optional[PrecisionType] = None
 
-  # TODO(malmaud): Remove the 'padding_mask' field from 'GetBounds.Params'
+  # TODO: Remove the 'padding_mask' field from 'GetBounds.Params'
   # so that 'get_bounds_params' can be a hyperparameter of this class and
   # only the padding mask will be passed as an argumen to '__call__'.
   @nn.compact
@@ -1036,11 +1036,11 @@ def quantized_dynamic_dot_general(
         # Since only per-layer scale factors are supported, we assert that the
         # scale factors are scalars.
         shape_utils.assert_shapes_compatible(scale.shape, ())
-        # TODO(malmaud): See comment on 'act_op.to_quantized' earlier in this
+        # TODO: See comment on 'act_op.to_quantized' earlier in this
         # file, which applies here as well.
         act_quantized = quant_op.to_quantized(act, dtype=input_dtype)
 
-        # TODO(shivaniagrawal): See comment in 'dot_general' above on why this
+        # TODO: See comment in 'dot_general' above on why this
         # logic is duplicated here and in the 'else' block below.
         return lax.cond(
             quant_op.should_quantize(),  #
@@ -1074,14 +1074,14 @@ def quantized_dynamic_dot_general(
           dimension_numbers=dot_dimension_numbers,
           precision=dot_precision)
 
-    # TODO(malmaud): There is an asymmetry here: when we scale the activations
+    # TODO: There is an asymmetry here: when we scale the activations
     # to quantize them, the scaling happens in QuantOps.to_quantized. But here,
     # when we dequantize the matrix multiplication of the activations by
     # dividing by the product of the scale factors, we don't use QuantOps. It
     # would be cleaner to do both operations at the same level of abstraction.
     out = (out_quantized / (lhs_scale * rhs_scale)).astype(input_dtype)
   elif quant_type in (QuantType.fake_quant, QuantType.fake_quant_with_int):
-    # TODO(shivaniagrawal): HParams currently allows act_hparams to be NONE.
+    # TODO: HParams currently allows act_hparams to be NONE.
     # Going forward we can change act_hparams to be required field where if
     # either `prec` or `bounds` is None will result in No activation
     # quantization.

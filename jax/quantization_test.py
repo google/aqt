@@ -151,7 +151,7 @@ class QuantOpsTest(parameterized.TestCase):
           act_distribution='symmetric',
           use_hparams_bounds=False,
       ),
-      # TODO(b/193561347): FP quantization with positive input distribution is
+      # TODO: FP quantization with positive input distribution is
       # not supported yet
       dict(
           testcase_name='fp_act_positive',
@@ -608,7 +608,7 @@ class ActQuantizationTest(parameterized.TestCase):
     onp.testing.assert_array_equal(inputs, inputs_after_fake_quant)
 
 
-# TODO(shivaniagrawal): Add tests for auto clip activation quantizations.
+# TODO: Add tests for auto clip activation quantizations.
 
 
 class AQTTest(parameterized.TestCase):

@@ -74,7 +74,7 @@ def load_hlo_proto_from_model(
                                     *ones_shape_list)
 
 
-# TODO(shivaniagrawal): use strict pytype here.
+# TODO: use strict pytype here.
 def output_hlo(computation: Any, file_path: str):
   """Saves HLO for the given xla computation to given file path.
 

@@ -101,7 +101,7 @@ class StatsTag(nn.Module):
     if channel_axis:
       distr_shape = tuple(d for i, d in enumerate(x.shape) if i in channel_axis)
 
-    # TODO(wanglisa): Consider adding configurability to specify which
+    # TODO: Consider adding configurability to specify which
     # statistics are collected.
     init_with_zeros = lambda shape: jnp.zeros(shape, dtype=jnp.float32)
     is_initializing = not self.has_variable('stats_tag', 'min_per_ch')

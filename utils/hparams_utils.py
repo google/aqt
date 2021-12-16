@@ -56,7 +56,7 @@ class HParamsMetadata:
   hyper_str: Optional[str] = None
 
 
-# TODO(abdolrashidi): Add unit tests for the functions below.
+# TODO: Add unit tests for the functions below.
 def save_dataclass_to_disk(data, path: str):
   """Serializes the given dataclass to a JSON file on disk.
 
@@ -168,7 +168,7 @@ def load_dataclass_from_json(dataclass_name: Type[T], json_data: str) -> T:
   return load_dataclass_from_dict(dataclass_name, data_dict)
 
 
-# TODO(shivaniagrawal): functionality `load_hparams_from_file` is created for a
+# TODO: functionality `load_hparams_from_file` is created for a
 # generic (model hparams independent) train_hparams class; either we should move
 # towards shared TrainHparams or remove the following functionalities.
 def load_hparams_from_config_dict(hparams_classname: Type[T],

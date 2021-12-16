@@ -87,7 +87,7 @@ masked_sum = functools.partial(
     pmap_reduction_fn=lax.psum,
     identity=0.0)
 
-# TODO(shivaniagrawal): The pmap_function_fn used here should be 'lax.pmax' for
+# TODO: The pmap_function_fn used here should be 'lax.pmax' for
 # masked_max and 'lax.pmin' for masked_min, but Jax currently doesn't support
 # using those in multihost training. Jax team says it will be trivial to add and
 # they welcome PRs, so we just approximate distributed max using lax.pmean until
@@ -217,7 +217,7 @@ class Stats:
       # Only update average where means are valid, so set deltas corresponding
       # to invalid entries to 0.
       delta = jnp.where(valid_mask, masked_new_val_reduced - old_avg, 0)
-      # TODO(lew): This is slightly incorrect, alpha should be proportional to
+      # TODO: This is slightly incorrect, alpha should be proportional to
       # the mask size.
       new_avg = old_avg + alpha * delta
       return new_avg

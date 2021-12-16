@@ -131,7 +131,7 @@ class ConvMetadataMonkeyPatch(contextlib.ContextDecorator):
         self._conv_general_dilated_p_original)
 
 
-# TODO(abdolrashidi): Add support for QuantOps.FloatQuant for cost estimation.
+# TODO: Add support for QuantOps.FloatQuant for cost estimation.
 def _quantization_annotation(lhs_prec: Optional[int], rhs_prec: Optional[int],
                              rhs_is_weight: bool) -> str:
   """Returns an annotation to be appended to the name of the quantizable op."""

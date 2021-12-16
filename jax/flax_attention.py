@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Optional, Type, TypeVar
 import dataclasses
 from flax import linen as nn
 from flax.linen import initializers
-# TODO(malmaud): Remove reliance on these 'legacy' nn.attention methods
+# TODO: Remove reliance on these 'legacy' nn.attention methods
 from flax.deprecated.nn.attention import _make_causal_mask
 from flax.deprecated.nn.attention import make_padding_mask
 import jax
@@ -119,7 +119,7 @@ class DotProductAttnHParams:
   # We also support downcast intermediate activations to a floating-point
   # format.
   softmax: Optional[SoftmaxHParams]
-  # TODO(shivaniagrawal): Changed the strategy to AQT if quant_type is aqt.
+  # TODO: Changed the strategy to AQT if quant_type is aqt.
 
 
 def reciprocal(tensor, dtype, recip_hparams: ReciprocalHParams):
@@ -146,7 +146,7 @@ def exponential(tensor, dtype, exp_hparams: ExpHParams):
   if exp_hparams.low_bound != 0:
     tensor = jnp.clip(tensor, exp_hparams.low_bound, 0.)
 
-  # TODO(luispazos) Use standard calls to top level jnp functions.
+  # TODO: Use standard calls to top level jnp functions.
   # pylint: disable=protected-access
   def make_constant(c):
     return lax_numpy._constant_like(tensor, c).astype(dtype)
@@ -217,7 +217,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
                                        None) or softmax_hparams is None:
     return unquantized_softmax(a)
 
-  # TODO(shivaniagrawal): Partial sum quantization (if enabled) will happen for
+  # TODO: Partial sum quantization (if enabled) will happen for
   # the entire training run, even before the global activation start step.
   if softmax_hparams.quant_hparams is not None:
     return lax.cond(quant_context.quantize_acts, quantized_softmax,
@@ -720,7 +720,7 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
         cached_key.value = key
         cached_value.value = value
 
-        # TODO(levskaya): verify this is still needed in translation decoding.
+        # TODO: verify this is still needed in translation decoding.
         key_padding_mask = jnp.broadcast_to(
             (jnp.arange(max_length) < cache_index.value), cshape[:2])
         key_padding_mask = key_padding_mask.astype(jnp.float32)[..., None]

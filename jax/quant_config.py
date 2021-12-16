@@ -66,7 +66,7 @@ class QuantContext:
 
   # Whether to quantize activations.
   #
-  # TODO(malmaud): This only applies to softmax for now. Apply it to layernorm
+  # TODO: This only applies to softmax for now. Apply it to layernorm
   # and dot operations as well.
   quantize_acts: bool = True
 

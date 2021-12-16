@@ -104,7 +104,7 @@ class DenseAqt(nn.Module):
   bias_init: InitializerType = nn.initializers.zeros
   precision: Optional[lax.Precision] = jax.lax.Precision.DEFAULT
 
-  # TODO(shivaniagrawal): Changed the strategy to AQT if quant_type is aqt.
+  # TODO: Changed the strategy to AQT if quant_type is aqt.
 
   @nn.compact
   def __call__(
@@ -131,7 +131,7 @@ class DenseAqt(nn.Module):
     batch_size = inputs.shape[0]
     if padding_mask is not None:
       shape_utils.assert_shapes_equal(padding_mask.shape, (batch_size, 1))
-    # TODO(wanglisa): Replace fake quant with AQT.
+    # TODO: Replace fake quant with AQT.
 
     if self.quant_context.collect_acts_stats:
       stats_tag.StatsTag(
@@ -180,7 +180,7 @@ class DenseAqt(nn.Module):
         axis=weight_quant_axis,
         expected_scale_shape=expected_scale_shape)
 
-    # TODO(wanglisa): add option to control when scale is being recomputed
+    # TODO: add option to control when scale is being recomputed
 
     # matmul
     contracting_dims = ((inputs.ndim - 1,), (0,))
@@ -346,7 +346,7 @@ class ConvAqt(nn.Module):
           dimension_numbers=dimension_numbers,
           feature_group_count=self.feature_group_count,
           precision=jax_precision)
-    # TODO(shivaniagrawal): create quantized conv general dilated.
+    # TODO: create quantized conv general dilated.
 
     # bias
     if self.use_bias:
@@ -354,7 +354,7 @@ class ConvAqt(nn.Module):
       bias = jnp.asarray(bias, self.dtype)
       # The inputs can have an arbitrary number of spatial dims, so we broadcast
       # the bias to match: (batch_size, spatial_dim,... features)
-      # TODO(shivaniagrawal): Consider making ConvAqt rank static (e.g. 2D)
+      # TODO: Consider making ConvAqt rank static (e.g. 2D)
       # or maybe add error checking (e.g. expect inputs to have rank N, but this
       # may already be checked by lax.conv_general_dialated).
       bias = utils.broadcast_rank(bias, inputs)
@@ -485,7 +485,7 @@ class EmbedAqt(nn.Module):
       # 'inputs' to produce the embedding tensor, we apply the same gathering to
       # the per-row scale factors of the embedding matrix so the scale factors
       # will broadcast appropriately in the subsequent call to 'to_quantized'.
-      # TODO(malmaud): As part of quantization.py refactor, change
+      # TODO: As part of quantization.py refactor, change
       # 'get_scale_for_aqt' to cleanly support this and hence avoid the need to
       # directly access a protected member of QuantOps.
       scale = embedding_quant_ops._scale[inputs]  # pylint: disable=protected-access
@@ -529,7 +529,7 @@ class EmbedAqt(nn.Module):
     embedding = self.embedding
     embedding = jnp.asarray(embedding, self.dtype)
 
-    # TODO(malmaud): Remove the 'mask' field from this struct so we can
+    # TODO: Remove the 'mask' field from this struct so we can
     # make this struct a hyperparameter of the EncoderAqt class.
     get_bounds_params = get_bounds.GetBounds.Params(
         update_bounds=self.quant_context.update_bounds,
@@ -573,7 +573,7 @@ class LayerNormAqt(nn.Module):
 
   @dataclass
   class QuantHParams:
-    # TODO(malmaud): Generalize this to other quantization formats.
+    # TODO: Generalize this to other quantization formats.
     prec: QuantOps.FloatQuant.FloatPrec
     reduction_prec: Optional[QuantOps.FloatQuant.FloatPrec]
 

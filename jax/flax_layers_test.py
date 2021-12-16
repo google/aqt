@@ -592,7 +592,7 @@ class DenseAqtTest(parameterized.TestCase):
     onp.testing.assert_array_equal(outputs, exp_outputs)
 
   @parameterized.named_parameters(
-      # TODO(shivaniagrawal): this test is flaky and fails with rtol=0.0004
+      # TODO: this test is flaky and fails with rtol=0.0004
       # with given rtol=0.0001
       # dict(
       #     testcase_name='dense_quant_8bit',
@@ -629,7 +629,7 @@ class DenseAqtTest(parameterized.TestCase):
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs, padding_mask=None)
     exp_outputs = jnp.matmul(inputs, state['params']['kernel'])
-    # TODO(wanglisa): Determine how much noise is expected for following test.
+    # TODO: Determine how much noise is expected for following test.
     # We know that the noise should be proportional to the square root of
     # input_dim and inversely proportional to 2**weight_prec.
     # The following tol_const was obtained experimentally and should be derived
@@ -644,7 +644,7 @@ class DenseAqtTest(parameterized.TestCase):
       # dict(
       #     testcase_name='dense_quant_8bit',
       #     weight_prec=8),
-      # TODO(shivaniagrawal): fix the above test, test above doesn't follow
+      # TODO: fix the above test, test above doesn't follow
       # the expected tolerance. Expected absolute difference = 0.188386,
       # actual absolute difference: 0.20296225
       dict(
@@ -671,7 +671,7 @@ class DenseAqtTest(parameterized.TestCase):
     test_utils.assert_all_close_prec(exp_output_without_quant,
                                      outputs_with_quant, weight_prec)
 
-  # TODO(wanglisa): Add tests with bigger matrices.
+  # TODO: Add tests with bigger matrices.
 
   @parameterized.named_parameters(
       dict(
@@ -731,7 +731,7 @@ class DenseAqtTest(parameterized.TestCase):
     outputs = model.apply(state, inputs, padding_mask=None)
     onp.testing.assert_array_equal(outputs, onp.zeros((2, 4)))
 
-  # TODO(shivaniagrawal): change mock tests to check for QuantOps than
+  # TODO: change mock tests to check for QuantOps than
   # primitives.
   @parameterized.named_parameters(
       dict(
@@ -821,7 +821,7 @@ class DenseAqtTest(parameterized.TestCase):
     self.assertEqual(round_with_gradient.call_count, 1)
     floor_with_gradient.assert_not_called()
 
-  # TODO(shivaniagrawal): change mock tests to check for QuantOps than
+  # TODO: change mock tests to check for QuantOps than
   # primitives.
   @parameterized.named_parameters(
       dict(
@@ -978,7 +978,7 @@ class DenseAqtTest(parameterized.TestCase):
 class EmbedLayerTest(parameterized.TestCase):
   """Tests for AQT Embed layer."""
 
-  # TODO(shivaniagrawal/malmaud): we are not raising error on jax rank
+  # TODO: we are not raising error on jax rank
   # promotion. For EmbedAqt tests; in AQT style inputs and output are not be
   # of same shape; require more work to avoid rank promotion.
   @parameterized.named_parameters(

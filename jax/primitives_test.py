@@ -118,7 +118,7 @@ class PrimitivesTest(parameterized.TestCase):
     quantize1bit_grad = jax.vmap(jax.grad(quantize1bit))
     quantize2bit_grad = jax.vmap(jax.grad(quantize2bit))
 
-    # TODO(lew): Resolve the error and use self.assertEqual instead.
+    # TODO: Resolve the error and use self.assertEqual instead.
     # ValueError: The truth value of an array with more than one element is
     # ambiguous. Use a.any() or a.all()
     def assert_equal(a, b):

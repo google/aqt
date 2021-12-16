@@ -157,7 +157,7 @@ def get_fp_config() -> ml_collections.ConfigDict:
   return config
 
 
-# TODO(shivaniagrawal): base config should be more generic and only model
+# TODO: base config should be more generic and only model
 # specific configs should be updated.
 def get_base_config(use_auto_acts: bool,
                     fp_quant: bool) -> ml_collections.ConfigDict:
@@ -194,7 +194,7 @@ def get_base_config(use_auto_acts: bool,
       "quant_type": str_ph(),
       "quant_act": {
           "bounds": bounds,
-          # TODO(shivaniagrawal): The input distribution is really an intrinsic
+          # TODO: The input distribution is really an intrinsic
           # model property and shouldn't be part of the model configuration.
           # Update the hparam dataclasses to eliminate the input_distribution
           # field and then delete this.

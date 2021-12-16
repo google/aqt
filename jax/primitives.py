@@ -104,7 +104,7 @@ def round_and_clip_to_signed_int(x: DeviceArray,
     x = jnp.clip(x, a_min=-bound, a_max=bound).astype(dtype)
     x = floor_with_gradient(x) + 0.5
   else:
-    # TODO(lew): Use the formula for better gradients. Needs a sweep though.
+    # TODO: Use the formula for better gradients. Needs a sweep though.
     # bound = 2**(prec - 1) - 0.5 - epsilon
     x = jnp.clip(x, a_min=-bound, a_max=bound).astype(dtype)
     x = round_with_gradient(x)
@@ -131,7 +131,7 @@ def floor_and_clip_to_unsigned_int(x: DeviceArray,
   """
   assert not half_shift
   x = floor_with_gradient(x)
-  # TODO(lew): should be (a_max=2**prec - epsilon) for a better gradient.
+  # TODO: should be (a_max=2**prec - epsilon) for a better gradient.
   x = jnp.clip(x, a_min=0, a_max=2**prec - 1).astype(dtype)
   return x
 
@@ -143,7 +143,7 @@ def signed_int_bound(prec: int, half_shift: bool) -> float:
     if half_shift:
       return 2**(prec - 1.0)
     else:
-      # TODO(lew): run an experiment with 2bit rounding with 2**(prec-1) - 0.5
+      # TODO: run an experiment with 2bit rounding with 2**(prec-1) - 0.5
       # When prec=1 and half_shift is turned off, a zero bound will make the
       # scaling factor zero. This causes division by zero problem when dividing
       # the scaling factor back. So we need to return a nonzero value that
@@ -166,7 +166,7 @@ def unsigned_int_bound(prec: int) -> float:
   # NOTE: it's computing 2**prec, which is above the largest unsigned
   # value for that prec. This factor is used for scaling input to range
   # [0, 2**prec].
-  if prec < 0:  # TODO(shivaniagrawal) or allow only some values: 4, 8 etc.
+  if prec < 0:  # TODO: or allow only some values: 4, 8 etc.
     raise ValueError('prec value should be >= 0.')
 
   return 2**prec

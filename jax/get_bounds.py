@@ -54,7 +54,7 @@ class GetBounds(nn.Module):
     # the 'reset_stats' parameter.
     ema_coeff: Optional[float] = None
 
-    # TODO(shivaniagrawal): Refactor these boolean flags to an enum since
+    # TODO: Refactor these boolean flags to an enum since
     # they are mututally exclusive.
 
     # Whether to use |mean| + centered stddev formula to calculate bounds.

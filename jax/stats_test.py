@@ -41,7 +41,7 @@ class StatsTest(parameterized.TestCase):
     self.assertEqual(stats.mean_abs, 0.)
     self.assertEqual(stats.mean_sq, 0.)
 
-  # TODO(wanglisa/shivaniagrawal): parametrize tests for values of alpha.
+  # TODO: parametrize tests for values of alpha.
   @parameterized.named_parameters(
       dict(
           testcase_name='axisnone_1dim',

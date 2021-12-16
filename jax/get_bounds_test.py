@@ -68,7 +68,7 @@ class GetBoundsTest(parameterized.TestCase):
         self.key2, self.x, bounds_params=gb_bounds_params)
     return bounds_module, init_state, gb_bounds_params
 
-  # TODO(shivaniagrawal): parametrize test for different values of axis
+  # TODO: parametrize test for different values of axis
   @parameterized.named_parameters(
       dict(testcase_name='update_bound', update_bound=True),
       dict(testcase_name='do_not_update', update_bound=False),
@@ -82,7 +82,7 @@ class GetBoundsTest(parameterized.TestCase):
     onp.testing.assert_array_equal(init_state_stats.mean_sq, 0)
     onp.testing.assert_array_equal(init_state['get_bounds']['bounds'], 6.)
 
-  # TODO(shivaniagrawal): more elaborate testing here as follows:
+  # TODO: more elaborate testing here as follows:
   # - run with (update_stats, update_bounds) = (False, False)
   # check that neither state changed
   # - run with (update_stats, update_bounds) = (True, False)
