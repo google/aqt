@@ -19,8 +19,8 @@ import jax
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import primitives
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
+from aqt import primitives
+from aqt import test_utils
 
 fp32 = onp.float32
 test_utils.configure_jax()

@@ -14,6 +14,14 @@ Pouya Dormiani, Phoenix Meadowlark, Oleg Rybakov.
 `Jax` and `Flax` quantization libraries provides `what you serve is what you train`
 quantization for convolution and matmul. See [this README.md](./jax/README.md).
 
+## Installation
+You can simply run the following command to install the package
+```
+pip3 install aqtp
+
+# Install the requirements from `requirements.txt`
+```
+
 ## Reporting Tool
 
 After a training run has completed, the reporting tool in

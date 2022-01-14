@@ -22,8 +22,8 @@ from jax.config import config
 import jax.numpy as jnp
 import numpy as np
 
-from google3.third_party.google_research.google_research.aqt.jax import quantization
-from google3.third_party.google_research.google_research.aqt.jax import stats
+from aqt import quantization
+from aqt import stats
 
 
 def assert_all_close_prec(

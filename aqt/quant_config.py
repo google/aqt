@@ -20,7 +20,7 @@ import typing
 
 import flax
 
-from google3.third_party.google_research.google_research.aqt.jax.flax import struct as flax_struct
+from aqt.flax import struct as flax_struct
 
 dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
 

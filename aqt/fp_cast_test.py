@@ -20,7 +20,7 @@ import jax
 from jax.config import config
 import jax.numpy as jnp
 import numpy as onp
-from google3.third_party.google_research.google_research.aqt.jax import fp_cast
+from aqt import fp_cast
 
 
 config.update('jax_numpy_rank_promotion', 'raise')

@@ -26,17 +26,17 @@ import jax.numpy as jnp
 import numpy as onp
 import tensorflow as tf
 
-from google3.third_party.google_research.google_research.aqt.jax import flax_attention
-from google3.third_party.google_research.google_research.aqt.jax import flax_layers
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
-from google3.third_party.google_research.google_research.aqt.jax.flax_attention import DotProductAttnHParams
-from google3.third_party.google_research.google_research.aqt.jax.flax_attention import ExpHParams
-from google3.third_party.google_research.google_research.aqt.jax.flax_attention import ReciprocalHParams
-from google3.third_party.google_research.google_research.aqt.jax.flax_attention import SoftmaxHParams
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantOps
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantType
+from aqt import flax_attention
+from aqt import flax_layers
+from aqt import get_bounds
+from aqt import quant_config
+from aqt import test_utils
+from aqt.flax_attention import DotProductAttnHParams
+from aqt.flax_attention import ExpHParams
+from aqt.flax_attention import ReciprocalHParams
+from aqt.flax_attention import SoftmaxHParams
+from aqt.quantization import QuantOps
+from aqt.quantization import QuantType
 
 test_utils.configure_jax()
 

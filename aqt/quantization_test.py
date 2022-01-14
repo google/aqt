@@ -25,16 +25,16 @@ from jax import random
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import fp_cast
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import primitives
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import quantization
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
-from google3.third_party.google_research.google_research.aqt.jax.get_bounds import GetBounds
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantOps
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantType
-from google3.third_party.google_research.google_research.aqt.jax.quantization import SCALE_DTYPE
+from aqt import fp_cast
+from aqt import get_bounds
+from aqt import primitives
+from aqt import quant_config
+from aqt import quantization
+from aqt import test_utils
+from aqt.get_bounds import GetBounds
+from aqt.quantization import QuantOps
+from aqt.quantization import QuantType
+from aqt.quantization import SCALE_DTYPE
 
 fp32 = onp.float32
 test_utils.configure_jax()

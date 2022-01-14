@@ -30,16 +30,16 @@ from jax.nn import initializers
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import flax_layers
-from google3.third_party.google_research.google_research.aqt.jax import fp_cast
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import primitives
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import quantization
-from google3.third_party.google_research.google_research.aqt.jax import shape_utils
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantOps
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantType
+from aqt import flax_layers
+from aqt import fp_cast
+from aqt import get_bounds
+from aqt import primitives
+from aqt import quant_config
+from aqt import quantization
+from aqt import shape_utils
+from aqt import test_utils
+from aqt.quantization import QuantOps
+from aqt.quantization import QuantType
 
 FLAGS = flags.FLAGS
 

@@ -21,9 +21,9 @@ from jax import random
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
+from aqt import get_bounds
+from aqt import quant_config
+from aqt import test_utils
 
 test_utils.configure_jax()
 

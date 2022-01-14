@@ -30,18 +30,18 @@ from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import flax_layers
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import quantization
-from google3.third_party.google_research.google_research.aqt.jax import shape_utils
-from google3.third_party.google_research.google_research.aqt.jax import stats_tag
-from google3.third_party.google_research.google_research.aqt.jax.flax import struct as flax_struct
-from google3.third_party.google_research.google_research.aqt.jax.flax_layers import default_kernel_init
-from google3.third_party.google_research.google_research.aqt.jax.flax_layers import InitializerType
-from google3.third_party.google_research.google_research.aqt.jax.quantization import quantized_dynamic_dot_general
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantOps
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantType
+from aqt import flax_layers
+from aqt import get_bounds
+from aqt import quant_config
+from aqt import quantization
+from aqt import shape_utils
+from aqt import stats_tag
+from aqt.flax import struct as flax_struct
+from aqt.flax_layers import default_kernel_init
+from aqt.flax_layers import InitializerType
+from aqt.quantization import quantized_dynamic_dot_general
+from aqt.quantization import QuantOps
+from aqt.quantization import QuantType
 
 T = TypeVar('T')
 

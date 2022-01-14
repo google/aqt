@@ -29,16 +29,16 @@ import jax
 from jax import lax
 import jax.numpy as jnp
 
-from google3.third_party.google_research.google_research.aqt.jax import compute_cost_utils
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import quantization
-from google3.third_party.google_research.google_research.aqt.jax import shape_utils
-from google3.third_party.google_research.google_research.aqt.jax import stats_tag
-from google3.third_party.google_research.google_research.aqt.jax import utils
-from google3.third_party.google_research.google_research.aqt.jax.flax import struct as flax_struct
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantOps
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantType
+from aqt import compute_cost_utils
+from aqt import get_bounds
+from aqt import quant_config
+from aqt import quantization
+from aqt import shape_utils
+from aqt import stats_tag
+from aqt import utils
+from aqt.flax import struct as flax_struct
+from aqt.quantization import QuantOps
+from aqt.quantization import QuantType
 
 FLAGS = flags.FLAGS
 

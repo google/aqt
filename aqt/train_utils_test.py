@@ -17,7 +17,7 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 
-from google3.third_party.google_research.google_research.aqt.jax import train_utils
+from aqt import train_utils
 
 
 class UpdateBoundsUtilsTest(parameterized.TestCase):

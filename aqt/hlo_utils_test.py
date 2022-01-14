@@ -20,7 +20,7 @@ from flax import linen as nn
 from jax import random
 import jax.numpy as jnp
 
-from google3.third_party.google_research.google_research.aqt.jax import hlo_utils
+from aqt import hlo_utils
 
 
 class HloUtilsTest(parameterized.TestCase):

@@ -20,12 +20,9 @@ from flax import linen as nn
 import jax
 import jax.numpy as jnp
 
-# BEGIN GOOGLE-INTERNAL
-from google3.pyglib import gfile
-# END GOOGLE-INTERNAL
 
 # pylint: disable=g-direct-tensorflow-import
-from google3.third_party.tensorflow.compiler.xla.service import hlo_pb2
+from tensorflow.compiler.xla.service import hlo_pb2
 # pylint: enable=g-direct-tensorflow-import
 
 
@@ -88,34 +85,6 @@ def output_hlo(computation: Any, file_path: str):
   hlo_module_proto_str = computation.as_serialized_hlo_module_proto()
   hlo_txt = computation.as_hlo_text()
   output_hlo_to_file(hlo_module_proto_str, hlo_txt, file_path)
-
-
-# BEGIN GOOGLE-INTERNAL
-def output_hlo_to_file(hlo_module_proto_str: Union[bytes, Text],
-                       hlo_txt: Union[str, Text], file_path: str):
-  """Saves HLO proto string and hlo text to given file path.
-
-  The file format is determined by the file_path extension, i.e. for .txt file
-  only saves the hlo_txt, and for .pb file only save the hlo_module_proto_str
-  binary.
-
-  Args:
-    hlo_module_proto_str: hlo module proto serialized as string
-    hlo_txt: hlo text
-    file_path: file path to write the HLO to.
-  """
-  _, ext = os.path.splitext(file_path)
-  if ext == '.pb':
-    # At the moment, we're not saving HloProto because the method that we've
-    # been using before (as_serialized_hlo_module_proto, ParseFromString and
-    # then create a HloProto) takes a while to compute. See cl/309175318 for
-    # discussion.
-    with gfile.Open(file_path, 'wb') as f:
-      f.write(hlo_module_proto_str)
-  elif ext == '.txt':
-    with gfile.Open(file_path, 'w') as f:
-      f.write(hlo_txt)
-# END GOOGLE-INTERNAL
 
 
 def count_ops_in_hlo_proto(hlo_proto: hlo_pb2.HloModuleProto,

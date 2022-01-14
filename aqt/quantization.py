@@ -28,13 +28,13 @@ import jax
 from jax import lax
 import jax.numpy as jnp
 
-from google3.third_party.google_research.google_research.aqt.jax import compute_cost_utils
-from google3.third_party.google_research.google_research.aqt.jax import fp_cast
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import primitives
-from google3.third_party.google_research.google_research.aqt.jax import shape_utils
-from google3.third_party.google_research.google_research.aqt.jax import utils
-from google3.third_party.google_research.google_research.aqt.jax.flax import struct as flax_struct
+from aqt import compute_cost_utils
+from aqt import fp_cast
+from aqt import get_bounds
+from aqt import primitives
+from aqt import shape_utils
+from aqt import utils
+from aqt.flax import struct as flax_struct
 
 # Global bool to control the use of epsilon in the denominator of the scaling
 # methods signed_int_scale and unsigned_int_scale. Epsilon is added to avoid

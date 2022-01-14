@@ -27,10 +27,10 @@ from jax.interpreters import masking
 from jax.interpreters import xla
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import hlo_utils
+from aqt import hlo_utils
 
 # pylint: disable=g-direct-tensorflow-import
-from google3.third_party.tensorflow.compiler.xla.service import hlo_pb2
+from tensorflow.compiler.xla.service import hlo_pb2
 # pylint: enable=g-direct-tensorflow-import
 
 FLAGS = flags.FLAGS

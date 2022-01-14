@@ -20,10 +20,10 @@ from jax import random
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
-from google3.third_party.google_research.google_research.aqt.jax.stats import masked_mean
-from google3.third_party.google_research.google_research.aqt.jax.stats import masked_sum
-from google3.third_party.google_research.google_research.aqt.jax.stats import Stats
+from aqt import test_utils
+from aqt.stats import masked_mean
+from aqt.stats import masked_sum
+from aqt.stats import Stats
 
 test_utils.configure_jax()
 

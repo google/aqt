@@ -15,7 +15,7 @@
 """Util functions for training, which can be shared across models.
 """
 
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
+from aqt import quant_config
 
 
 def should_quantize_weights(weight_quant_start_step: int, step: int) -> bool:

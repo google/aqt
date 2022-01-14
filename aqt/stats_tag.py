@@ -20,9 +20,9 @@ from typing import Optional, Iterable, Union
 from flax import linen as nn
 import jax.numpy as jnp
 
-from google3.third_party.google_research.google_research.aqt.jax import shape_utils
-from google3.third_party.google_research.google_research.aqt.jax import stats
-from google3.third_party.google_research.google_research.aqt.jax.utils import normalize_axes
+from aqt import shape_utils
+from aqt import stats
+from aqt.utils import normalize_axes
 
 
 def _take_subset_of_axes(x: jnp.ndarray,

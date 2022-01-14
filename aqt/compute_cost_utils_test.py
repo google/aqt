@@ -27,14 +27,14 @@ from jax.nn import initializers
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import compute_cost_utils
-from google3.third_party.google_research.google_research.aqt.jax import flax_layers as aqt_flax_layers
-from google3.third_party.google_research.google_research.aqt.jax import get_bounds
-from google3.third_party.google_research.google_research.aqt.jax import hlo_utils
-from google3.third_party.google_research.google_research.aqt.jax import quant_config
-from google3.third_party.google_research.google_research.aqt.jax import quantization
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantOps
-from google3.third_party.google_research.google_research.aqt.jax.quantization import QuantType
+from aqt import compute_cost_utils
+from aqt import flax_layers as aqt_flax_layers
+from aqt import get_bounds
+from aqt import hlo_utils
+from aqt import quant_config
+from aqt import quantization
+from aqt.quantization import QuantOps
+from aqt.quantization import QuantType
 
 FLAGS = flags.FLAGS
 

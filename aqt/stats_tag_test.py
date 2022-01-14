@@ -22,8 +22,8 @@ from jax import random
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.third_party.google_research.google_research.aqt.jax import test_utils
-from google3.third_party.google_research.google_research.aqt.jax.stats_tag import StatsTag
+from aqt import test_utils
+from aqt.stats_tag import StatsTag
 
 test_utils.configure_jax()
 
