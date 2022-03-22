@@ -27,7 +27,7 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 import tensorflow_text as tftxt
 
-from google3.third_party.sentencepiece.src.python.sentencepiece_trainer import SentencePieceTrainer
+from sentencepiece import SentencePieceTrainer
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 

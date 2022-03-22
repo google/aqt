@@ -22,7 +22,7 @@ import jax.numpy as jnp
 
 
 # pylint: disable=g-direct-tensorflow-import
-from google3.third_party.tensorflow.compiler.xla.service import hlo_pb2
+from tensorflow.compiler.xla.service import hlo_pb2
 # pylint: enable=g-direct-tensorflow-import
 
 

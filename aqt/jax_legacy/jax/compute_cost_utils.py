@@ -28,7 +28,7 @@ from jax.interpreters import masking
 from jax.interpreters import xla
 import numpy as onp
 # pylint: disable=g-direct-tensorflow-import
-from google3.third_party.tensorflow.compiler.xla.service import hlo_pb2
+from tensorflow.compiler.xla.service import hlo_pb2
 # pylint: enable=g-direct-tensorflow-import
 
 FLAGS = flags.FLAGS
