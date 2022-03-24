@@ -11,11 +11,8 @@ Pouya Dormiani, Phoenix Meadowlark, Oleg Rybakov.
 
 ## Installation
 ```
-# Install SVN to only download the aqt directory of Google Research.
-sudo apt install subversion
-
-# Download this directory.
-svn export https://github.com/google/aqt/jax_legacy
+# Clone aqt repository.
+git clone git@github.com:google/aqt.git
 
 # Upgrade pip.
 pip install --user --upgrade pip
@@ -23,8 +20,8 @@ pip install --user --upgrade pip
 # Install the requirements from `requirements.txt`.
 pip install --user -r jax_legacy/requirements.txt
 
-# Add jax_legacy to PYTHONPATH so that its modules can be imported anywhere.
-export PYTHONPATH=/path/to/parent/dir/of/jax_legacy
+# Add aqt to PYTHONPATH so that its modules can be imported anywhere.
+export PYTHONPATH=/path/to/parent/dir/of/aqt
 ```
 
 ## AQT Quantization Library
