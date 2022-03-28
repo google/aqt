@@ -98,7 +98,8 @@ def get_base_config(n_layers: int, use_auto_acts: bool, fp_quant: bool):
           "logits_via_embedding": True,
       },
       "weight_outlier_regularization_regex": "^.*kernel$",
-      "weight_quant_granularity": "per_channel"
+      "weight_quant_granularity": "per_channel",
+
   })
   if not fp_quant:
     config.prec = None

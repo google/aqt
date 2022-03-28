@@ -109,7 +109,6 @@ class BaseConfigTest(parameterized.TestCase):
     # configuration hierarchy. A value of 'None' in the expected schemas defined
     # below indicates a real configuration would have a concrete scalar value
     # there.
-
     quant_act_schema = {
         'bounds': {
             'initial_bound': None,

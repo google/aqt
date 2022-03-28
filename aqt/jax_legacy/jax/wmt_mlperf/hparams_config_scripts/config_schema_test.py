@@ -171,6 +171,7 @@ class BaseConfigTest(parameterized.TestCase):
     # below indicates a real configuration would have a concrete scalar value
     # there.
 
+
     quant_act_schema = {
         'bounds': {
             'initial_bound': None,

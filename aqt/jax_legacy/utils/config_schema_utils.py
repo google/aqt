@@ -88,9 +88,9 @@ def set_default_reference(child_config: ml_collections.ConfigDict,
     child_config: The child ConfigDict.
     parent_config: The parent ConfigDict.
     field: Either the name of a field or a list of field names.
-    parent_field: The name of the parent field in 'parent_config'. If None (the
-      default), the parent field name is assumed to be the same as the child
-      field name.
+    parent_field: The name of the parent field in 'parent_config'.
+      If None (the default), the parent field name is assumed to be the same
+      as the child field name.
   """
   if isinstance(field, list):
     for subfield in field:
@@ -118,10 +118,16 @@ def get_dense_config(
     parent_config: ml_collections.ConfigDict) -> ml_collections.ConfigDict:
   """Creates a ConfigDict corresponding to aqt.flax_layers.DenseAqt.HParams."""
   config = ml_collections.ConfigDict()
-  set_default_reference(config, parent_config, [
-      "weight_prec", "weight_quant_granularity", "quant_type", "quant_act",
-      "weight_half_shift"
-  ])
+  set_default_reference(
+      config,
+      parent_config,
+      [
+          "weight_prec",
+          "weight_quant_granularity",
+          "quant_type",
+          "quant_act",
+          "weight_half_shift",
+      ])
   config.lock()
   return config
 
@@ -157,10 +163,14 @@ def get_fp_config() -> ml_collections.ConfigDict:
   return config
 
 
+
+
 # TODO(shivaniagrawal): base config should be more generic and only model
 # specific configs should be updated.
-def get_base_config(use_auto_acts: bool,
-                    fp_quant: bool) -> ml_collections.ConfigDict:
+def get_base_config(
+    use_auto_acts: bool,
+    fp_quant: bool,
+) -> ml_collections.ConfigDict:
   """Return a base ConfigDict for AQT; does not have model specific fields."""
   if use_auto_acts:
     bounds = ml_collections.ConfigDict({
@@ -206,6 +216,7 @@ def get_base_config(use_auto_acts: bool,
   set_default_reference(
       base_config, base_config, "weight_prec", parent_field="prec")
   set_default_reference(base_config.quant_act, base_config, "prec")
+
   set_default_reference(
       base_config, base_config, "weight_half_shift", parent_field="half_shift")
   set_default_reference(base_config.quant_act, base_config, "half_shift")

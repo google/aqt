@@ -31,6 +31,9 @@ from aqt.jax_legacy.jax import shape_utils
 from aqt.jax_legacy.jax import stats_tag
 from aqt.jax_legacy.jax import utils
 from aqt.jax_legacy.jax.flax import struct as flax_struct
+
+
+
 from aqt.jax_legacy.jax.quantization import QuantOps
 from aqt.jax_legacy.jax.quantization import QuantType
 import flax
@@ -91,6 +94,7 @@ class DenseAqt(nn.Module):
     # Quantization strategy, one of `fake_quant` or `aqt`.
     quant_type: QuantType
     weight_quant_granularity: quant_config.QuantGranularity
+
 
   hparams: HParams
   paxis_name: Optional[str]
@@ -159,6 +163,7 @@ class DenseAqt(nn.Module):
 
     inputs = jnp.asarray(inputs, self.dtype)
     kernel = jnp.asarray(kernel, self.dtype)
+
 
     get_bounds_params = get_bounds.GetBounds.Params(
         update_bounds=self.quant_context.update_bounds,

@@ -23,6 +23,8 @@ from typing import Any, Dict, Optional, Type, TypeVar
 from aqt.jax_legacy.jax import quant_config
 from aqt.jax_legacy.jax import quantization
 from aqt.jax_legacy.jax.flax import struct as flax_struct
+
+
 import dacite
 import jax
 import ml_collections
@@ -104,7 +106,8 @@ def load_dataclass_from_dict(dataclass_name: Type[T],
   # listed here. See https://github.com/konradhalas/dacite#casting.
   enum_classes = [
       quantization.QuantOps.ActHParams.InputDistribution,
-      quantization.QuantType, quant_config.QuantGranularity
+      quantization.QuantType,
+      quant_config.QuantGranularity,
   ]
   data_dict = _convert_lists_to_tuples(data_dict)
   return dacite.from_dict(

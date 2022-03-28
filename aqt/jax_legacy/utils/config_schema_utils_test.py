@@ -166,6 +166,7 @@ class BaseConfigTest(parameterized.TestCase):
     self.assertEqual(config.weight_prec.to_dict(), expected_prec_dict)
     self.assertEqual(config.quant_act.prec.to_dict(), expected_prec_dict)
 
+
   def test_auto_acts_parameter(self):
     # If use_auto_acts is False, then the bounds should be a single scalar that
     # specifies the fixed bound; 'None' by default.
@@ -186,8 +187,13 @@ class BaseConfigTest(parameterized.TestCase):
   @parameterized.parameters(
       dict(use_auto_acts=True, fp_quant=False),
       dict(use_auto_acts=False, fp_quant=False),
-      dict(use_auto_acts=False, fp_quant=True))
-  def test_schema_matches_expected(self, use_auto_acts, fp_quant):
+      dict(use_auto_acts=False, fp_quant=True),
+  )
+  def test_schema_matches_expected(
+      self,
+      use_auto_acts,
+      fp_quant,
+  ):
     # This tests that the schema of the configdict returned by 'base_config',
     # once all references are resolved, matches an expected schema. 'Schema'
     # here means the names and structure of fields at each level of the
@@ -232,7 +238,6 @@ class BaseConfigTest(parameterized.TestCase):
           'prec': prec,
           'half_shift': None,
       }
-
     expected_top_level_schema = {
         'metadata': {
             'description': None,
@@ -251,7 +256,9 @@ class BaseConfigTest(parameterized.TestCase):
     }
 
     config = config_schema_utils.get_base_config(
-        use_auto_acts=use_auto_acts, fp_quant=fp_quant)
+        use_auto_acts=use_auto_acts,
+        fp_quant=fp_quant,
+    )
     # This round-trip conversion from JSON forces all references to resolve to
     # concrete values.
     config_reified = json.loads(config.to_json())

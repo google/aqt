@@ -105,6 +105,7 @@ def get_base_config(imagenet_type: ImagenetType, quant_target: QuantTarget):
       "activation_bound_update_freq": -1,
       "activation_bound_start_step": -1,
       "prec": None,
+
       "quant_type": "fake_quant",
       "weight_quant_granularity": "per_channel",
       "act_function": "relu",
