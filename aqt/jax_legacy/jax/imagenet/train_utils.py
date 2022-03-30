@@ -24,7 +24,7 @@ import functools
 from typing import Any, Mapping
 from aqt.jax_legacy.jax.imagenet import input_pipeline
 from aqt.jax_legacy.jax.imagenet import models
-
+from aqt.jax_legacy.jax.imagenet import pokebnn
 
 import flax
 from flax import jax_utils
@@ -50,6 +50,8 @@ def create_model(
   input_shape = (batch_size, image_size, image_size, 3)
   if is_teacher:  # create teacher model
     model = models.create_resnet(hparams, model_dtype, train, **kwargs)
+  else:  # create PokeBNN model
+    model = pokebnn.create_pokebnn(hparams=hparams, train=train, **kwargs)
   init_state = model.init(key, jnp.zeros(input_shape, dtype=model_dtype))
   return model, init_state
 
