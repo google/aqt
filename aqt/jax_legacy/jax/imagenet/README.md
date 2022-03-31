@@ -119,7 +119,7 @@ $ gsutil cp -r /path/to/tensorflow_datasets gs://GCS_BUCKET_NAME/datasets
 
 A single host machine typically has 8 TPU chips. You can verify this by ssh into the machine and typing `jax.device_count()` in the python3 environment. To launch an AQT training on such a machine, follow these steps:
 
-1. Refer to the instructions in the [AQT repository](http://google3/third_party/google_research/google_research/aqt) and install AQT.
+1. Refer to the instructions in the [AQT repository](https://github.com/google/aqt/tree/main/aqt/jax_legacy) and install AQT.
 2. Point python compilation path to aqt. Also point the ImageNet path to the correct directory in the storage bucket. Run these commands on cloud TPU through SSH
     ```
     $ export PYTHONPATH=/path/to/parent/directory/of/aqt
