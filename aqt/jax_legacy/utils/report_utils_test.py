@@ -13,10 +13,17 @@
 # limitations under the License.
 
 """Tests for report_utils.py."""
+import json
+import os
+import pathlib
+import shutil
+
 from absl.testing import absltest
 from absl.testing import parameterized
 
 from aqt.jax_legacy.utils import report_utils
+import dacite
+
 import numpy as onp
 
 EventSeries = report_utils.EventSeries
@@ -655,6 +662,39 @@ class ReportUtilsTest(parameterized.TestCase):
     self.assertEqual(agg_metrics, exp_agg_metrics)
     self.assertEqual(agg_metrics_unsmoothed, exp_agg_metrics_unsmoothed)
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='dir_with_fileext',
+          model_dir='/a/b/c.json',
+          exp='a--b--c'),
+      dict(
+          testcase_name='dir_without_fileext',
+          model_dir='/a/b/c',
+          exp='a--b--c'),
+  )
+  def test_report_path_from_model_dir(self, model_dir, exp):
+    res = report_utils.report_path_from_model_dir(pathlib.Path(model_dir))
+    self.assertEqual(res, pathlib.Path(exp))
+
+  def test_save_report(self):
+    temp_dir = '/tmp/test_save_report'
+    report = report_utils.ExperimentReport(
+        model_dir=temp_dir,
+        metrics=None,
+        unsmoothed_metrics=None,
+        early_stop_step=1234,
+        num_train_steps=2345,
+        report_query_args={'test_key': 'test_val'})
+    report_path = report_utils.save_report(report, temp_dir)
+
+    with open(os.path.join(report_path,
+                           report_utils.REPORT_FILENAME)) as report_file:
+      report_dict = json.load(report_file)
+      report_from_file = dacite.from_dict(
+          data_class=report_utils.ExperimentReport, data=report_dict)
+      self.assertEqual(report, report_from_file)
+
+    shutil.rmtree(temp_dir)
 
 
 if __name__ == '__main__':
