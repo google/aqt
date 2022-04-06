@@ -142,32 +142,41 @@ A TPU pod slice has multiple host machines, each of which has 8 TPU chips. One n
 
 To launch AQT training on a pod slice (e.g., with 8 host machines, 64 TPU chips in total), here is the combined single command that automates dependency installation and training. After creating a VM and preparing the ImageNet dataset in the cloud storage bucket, run this command on a local machine in the cloud CLI tool (please change the VM info and directory names accordingly):
 ```
-gcloud alpha compute tpus tpu-vm ssh [VM name]--zone [VM zone]--worker=all --command "pip install 'jax[tpu]>=0.2.16' -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && pip install --upgrade clu && pip install flax && pip install dacite && git clone https://github.com/google-research/google-research.git && cd google-research && export PYTHONPATH=/path/to/parent/directory/of/aqt && export TFDS_DATA_DIR=gs://GCS_BUCKET_NAME/datasets/tensorflow_datasets && cd aqt/jax/imagenet && python3 train.py --model_dir gs://GCS_BUCKET_NAME/log_dir --hparams_config_dict configs/paper/resnet50_w4_a4_auto.py --batch_size 8192"
+gcloud alpha compute tpus tpu-vm ssh [VM name]--zone [VM zone]--worker=all --command "pip install 'jax[tpu]>=0.2.16' -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && pip install --upgrade clu && pip install flax && pip install dacite && git clone https://github.com/google/aqt.git && export PYTHONPATH=/home/[USER_NAME]/aqt && export TFDS_DATA_DIR=gs://[GCS_BUCKET_NAME]/datasets/tensorflow_datasets && cd aqt/aqt/jax_legacy/jax/imagenet && python3 train.py --model_dir ./log_dir --hparams_config_dict configs/paper/resnet50_w4_a4_auto.py --batch_size 8192 2>&1 | tee /home/[USER_NAME]/training_log.txt"
 ```
+**Attention**: Do not use cloud storage bucket as the `model_dir` during training. This will cause uploading tensorboard data and intermediate model checkpoints to the cloud, which is much slower than training loop itself. Specify a local directory on VM and sync it to the cloud after the training finishes. Training log is stored in `training-log.txt` under home directory.
 
+
+
+### Train PokeBNN on a TPU Pod Slice.
+
+After setting up the VM and downloading the ImageNet dataset, use the following combined command to launch a PokeBNN training(e.g., on v3-64).
+```
+gcloud alpha compute tpus tpu-vm ssh [VM name]--zone [VM zone]--worker=all --command "pip install 'jax[tpu]>=0.2.16' -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && pip install --upgrade clu && pip install flax && pip install dacite && git clone https://github.com/google/aqt.git && export PYTHONPATH=/home/[USER_NAME]/aqt && export TFDS_DATA_DIR=gs://[GCS_BUCKET_NAME]/datasets/tensorflow_datasets && cd aqt/aqt/jax_legacy/jax/imagenet && python3 train.py --model_dir ./log_dir --hparams_config_dict configs/pokebnn/pokebnn_config.py --batch_size 8192 --resnet508b_ckpt_path [/path/to/aqt-resnet50-w8a8auto/checkpoints] --config_idx 0 2>&1 | tee /home/[USER_NAME]/training_log.txt"
+```
 
 
 ### Visualizing Tensorboard Data through Colab
 
-Run the following code block in Colab to visualize the tensorboard data. Fill in project ID, storage bucket name and directory name that stores the data.
+Run the following code block in Colab to visualize the tensorboard data. Fill in the cloud storage bucket name and directory name that stores the data.
 ```
 from google.colab import auth
 auth.authenticate_user()
-#@markdown Your Cloud Platform project ID:
-project_id = 'your_cloud_project_id' #@param {type:"string"}
-!gcloud config set project {project_id}
 
 #@markdown Enter cloud storage bucket name:
 bucket_name = 'your_cloud_storage_bucket_name' #@param {type:"string"}
 # list file in the bucket as a test
 !gsutil ls gs://{bucket_name}/
-#@markdown Enter log directory name (should be under logs/):
+#@markdown Enter log directory name in the cloud storage bucket:
 log_dir = 'directory_in_bucket_storing_TB_data' #@param {type:"string"}
 
-# load tensorboard files
+# copy tensorboard data to the temporary storage on colab
+!mkdir /content/tb_dir
+!gsutil rsync -r gs://{bucket_name}/{log_dir} /content/tb_dir
+
+# load tensorboard
 %load_ext tensorboard
-# %reload_ext tensorboard
-%tensorboard --logdir gs://{bucket_name}/{log_dir}
+%tensorboard --logdir /content/tb_dir
 ```
 
 
