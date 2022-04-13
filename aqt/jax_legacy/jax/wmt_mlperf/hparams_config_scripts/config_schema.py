@@ -227,7 +227,8 @@ def get_embedding_config(
   config = ml_collections.ConfigDict()
   config_schema_utils.set_default_reference(
       config, parent_config,
-      ["weight_prec", "quant_type", "quant_act", "weight_half_shift"])
+      ["weight_prec", "quant_type", "quant_act", "weight_half_shift",
+       ])
   config.lock()
   return config
 

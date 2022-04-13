@@ -138,7 +138,7 @@ def get_conv_config(
   config = ml_collections.ConfigDict()
   set_default_reference(config, parent_config, [
       "weight_prec", "weight_quant_granularity", "quant_type", "quant_act",
-      "weight_half_shift"
+      "weight_half_shift",
   ])
   config.lock()
   return config
