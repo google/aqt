@@ -265,7 +265,6 @@ class ConvAqt(nn.Module):
     """Hyperparameter class to quantize Conv Layer."""
     # Target integer precision of weights in bits.
     # If None, no weight quantization will be applied.
-    # TODO(shivaniagrawal): we could replace this with quant_weight instead.
     weight_prec: Union[None, int, QuantOps.FloatQuant]
     # half_shift flag for weights
     weight_half_shift: bool
@@ -453,8 +452,7 @@ class EmbedAqt(nn.Module):
             prec=hparams.weight_prec,
             axis=(0,),
             expected_scale_shape=(1, self.embedding.shape[0]),
-            half_shift=hparams.weight_half_shift,
-            ))
+            half_shift=hparams.weight_half_shift))
 
   def __call__(
       self,
@@ -502,10 +500,7 @@ class EmbedAqt(nn.Module):
       embedding_quant_ops = QuantOps.create_weights_ops(
           embedding,
           weight_params=QuantOps.WeightParams(
-              prec=weight_prec,
-              axis=(1,),
-              half_shift=weight_half_shift,
-              ))
+              prec=weight_prec, axis=(1,), half_shift=weight_half_shift))
       embedding_quant_ops.assert_scale_shape_is(shape=(self.num_embeddings, 1))
 
       quantized_embedding = embedding_quant_ops.to_quantized(

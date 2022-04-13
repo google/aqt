@@ -150,8 +150,6 @@ class QuantOps:
     half_shift: bool
     # Axis along which to quantize weights (the non-feature axis).
     axis: Optional[Iterable[int]]
-
-
     # expected scale shape for weights quantization. Defaults to None.
     expected_scale_shape: Union[None, int, Tuple[int, ...]] = None
 
@@ -170,7 +168,6 @@ class QuantOps:
     bounds: ActsBoundT
     prec: _PrecT
     half_shift: bool
-
 
   def __init__(
       self,  #
@@ -408,8 +405,6 @@ class QuantOps:
     else:
       ops = cls.create_symmetric(
           bounds=weight_bounds, prec=prec, half_shift=half_shift)
-
-
     if weight_params.expected_scale_shape is not None:
       # NOTE: We set keepdim to True when computing weights scale, as a result
       # the axes which are reduced are left in the result as dimensions with
@@ -449,16 +444,9 @@ class QuantOps:
     # TODO(yichi): if weight_params.prec is None or weight_binarize flag True:
     if weight_params.prec is None or not quantize_weights:
       return w
-
-    weight_shape = w.shape
-
-
     ops = cls.create_weights_ops(w, weight_params=weight_params)
-    weight_rescaled = ops.fake_quant(
+    return ops.fake_quant(
         w, quantized_type=quantized_type, fake_dependency=fake_dependency)
-
-
-    return weight_rescaled
 
   # TODO(malmaud): rename 'input' to activation here and elsewhere in this file.
   @classmethod
