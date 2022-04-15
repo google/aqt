@@ -28,13 +28,14 @@ from aqt.jax_legacy.jax.imagenet import pokebnn
 
 import flax
 from flax import jax_utils
-from flax import optim
+from flax import struct
 from flax.optim import dynamic_scale as dynamic_scale_lib
 from flax.training import common_utils
 import jax
 from jax import lax
 import jax.nn
 import jax.numpy as jnp
+import optax
 
 
 def create_model(
@@ -95,8 +96,7 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
 
   def loss_fn(params):
     """loss function used for training."""
-    variables = {'params': params}
-    variables.update(state.model_state)
+    variables = {'params': params, **state.mutable_vars}
     logits, new_model_state = model.apply(
         variables, batch['image'], mutable=['batch_stats', 'get_bounds'])
     # TODO(yichi): use the checkpoint and the 8-bit model to compute logits
@@ -104,7 +104,7 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
                                       batch['label'])
     # TODO(yichi): replace cross_entropy_loss with KL div loss
     loss = kl_div_loss(logits, teacher_logits)
-    weight_penalty_params = jax.tree_leaves(variables['params'])
+    weight_penalty_params = jax.tree_leaves(params)
     weight_decay = hparams.weight_decay
     weight_l2 = sum(
         [jnp.sum(x**2) for x in weight_penalty_params if x.ndim > 1])
@@ -113,37 +113,46 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
     return loss, (new_model_state, logits)
 
   step = state.step
-  optimizer = state.optimizer
   dynamic_scale = state.dynamic_scale
   lr = learning_rate_fn(step)
 
   if dynamic_scale:
     grad_fn = dynamic_scale.value_and_grad(
         loss_fn, has_aux=True, axis_name='batch')
-    dynamic_scale, is_fin, aux, grad = grad_fn(optimizer.target)
+    dynamic_scale, is_fin, aux, grad = grad_fn(state.params)
     # dynamic loss takes care of averaging gradients across replicas
   else:
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    aux, grad = grad_fn(optimizer.target)
+    aux, grad = grad_fn(state.params)
     # Re-use same axis_name as in the call to `pmap(...train_step...)` below.
     grad = lax.pmean(grad, axis_name='batch')
   new_model_state, logits = aux[1]
-  new_optimizer = optimizer.apply_gradient(grad, learning_rate=lr)
   metrics = compute_metrics(logits, batch['label'])
   metrics['learning_rate'] = lr
+
+  updates, new_opt_state = state.tx.update(grad, state.opt_state, state.params)
+  new_params = optax.apply_updates(state.params, updates)
+  new_state = state.replace(
+      step=step+1,
+      params=new_params,
+      mutable_vars=new_model_state,
+      opt_state=new_opt_state,
+      dynamic_scale=dynamic_scale)
 
   if dynamic_scale:
     # if is_fin == False the gradients contain Inf/NaNs and the old optimizer
     # state should be restored.
-    new_optimizer = jax.tree_multimap(
-        functools.partial(jnp.where, is_fin), new_optimizer, optimizer)
+    new_state = new_state.replace(
+        opt_state=jax.tree_multimap(
+            functools.partial(jnp.where, is_fin),
+            new_state.opt_state,
+            state.opt_state),
+        params=jax.tree_multimap(
+            functools.partial(jnp.where, is_fin),
+            new_state.params,
+            state.params))
     metrics['scale'] = dynamic_scale.scale
 
-  new_state = state.replace(
-      step=step + 1,
-      optimizer=new_optimizer,
-      model_state=new_model_state,
-      dynamic_scale=dynamic_scale)
   return new_state, metrics
 
 
@@ -154,7 +163,7 @@ def eval_step(model, state, batch, quantize_weights):
       model.quant_context, quantize_weights=quantize_weights)
   model = dataclasses.replace(model, quant_context=quant_context)
 
-  variables = {'params': state.optimizer.target, **state.model_state}
+  variables = {'params': state.params, **state.mutable_vars}
   model = dataclasses.replace(model, train=False)
   logits = model.apply(variables, batch['image'], mutable=False)
   return compute_metrics(logits, batch['label'])
@@ -189,18 +198,32 @@ def create_input_iter(batch_size, data_dir, image_size, dtype, train, cache):
   return it
 
 
-@flax.struct.dataclass
-class TrainState:
+class TrainState(struct.PyTreeNode):
+  """Train state keeping track of step, parameters, optimizer state, and etc."""
   step: int
-  optimizer: optim.Optimizer
-  model_state: Mapping[str, Any]
+  params: flax.core.FrozenDict[str, Any]
+  mutable_vars: Mapping[str, Any]
+  tx: optax.GradientTransformation = struct.field(pytree_node=False)
+  opt_state: optax.OptState
   dynamic_scale: dynamic_scale_lib.DynamicScale
+
+  @classmethod
+  def create(cls, *, params, tx, **kwargs):
+    """Creates a new instance with `step=0` and initialized `opt_state`."""
+    opt_state = tx.init(params)
+    return cls(
+        step=0,
+        params=params,
+        tx=tx,
+        opt_state=opt_state,
+        **kwargs,
+    )
 
 
 def sync_batch_stats(state):
   """Sync the batch statistics across replicas."""
   avg = jax.pmap(lambda x: lax.pmean(x, 'x'), 'x')
 
-  new_model_state = state.model_state.copy(
-      {'batch_stats': avg(state.model_state['batch_stats'])})
-  return state.replace(model_state=new_model_state)
+  new_mutable_vars = state.mutable_vars.copy(
+      {'batch_stats': avg(state.mutable_vars['batch_stats'])})
+  return state.replace(mutable_vars=new_mutable_vars)
