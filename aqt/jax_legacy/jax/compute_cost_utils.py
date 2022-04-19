@@ -25,7 +25,7 @@ from jax._src.lax import lax
 from jax.interpreters import ad
 from jax.interpreters import batching
 from jax.interpreters import masking
-from jax.interpreters import xla
+from jax.interpreters import mlir
 import numpy as onp
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.compiler.xla.service import hlo_pb2
@@ -66,12 +66,12 @@ class DotMetadataMonkeyPatch(contextlib.ContextDecorator):
     lax.dot_general_p = lax.standard_primitive(
         shape_rule=lax._dot_general_shape_rule,
         dtype_rule=lax._dot_general_dtype_rule,
-        name=self._op_name,
-        translation_rule=lax._dot_general_translation_rule)
+        name=self._op_name)
     ad.defbilinear(lax.dot_general_p, lax._dot_general_transpose_lhs,
                    lax._dot_general_transpose_rhs)
     batching.primitive_batchers[lax.dot_general_p] = lax._dot_general_batch_rule
     masking.masking_rules[lax.dot_general_p] = lax._dot_general_masking_rule
+    mlir.register_lowering(lax.dot_general_p, lax._dot_general_lower)
     # pylint: enable=protected-access
 
   def __exit__(self, *exc):
@@ -99,21 +99,18 @@ class ConvMetadataMonkeyPatch(contextlib.ContextDecorator):
     lax_convolution.conv_general_dilated_p = lax.standard_primitive(
         shape_rule=lax_convolution._conv_general_dilated_shape_rule,
         dtype_rule=lax_convolution._conv_general_dilated_dtype_rule,
-        name=self._op_name,
-        translation_rule=functools.partial(
-            lax_convolution._conv_general_dilated_translation_rule,
-            expand_complex_convolutions=False))
-    xla.register_translation(
+        name=self._op_name)
+    mlir.register_lowering(lax_convolution.conv_general_dilated_p,
+                           lax_convolution._conv_general_dilated_lower)
+    mlir.register_lowering(
         lax_convolution.conv_general_dilated_p,
-        functools.partial(
-            lax_convolution._conv_general_dilated_translation_rule,
-            expand_complex_convolutions=True),
+        functools.partial(lax_convolution._conv_general_dilated_lower,
+                          expand_complex_convolutions=True),
         platform='cpu')
-    xla.register_translation(
+    mlir.register_lowering(
         lax_convolution.conv_general_dilated_p,
-        functools.partial(
-            lax_convolution._conv_general_dilated_translation_rule,
-            expand_complex_convolutions=True),
+        functools.partial(lax_convolution._conv_general_dilated_lower,
+                          expand_complex_convolutions=True),
         platform='gpu')
     ad.defbilinear(lax_convolution.conv_general_dilated_p,
                    lax_convolution._conv_general_dilated_transpose_lhs,
