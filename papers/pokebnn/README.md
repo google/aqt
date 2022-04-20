@@ -1,8 +1,11 @@
 ## Reproduce PokeBNN on a Cloud TPU VM
 
+This readme describes how to reproduce the [PokeBNN paper](https://arxiv.org/abs/2112.00133) on a google cloud TPU virtual ma
+chine.
+
 ### Step 1: Download ImageNet Dataset
 
-Please refer to [this documentation](https://github.com/ychzhang/aqt/tree/main/aqt/jax_legacy/jax/imagenet#reproduce-aqt-experiments-on-gcloud-tpus) for setting up the gcloud command line tool, the cloud storage bucket, and downloading ImageNet.
+Please refer to the section `Reproduce AQT Experiments on GCloud TPUs` in [this documentation](https://github.com/ychzhang/aqt/tree/main/aqt/jax_legacy/jax/imagenet#reproduce-aqt-experiments-on-gcloud-tpus) for setting up the gcloud command line tool, the cloud storage bucket, and downloading the ImageNet dataset.
 
 ### Step 2: Create TPU VM and Train PokeBNN-1.0x
 
@@ -11,28 +14,21 @@ The provided bash script `cloudtpu_train_pokebnn.sh` automates this step. Please
 source cloudtpu_train_pokebnn.sh
 ```
 
+### Step 3: Visualizing Tensorboard Data through Colab
 
-### Visualizing Tensorboard Data through Colab
+1. Navigate to https://colab.research.google.com/
+2. Open a new colab file. Load and run the provided `tensorboard.ipynb`. Please remember filling in the correct cloud storage bucket name and directory name that stores the data.
 
-Run the following code block in Colab to visualize the tensorboard data. Fill in the cloud storage bucket name and directory name that stores the data.
+## Citation
+
+If you find PokeBNN and this repository useful, please cite:
+
 ```
-from google.colab import auth
-auth.authenticate_user()
-
-#@markdown Enter cloud storage bucket name:
-bucket_name = 'your_cloud_storage_bucket_name' #@param {type:"string"}
-# list file in the bucket as a test
-!gsutil ls gs://{bucket_name}/
-#@markdown Enter log directory name in the cloud storage bucket:
-log_dir = 'directory_in_bucket_storing_TB_data' #@param {type:"string"}
-
-# copy tensorboard data to the temporary storage on colab
-!mkdir /content/tb_dir
-!gsutil rsync -r gs://{bucket_name}/{log_dir} /content/tb_dir
-
-# load tensorboard
-%load_ext tensorboard
-%tensorboard --logdir /content/tb_dir
+@article{zhanglew2021pokebnn,
+  title={PokeBNN: A Binary Pursuit of Lightweight Accuracy},
+  author={Zhang, Yichi and Zhang, Zhiru and Lew, Lukasz},
+  journal={arXiv preprint arXiv:2112.00133},
+  year={2021}
+}
 ```
-
 
