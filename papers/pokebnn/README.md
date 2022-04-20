@@ -1,7 +1,6 @@
 ## Reproduce PokeBNN on a Cloud TPU VM
 
-This readme describes how to reproduce the [PokeBNN paper](https://arxiv.org/abs/2112.00133) on a google cloud TPU virtual ma
-chine.
+This readme describes how to reproduce the [PokeBNN paper](https://arxiv.org/abs/2112.00133) on a google cloud TPU virtual machine.
 
 ### Step 1: Download ImageNet Dataset
 
