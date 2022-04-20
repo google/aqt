@@ -75,6 +75,14 @@ class GetBounds(nn.Module):
     # whether to use old or new code to compute the bound
     use_old_code: bool = True
 
+    # Whether to use dynamic quantization.
+    # It will dynamically quantize the tensor in training and inference modes.
+    dynamic: bool = False
+
+    # Clipping coefficient applied during dynamic quantization.
+    # E.g. if it is 0.9 then dynamic scale will be reduced by 10%.
+    clipping_coeff: float = 1.0
+
   @dataclass
   class Params:
     """Parameters for act quantiztaion using get_bounds."""
@@ -117,6 +125,7 @@ class GetBounds(nn.Module):
     x = jnp.asarray(x, jnp.float32)
 
     hyper = self.hyper
+
     is_initializing = not self.has_variable('get_bounds', 'stats')
 
     if hyper.granularity == quant_config.QuantGranularity.PER_TENSOR:
@@ -135,6 +144,13 @@ class GetBounds(nn.Module):
       stats_shape = (1,) * (x.ndim - 1) + (x.shape[-1],)
     else:
       raise ValueError(f'Unknown granularity {hyper.granularity}')
+
+    if hyper.dynamic:
+      abs_max_x = jnp.max(jnp.abs(x), axis=quant_axis)
+
+      # If dynamic quantization is applied then
+      # there is no need to do stats computation.
+      return abs_max_x * hyper.clipping_coeff
 
     stats_state = self.variable('get_bounds', 'stats', Stats.stats_initializer,
                                 stats_shape)

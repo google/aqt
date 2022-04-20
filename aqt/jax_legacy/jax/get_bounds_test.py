@@ -50,7 +50,9 @@ class GetBoundsTest(parameterized.TestCase):
                  reset_stats=False,
                  use_cams=False,
                  granularity=quant_config.QuantGranularity.PER_TENSOR,
-                 ema_coeff=None):
+                 ema_coeff=None,
+                 dynamic=False,
+                 clipping_coeff=1.0):
     self.hyperparam = get_bounds.GetBounds.Hyper(
         initial_bound=self.hyperparam.initial_bound,
         stddev_coeff=self.hyperparam.stddev_coeff,
@@ -59,7 +61,9 @@ class GetBoundsTest(parameterized.TestCase):
         reset_stats=reset_stats,
         use_cams=use_cams,
         ema_coeff=ema_coeff,
-        granularity=granularity)
+        granularity=granularity,
+        dynamic=dynamic,
+        clipping_coeff=clipping_coeff)
     gb_bounds_params = get_bounds.GetBounds.Params(
         update_bounds=update_bounds, update_stats=update_stats)
     bounds_module = get_bounds.GetBounds(hyper=self.hyperparam)
@@ -262,6 +266,30 @@ class GetBoundsTest(parameterized.TestCase):
     onp.testing.assert_allclose(stats.mean_abs, exp_mean_abs)
     print(stats)
     return
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='no clipping + per channel bounds',
+          clipping_coeff=1.0,
+          granularity=quant_config.QuantGranularity.PER_CHANNEL),
+      dict(
+          testcase_name='with clipping + per tensor bounds',
+          clipping_coeff=0.5,
+          granularity=quant_config.QuantGranularity.PER_TENSOR))
+  def test_dynamic_bounds(self, clipping_coeff, granularity):
+    model, state, params = self.init_model(
+        False,
+        False,
+        granularity=granularity,
+        dynamic=True,
+        clipping_coeff=clipping_coeff)
+
+    x = jnp.array([[[2, 3], [5, 4]], [[5, 6], [7, 6]]])
+    bounds = model.apply(state, x, bounds_params=params)
+    if granularity == quant_config.QuantGranularity.PER_CHANNEL:
+      onp.testing.assert_allclose(bounds, jnp.array([7.0, 6.0]))
+    else:
+      onp.testing.assert_allclose(bounds, jnp.array(3.5))
 
 
 if __name__ == '__main__':
