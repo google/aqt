@@ -13,7 +13,7 @@ The provided bash script `cloudtpu_train_pokebnn.sh` automates this step. Please
 source cloudtpu_train_pokebnn.sh
 ```
 
-### Step 3: Visualizing Tensorboard Data through Colab
+### Step 3: Visualize Tensorboard Data through Colab
 
 1. Navigate to https://colab.research.google.com/
 2. Open a new colab file. Load and run the provided `tensorboard.ipynb`. Please remember filling in the correct cloud storage bucket name and directory name that stores the data.
