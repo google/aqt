@@ -249,7 +249,8 @@ def prepare_and_save_report(
   # set to -1, but the report start_step cannot be negative, so the max()
   # sets the start_step to 0 in this case.
   report_start_step = max(0, hparams.activation_bound_start_step)
-  report = report_utils.create_end_of_training_report(
+  create_end_of_training_report = report_utils.create_end_of_training_report
+  report = create_end_of_training_report(
       model_dir=FLAGS.model_dir,
       eval_freq=eval_freq,
       num_train_steps=num_train_steps,
