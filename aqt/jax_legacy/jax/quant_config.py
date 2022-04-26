@@ -35,7 +35,7 @@ class QuantGranularity(str, enum.Enum):
 
 
 @dataclass
-class QuantContext:
+class DynamicContext:
   """Dynamic parameters visible to all model layers.
 
   A single instance of this dataclass is intended to be threaded throughout the
@@ -61,6 +61,7 @@ class QuantContext:
 
   # Whether to tag activations to record statistics.
   collect_acts_stats: bool = flax.struct.field(default=False, pytree_node=False)
+
 
   # Whether to quantize activations.
   #

@@ -148,6 +148,7 @@ flags.DEFINE_string(
     'FLAGS.model_dir. Both HLO text (filename.txt) and protobuf (filename.pb)'
     ' are emitted.')
 
+
 flags.DEFINE_bool(
     'visualize_acts_bound',
     default=False,

@@ -94,7 +94,7 @@ def encoder_from_file(config: config_dict.ConfigDict,
       train=False,
       dropout_rate=0.1,
       attention_dropout_rate=0.1,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, collect_acts_stats=False, quantize_acts=True))
   init_state = model.init(rng, jnp.ones(input_shape, jnp.float32))
 
@@ -173,7 +173,7 @@ def encoder_n_32(layers: int):
       train=False,
       dropout_rate=0.1,
       attention_dropout_rate=0.1,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, collect_acts_stats=False, quantize_acts=True))
   init_state = model.init(rng, jnp.ones(input_shape, jnp.float32))
 
@@ -240,7 +240,7 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
       **transformer_kwargs,
       hparams=model_hparams,
       train=False,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, collect_acts_stats=False, quantize_acts=True),
       should_decode=True,
       use_bfloat16=False,
@@ -265,7 +265,7 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
           decode_length,
           transformer_kwargs=transformer_kwargs,
           hparams=model_hparams,
-          quant_context=quant_config.QuantContext(
+          dynamic_context=quant_config.DynamicContext(
               update_bounds=False, quantize_acts=True))
 
     computation = jax.xla_computation(_with_weights)(input_dummy)
@@ -281,7 +281,7 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
           decode_length,
           transformer_kwargs=transformer_kwargs,
           hparams=model_hparams,
-          quant_context=quant_config.QuantContext(
+          dynamic_context=quant_config.DynamicContext(
               update_bounds=False, quantize_acts=True))
 
     computation = jax.xla_computation(_without_weights)(input_dummy, params)

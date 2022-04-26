@@ -154,7 +154,7 @@ class SoftmaxTest(parameterized.TestCase, tf.test.TestCase):
     dtype = jax._src.numpy.lax_numpy.float32
     output = flax_attention.softmax(
         input_tensor, norm_dims, dtype, softmax_hparams,
-        quant_config.QuantContext(update_bounds=False, quantize_acts=False))
+        quant_config.DynamicContext(update_bounds=False, quantize_acts=False))
     self.assertAllClose(expected_output, output, atol=1e-6)
 
   # # Test modified softmax vs original softmax.
@@ -206,10 +206,10 @@ class SoftmaxTest(parameterized.TestCase, tf.test.TestCase):
     input_tensor = jnp.array(input_tensor)
     output = flax_attention.softmax(
         input_tensor, norm_dims, dtype, softmax_hparams,
-        quant_config.QuantContext(update_bounds=False, quantize_acts=True))
+        quant_config.DynamicContext(update_bounds=False, quantize_acts=True))
     expected_output = flax_attention.softmax(
         input_tensor, norm_dims, dtype, SoftmaxHParams(None, None, None),
-        quant_config.QuantContext(update_bounds=False, quantize_acts=True))
+        quant_config.DynamicContext(update_bounds=False, quantize_acts=True))
     self.assertAllClose(expected_output, output, atol=1e-8)
 
 
@@ -248,7 +248,7 @@ class AttentionTest(parameterized.TestCase):
         num_heads=8,
         attention_axis=(1,),
         qkv_features=16,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         train=False,
         paxis_name=None,
@@ -275,7 +275,7 @@ class AttentionTest(parameterized.TestCase):
         num_heads=8,
         hparams=self.construct_hparams(weight_prec),
         attention_axis=(1,),
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         train=False,
         paxis_name=None,
@@ -303,7 +303,7 @@ class AttentionTest(parameterized.TestCase):
         num_heads=8,
         hparams=self.construct_hparams(weight_prec),
         attention_axis=(1,),
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         train=False,
         paxis_name=None,
@@ -351,7 +351,7 @@ class AttentionTest(parameterized.TestCase):
     module = flax_attention.SelfAttentionAqt(
         num_heads=num_heads,
         hparams=self.construct_hparams(weight_prec),
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         train=False,
         paxis_name=None,
@@ -415,7 +415,7 @@ class AttentionTest(parameterized.TestCase):
     module = flax_attention.SelfAttentionAqt(
         num_heads=num_heads,
         hparams=self.construct_hparams(weight_prec),
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         train=False,
         paxis_name=None,
@@ -494,7 +494,7 @@ class AttentionTest(parameterized.TestCase):
         num_heads=2,
         paxis_name=None,
         train=True,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=True, collect_acts_stats=False),
         dtype=jnp.float32,
         qkv_features=None,
@@ -658,7 +658,7 @@ class AttnActsMatmulQuantTest(parameterized.TestCase):
     sa_module = flax_attention.SelfAttentionAqt(
         hparams=hparams,
         num_heads=4,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=update_bounds, collect_acts_stats=False),
         train=train,
         paxis_name=paxis_name,

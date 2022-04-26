@@ -81,7 +81,7 @@ class ComputeCostUtilsTest(parameterized.TestCase):
           features=num_classes,
           dtype=dtype,
           train=False,
-          quant_context=quant_config.QuantContext(
+          dynamic_context=quant_config.DynamicContext(
               update_bounds=False, collect_acts_stats=False),
           paxis_name='batch',
           hparams=hparams,
@@ -106,7 +106,7 @@ class ComputeCostUtilsTest(parameterized.TestCase):
           use_bias=False,
           dtype=dtype,
           train=False,
-          quant_context=quant_config.QuantContext(update_bounds=False),
+          dynamic_context=quant_config.DynamicContext(update_bounds=False),
           paxis_name='batch',
           hparams=hparams)(
               inputs)
@@ -470,7 +470,7 @@ class ComputeCostUtilsTest(parameterized.TestCase):
         kernel_size=(3, 3),
         padding='VALID',
         paxis_name='batch',
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
         train=False,
         hparams=aqt_flax_layers.ConvAqt.HParams(
             weight_prec=weight_prec,
@@ -496,7 +496,7 @@ class ComputeCostUtilsTest(parameterized.TestCase):
         kernel_size=(3, 3),
         padding='VALID',
         paxis_name='batch',
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
         train=False,
         hparams=aqt_flax_layers.ConvAqt.HParams(
             weight_prec=weight_prec,
@@ -553,7 +553,7 @@ class ComputeCostUtilsTest(parameterized.TestCase):
     module_no_annotation = aqt_flax_layers.DenseAqt(
         features=4,
         use_bias=False,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         paxis_name='batch',
         train=False,
@@ -580,7 +580,7 @@ class ComputeCostUtilsTest(parameterized.TestCase):
         use_bias=False,
         paxis_name='batch',
         train=False,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         dtype=jnp.float32,
         hparams=aqt_flax_layers.DenseAqt.HParams(

@@ -149,7 +149,7 @@ def create_model(key, input_shape, target_shape,
   """Instantiate transformer model."""
   model = models.Transformer(
       **transformer_kwargs,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, collect_acts_stats=FLAGS.collect_acts_stats),
       hparams=hparams,
       use_bfloat16=False,
@@ -300,7 +300,7 @@ class WrapHashably:
 
 def train_step(optimizer,
                batch,
-               quant_context: quant_config.QuantContext,
+               dynamic_context: quant_config.DynamicContext,
                transformer_kwargs: Mapping[str, Any],
                hparams: Union[training_hparams.TrainingHParams, WrapHashably],
                state,
@@ -327,7 +327,7 @@ def train_step(optimizer,
     """loss function used for training."""
     model = models.Transformer(
         **transformer_kwargs,
-        quant_context=quant_context,
+        dynamic_context=dynamic_context,
         use_bfloat16=FLAGS.use_bfloat16,
         train=True,
         hparams=hparams.model_hparams,
@@ -390,7 +390,7 @@ p_train_step = jax.pmap(
 def _write_beam_hlo(params, input_shape, cache, state,
                     transformer_kwargs: Mapping[str, Any],
                     hparams: models.Transformer.HParams,
-                    quant_context: quant_config.QuantContext):
+                    dynamic_context: quant_config.DynamicContext):
   """Writes HLO with beam search for given model."""
   if not FLAGS.output_beam_hlo_filename:
     return
@@ -407,7 +407,7 @@ def _write_beam_hlo(params, input_shape, cache, state,
         EOS_TOKEN,
         transformer_kwargs=transformer_kwargs,
         hparams=hparams,
-        quant_context=quant_context)
+        dynamic_context=dynamic_context)
 
   def _with_weights(inputs):
     """JAX computation with only inputs turned into parameters."""
@@ -419,7 +419,7 @@ def _write_beam_hlo(params, input_shape, cache, state,
         EOS_TOKEN,
         transformer_kwargs=transformer_kwargs,
         hparams=hparams,
-        quant_context=quant_context)
+        dynamic_context=dynamic_context)
 
   _write_hlo(basename, _without_weights, input_dummy, transformer_kwargs,
              params, cache, state)
@@ -437,7 +437,7 @@ def get_jax_computation_of_model(transformer_kwargs: Mapping[str, Any],
       (hparams.per_host_batch_size, FLAGS.max_target_length))
   model = models.Transformer(
       **transformer_kwargs,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, collect_acts_stats=False),
       train=False,
       hparams=hparams.model_hparams,
@@ -550,13 +550,13 @@ def _write_hlo(output, fn, *fn_args, **fn_kwargs):
 def eval_step(params: Mapping[str, Any], batch, state: Mapping[str, Any],
               transformer_kwargs: Mapping[str, Any],
               hparams: models.Transformer.HParams,
-              quant_context: quant_config.QuantContext):
+              dynamic_context: quant_config.DynamicContext):
   """Calculate evaluation metrics on a batch."""
   inputs, targets = batch['inputs'], batch['targets']
   weights = jnp.where(targets > 0, 1.0, 0.0)
   model = models.Transformer(
       **transformer_kwargs,
-      quant_context=quant_context,
+      dynamic_context=dynamic_context,
       use_bfloat16=FLAGS.use_bfloat16,
       train=False,
       hparams=hparams,
@@ -581,7 +581,7 @@ p_eval_step = jax.pmap(
 def predict_step(inputs, params, cache, state, eos_token,
                  transformer_kwargs: Mapping[str, Any],
                  hparams: models.Transformer.HParams,
-                 quant_context: quant_config.QuantContext):
+                 dynamic_context: quant_config.DynamicContext):
   return predict.step(
       inputs,
       params,
@@ -591,7 +591,7 @@ def predict_step(inputs, params, cache, state, eos_token,
       FLAGS.max_predict_length,
       transformer_kwargs=transformer_kwargs,
       hparams=hparams,
-      quant_context=quant_context)
+      dynamic_context=dynamic_context)
 
 
 p_pred_step = jax.pmap(
@@ -624,12 +624,12 @@ def run_eval(*,
   """Compute evaluation metrics for a given dataset."""
   eval_metrics = []
   eval_iter = iter(ds)
-  quant_context = get_quant_context(hparams, step, train=False)
+  dynamic_context = get_dynamic_context(hparams, step, train=False)
   for _, eval_batch in zip(range(num_steps), eval_iter):
     eval_batch = jax.tree_map(lambda x: x._numpy(), eval_batch)  # pylint: disable=protected-access
     eval_batch = common_utils.shard(eval_batch)
     metrics = p_eval_step(params, eval_batch, state, transformer_kwargs,
-                          hparams.model_hparams, quant_context)
+                          hparams.model_hparams, dynamic_context)
     eval_metrics.append(metrics)
   eval_metrics = common_utils.get_metrics(eval_metrics)
   eval_metrics_sums = jax.tree_map(jnp.sum, eval_metrics)
@@ -670,7 +670,7 @@ def initialize_cache(batch_size: int, transformer_kwargs: Dict[str, Any],
       hparams=hparams,
       should_decode=True,
       train=False,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, collect_acts_stats=False),
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
@@ -687,7 +687,7 @@ def run_inference(*, ds, transformer_kwargs,
 
   predict_iter = iter(ds)
   sources, references, predictions = [], [], []
-  quant_context = get_quant_context(hparams, step, train=False)
+  dynamic_context = get_dynamic_context(hparams, step, train=False)
   for _, pred_batch in enumerate(predict_iter):
     pred_batch = jax.tree_map(lambda x: x._numpy(), pred_batch)  # pylint: disable=protected-access
     # Handle final odd-sized batch by padding instead of dropping it.
@@ -714,7 +714,7 @@ def run_inference(*, ds, transformer_kwargs,
           state=state,
           transformer_kwargs=transformer_kwargs,
           hparams=hparams.model_hparams,
-          quant_context=quant_context)
+          dynamic_context=dynamic_context)
       logging.info('Finished writing inference HLO.')
       params = jax_utils.replicate(params)
       state = jax_utils.replicate(state)
@@ -729,7 +729,7 @@ def run_inference(*, ds, transformer_kwargs,
         EOS_TOKEN,
         transformer_kwargs,
         hparams.model_hparams,
-        quant_context=quant_context)
+        dynamic_context=dynamic_context)
     predicted = tohost(predicted)
     inputs = tohost(pred_batch['inputs'])
     targets = tohost(pred_batch['targets'])
@@ -831,8 +831,8 @@ class TrainingState:
         transformer_kwargs=transformer_kwargs)
 
 
-def get_quant_context(hparams: training_hparams.TrainingHParams, step: int,
-                      train: bool) -> quant_config.QuantContext:
+def get_dynamic_context(hparams: training_hparams.TrainingHParams, step: int,
+                        train: bool) -> quant_config.DynamicContext:
   """Returns quantization context for a given training step.
 
   Args:
@@ -842,34 +842,34 @@ def get_quant_context(hparams: training_hparams.TrainingHParams, step: int,
       step.
 
   Returns:
-    A QuantContext instance that has been replicated so it can be passed to
+    A DynamicContext instance that has been replicated so it can be passed to
       a pmapped function.
   """
   if train:
     collect_acts_stats = FLAGS.collect_acts_stats
   else:
     collect_acts_stats = False
-  quant_context = train_utils.get_quant_context_for_step(
+  dynamic_context = train_utils.get_dynamic_context_for_step(
       activation_bound_update_freq=hparams.activation_bound_update_freq,
       activation_bound_start_step=hparams.activation_bound_start_step,
       step=step,
       collect_acts_stats=collect_acts_stats,
       prefer_int8_to_int32_dot=hparams.prefer_int8_to_int32_dot)
   if not train:
-    quant_context = dataclasses.replace(quant_context, update_bounds=False)
-  return jax_utils.replicate(quant_context)
+    dynamic_context = dataclasses.replace(dynamic_context, update_bounds=False)
+  return jax_utils.replicate(dynamic_context)
 
 
 def run_train_step(*, training_state: TrainingState, step: int, batch: Any,
                    hparams: training_hparams.TrainingHParams):
   """Run a single step of training."""
-  quant_context = get_quant_context(hparams, step, train=True)
+  dynamic_context = get_dynamic_context(hparams, step, train=True)
   # Shard data to devices and do a training step.
   batch = common_utils.shard(jax.tree_map(lambda x: x._numpy(), batch))  # pylint: disable=protected-access
   flax_state, optimizer, metrics, dropout_rngs = p_train_step(
       training_state.optimizer,
       batch,
-      quant_context,
+      dynamic_context,
       training_state.transformer_kwargs,
       WrapHashably(hparams),
       state=training_state.flax_state,

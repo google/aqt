@@ -163,7 +163,7 @@ def exponential(tensor, dtype, exp_hparams: ExpHParams):
 
 
 def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
-            quant_context: quant_config.QuantContext):
+            dynamic_context: quant_config.DynamicContext):
   """Normalizes attention."""
   a = attn_weights
 
@@ -210,7 +210,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
   # TODO(shivaniagrawal): Partial sum quantization (if enabled) will happen for
   # the entire training run, even before the global activation start step.
   if softmax_hparams.quant_hparams is not None:
-    return lax.cond(quant_context.quantize_acts, quantized_softmax,
+    return lax.cond(dynamic_context.quantize_acts, quantized_softmax,
                     unquantized_softmax, a)
 
   # Approximated Softmax
@@ -251,7 +251,7 @@ def dot_product_attention(query,
                           key,
                           value,
                           hparams: DotProductAttnHParams,
-                          quant_context: quant_config.QuantContext,
+                          dynamic_context: quant_config.DynamicContext,
                           paxis_name: Optional[str],
                           train: bool,
                           key_padding_mask: Optional[jnp.ndarray],
@@ -281,7 +281,7 @@ def dot_product_attention(query,
     value: values to be used in attention with shape of `[batch_size,
       sequence_length, num_heads, value_channels]`.
     hparams: hyperparameters used for quantization.
-    quant_context: context for quantization.
+    dynamic_context: context for quantization.
     paxis_name: axis_name to which a user `pmaps` the parent module (model),
       refer to jax.pmap() for more documentation. This arg is used for
       get_bounds acts quantization (QuantOps.create_input_fake_quant)
@@ -354,7 +354,7 @@ def dot_product_attention(query,
     shape_utils.assert_shapes_equal(key_padding_mask_transposed.shape,
                                     (batch_size, 1, key_sequence_length, 1))
 
-  if quant_context.collect_acts_stats:
+  if dynamic_context.collect_acts_stats:
     stats_tag.StatsTag(
         channel_axis=None, name='attn_act_k', update_stats=train)(
             key, mask=key_padding_mask_transposed)
@@ -365,7 +365,7 @@ def dot_product_attention(query,
                                     (batch_size, 1, query_sequence_length, 1))
 
   key_get_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=quant_context.update_bounds,
+      update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
       mask=key_padding_mask_transposed,
@@ -382,13 +382,13 @@ def dot_product_attention(query,
     shape_utils.assert_shapes_equal(value_padding_mask_transposed.shape,
                                     (batch_size, 1, 1, key_sequence_length))
 
-  if quant_context.collect_acts_stats:
+  if dynamic_context.collect_acts_stats:
     stats_tag.StatsTag(
         channel_axis=None, name='attn_act_v', update_stats=train)(
             value, mask=value_padding_mask_transposed)
 
   value_get_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=quant_context.update_bounds,
+      update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
       mask=value_padding_mask_transposed,
@@ -399,13 +399,13 @@ def dot_product_attention(query,
   shape_utils.assert_shapes_equal(
       query.shape, (batch_size, num_heads, query_sequence_length, channel_size))
 
-  if quant_context.collect_acts_stats:
+  if dynamic_context.collect_acts_stats:
     stats_tag.StatsTag(
         channel_axis=None, name='attn_act_q', update_stats=train)(
             query, mask=query_padding_mask_transposed)
 
   query_get_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=quant_context.update_bounds,
+      update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
       mask=query_padding_mask_transposed,
@@ -443,7 +443,7 @@ def dot_product_attention(query,
       norm_dims,
       dtype,
       hparams.softmax,
-      quant_context=quant_context)
+      dynamic_context=dynamic_context)
 
   # apply dropout
   if not deterministic and dropout_rate > 0.0:
@@ -461,7 +461,7 @@ def dot_product_attention(query,
         keep.astype(attn_weights.dtype) / jnp.asarray(keep_prob, dtype=dtype))
     attn_weights = attn_weights * multiplier
 
-  if quant_context.collect_acts_stats:
+  if dynamic_context.collect_acts_stats:
     stats_tag.StatsTag(
         channel_axis=None, name='attn_act_probs', update_stats=train)(
             attn_weights, mask=attn_mask)
@@ -472,7 +472,7 @@ def dot_product_attention(query,
         'be set to fix value 1.0 to '
         'match Softmax range.')
   probs_get_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=quant_context.update_bounds,
+      update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
       mask=attn_mask,
@@ -559,7 +559,7 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
   num_heads: int
   paxis_name: Optional[str]
   train: bool
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dtype: Type[Any]
   qkv_features: Optional[int]
   attention_axis: Optional[Iterable[int]]
@@ -657,7 +657,7 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
           features=num_heads * head_dim,
           paxis_name=paxis_name,
           train=train,
-          quant_context=self.quant_context,
+          dynamic_context=self.dynamic_context,
           hparams=hparams.dense_kqv,
           kernel_init=kernel_init,
           bias_init=bias_init,
@@ -796,7 +796,7 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
         hparams=hparams.attn_acts,
         paxis_name=paxis_name,
         train=train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         dtype=dtype,
         axis=attention_axis,
         bias=attention_bias,
@@ -817,7 +817,7 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
     out = flax_layers.DenseAqt(
         features=channel_size,
         hparams=hparams.dense_out,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         paxis_name=paxis_name,
         train=train,
         kernel_init=kernel_init,

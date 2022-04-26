@@ -49,10 +49,17 @@ def should_update_bounds(activation_bound_update_freq: int,
     return steps_since_start % activation_bound_update_freq == 0
 
 
-def get_quant_context_for_step(
-    *, activation_bound_update_freq: int, activation_bound_start_step: int,
-    step: int, collect_acts_stats: bool,
-    prefer_int8_to_int32_dot: bool) -> quant_config.QuantContext:
+
+
+# pylint: disable=g-doc-args
+def get_dynamic_context_for_step(
+    *,
+    activation_bound_update_freq: int,
+    activation_bound_start_step: int,
+    step: int,
+    collect_acts_stats: bool,
+    prefer_int8_to_int32_dot: bool,
+) -> quant_config.DynamicContext:
   """Returns correct quantization context for a given step.
 
   Args:
@@ -67,14 +74,14 @@ def get_quant_context_for_step(
       and accumulate to int32.
 
   Returns:
-    A quant_config.QuantContext instance.
+    A quant_config.DynamicContext instance.
   """
   update_bounds = should_update_bounds(
       activation_bound_start_step=activation_bound_start_step,
       activation_bound_update_freq=activation_bound_update_freq,
       step=step)
   quantize_acts = step >= activation_bound_start_step
-  return quant_config.QuantContext(
+  return quant_config.DynamicContext(
       update_bounds=update_bounds,
       quantize_acts=quantize_acts,
       collect_acts_stats=collect_acts_stats,

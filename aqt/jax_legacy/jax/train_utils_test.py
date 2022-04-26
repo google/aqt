@@ -20,7 +20,7 @@ from absl.testing import parameterized
 from aqt.jax_legacy.jax import train_utils
 
 
-class UpdateBoundsUtilsTest(parameterized.TestCase):
+class UpdateUtilsTest(parameterized.TestCase):
 
   @parameterized.parameters(
       # No updates before the start step of 5
@@ -109,6 +109,7 @@ class UpdateBoundsUtilsTest(parameterized.TestCase):
             activation_bound_update_freq=frequency,
             activation_bound_start_step=start_step,
             step=current_step), should_update)
+
 
 
 if __name__ == '__main__':

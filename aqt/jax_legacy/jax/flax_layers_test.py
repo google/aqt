@@ -153,7 +153,7 @@ class ConvAqtTest(parameterized.TestCase):
         'kernel_init': kernel_init,
         'features': num_features,
         'use_bias': False,
-        'quant_context': quant_config.QuantContext(update_bounds=False),
+        'dynamic_context': quant_config.DynamicContext(update_bounds=False),
         'paxis_name': 'batch',
         'train': False,
         'kernel_size': kernel_size,
@@ -185,7 +185,7 @@ class ConvAqtTest(parameterized.TestCase):
         kernel_size=(3, 3),
         padding='VALID',
         paxis_name='batch',
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
         train=False,
         hparams=flax_layers.ConvAqt.HParams(
             weight_prec=weight_prec,
@@ -215,7 +215,7 @@ class ConvAqtTest(parameterized.TestCase):
         feature_group_count=2,
         padding='VALID',
         paxis_name='batch',
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
         train=False,
         hparams=flax_layers.ConvAqt.HParams(
             weight_prec=weight_prec,
@@ -511,13 +511,13 @@ class DenseAqtTest(parameterized.TestCase):
                               weight_half_shift=False,
                               kernel_axis_names=None):
     """Create and initialize a flax model with a single DenseAqt layer."""
-    quant_context = quant_config.QuantContext(
+    dynamic_context = quant_config.DynamicContext(
         update_bounds=False, collect_acts_stats=False)
     layer_kwargs = {
         'kernel_init': kernel_init,
         'features': num_features,
         'use_bias': False,
-        'quant_context': quant_context,
+        'dynamic_context': dynamic_context,
         'paxis_name': 'batch',
         'train': False,
         'dtype': jnp.float32,
@@ -562,7 +562,7 @@ class DenseAqtTest(parameterized.TestCase):
         hparams=hparams,
         features=1,
         paxis_name=None,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=True, collect_acts_stats=False),
         train=True,
         dtype=jnp.float32)
@@ -1041,7 +1041,7 @@ class DenseAqtTest(parameterized.TestCase):
     layer = flax_layers.DenseAqt(
         features=2,
         hparams=hparams,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, collect_acts_stats=False),
         paxis_name=None,
         train=False,
@@ -1093,7 +1093,7 @@ class EmbedLayerTest(parameterized.TestCase):
         embedding_init=lambda _rng, _shape: dummy_embedding,
         train=False,
         paxis_name=None,
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
     )
     y, state = embed_module.init_with_output(rng, x)
     test_utils.assert_all_close_prec(dummy_embedding[None], y, weight_prec)
@@ -1131,7 +1131,7 @@ class EmbedLayerTest(parameterized.TestCase):
             weight_half_shift=False),
         embedding_init=lambda _rng, _shape: dummy_embedding,
         train=False,
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
         paxis_name=None)
     y, init_state = embed_module.init_with_output(rng, x)
     onp.testing.assert_array_equal(dummy_embedding[None], y)
@@ -1210,7 +1210,7 @@ class EmbedLayerTest(parameterized.TestCase):
             quant_act=quant_act,
             quant_type=QuantType.FAKE_QUANT,
             weight_half_shift=False),
-        quant_context=quant_config.QuantContext(update_bounds=False),
+        dynamic_context=quant_config.DynamicContext(update_bounds=False),
         paxis_name=None,
         train=False)
     init_state = embed_module.init(
@@ -1256,7 +1256,7 @@ class LayerNormTest(parameterized.TestCase):
     quantized_layer_norm = flax_layers.LayerNormAqt(
         hparams=hparams,
         dtype=jnp.float32,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, quantize_acts=quantize_acts))
     x_rng, param_rng = jax.random.split(self.rng)
     x = jax.random.normal(x_rng, (3, 5))
@@ -1282,7 +1282,7 @@ class LayerNormTest(parameterized.TestCase):
         use_scale=False,
         epsilon=1e-6,
         dtype=jnp.float32,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=False, quantize_acts=True))
     x = jnp.ones((2, 5))
     y = layer_norm.apply({}, x)

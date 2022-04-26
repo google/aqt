@@ -21,7 +21,7 @@ import jax.numpy as jnp
 
 def step(inputs, params, cache, state, eos_token, max_decode_len,
          transformer_kwargs, hparams: models.Transformer.HParams,
-         quant_context: quant_config.QuantContext):
+         dynamic_context: quant_config.DynamicContext):
   """Predict translation with fast decoding beam search on a batch."""
   # If the state already has a cache, remove it in favor the 'cache' parameter
   # passed to this function.
@@ -47,7 +47,7 @@ def step(inputs, params, cache, state, eos_token, max_decode_len,
   model = models.Transformer(
       **transformer_kwargs,
       train=False,
-      quant_context=quant_context,
+      dynamic_context=dynamic_context,
       hparams=hparams,
       should_decode=False,
       dropout_rate=0.0,
@@ -68,7 +68,7 @@ def step(inputs, params, cache, state, eos_token, max_decode_len,
     model = models.Transformer(
         **transformer_kwargs,
         train=False,
-        quant_context=quant_context,
+        dynamic_context=dynamic_context,
         hparams=hparams,
         should_decode=True,
         dropout_rate=0.0,

@@ -132,7 +132,7 @@ class MlpBlock(nn.Module):
   hparams: HParams
   train: bool
   mlp_dim: int
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dtype: Any
   dropout_rate: float
   deterministic: bool
@@ -159,7 +159,7 @@ class MlpBlock(nn.Module):
         dtype=self.dtype,
         paxis_name='batch',
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         hparams=self.hparams.dense_1,
         kernel_init=self.kernel_init,
         bias_init=self.bias_init,
@@ -175,7 +175,7 @@ class MlpBlock(nn.Module):
         dtype=self.dtype,
         paxis_name='batch',
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         hparams=self.hparams.dense_2,
         kernel_init=self.kernel_init,
         bias_init=self.bias_init,
@@ -216,7 +216,7 @@ class Encoder1DBlock(nn.Module):
   mlp_dim: int
   num_heads: int
   train: bool
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dtype: Any
   dropout_rate: float
   attention_dropout_rate: float
@@ -246,7 +246,7 @@ class Encoder1DBlock(nn.Module):
     x = aqt_flax_layers.LayerNormAqt(
         dtype=self.dtype,
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             inputs)
     x = aqt_flax_attention.SelfAttentionAqt(
         hparams=self.hparams.attention,
@@ -256,7 +256,7 @@ class Encoder1DBlock(nn.Module):
         attention_axis=(1,),
         paxis_name='batch',
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         causal_mask=False,
         kernel_init=nn.initializers.xavier_uniform(),
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -275,14 +275,14 @@ class Encoder1DBlock(nn.Module):
     y = aqt_flax_layers.LayerNormAqt(
         dtype=self.dtype,
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             x)
     y = MlpBlock(
         mlp_dim=self.mlp_dim,
         hparams=self.hparams.mlp_block,
         # inputs would be signed, called after attention layer.
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         dtype=self.dtype,
         dropout_rate=self.dropout_rate,
         deterministic=self.deterministic,
@@ -324,7 +324,7 @@ class EncoderDecoder1DBlock(nn.Module):
   mlp_dim: int
   num_heads: int
   train: bool
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dtype: Any
   dropout_rate: float
   attention_dropout_rate: float
@@ -369,7 +369,7 @@ class EncoderDecoder1DBlock(nn.Module):
     x = aqt_flax_layers.LayerNormAqt(
         dtype=self.dtype,
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             targets)
     x = aqt_flax_attention.SelfAttentionAqt(
         hparams=self.hparams.self_attention,
@@ -379,7 +379,7 @@ class EncoderDecoder1DBlock(nn.Module):
         attention_axis=(1,),
         paxis_name='batch',
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         causal_mask=True,
         kernel_init=nn.initializers.xavier_uniform(),
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -400,7 +400,7 @@ class EncoderDecoder1DBlock(nn.Module):
     y = aqt_flax_layers.LayerNormAqt(
         dtype=self.dtype,
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             x)
     y = aqt_flax_attention.MultiHeadDotProductAttentionAqt(
         hparams=self.hparams.enc_dec_attention,
@@ -410,7 +410,7 @@ class EncoderDecoder1DBlock(nn.Module):
         attention_axis=(1,),
         paxis_name='batch',
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         causal_mask=False,
         kernel_init=nn.initializers.xavier_uniform(),
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -433,7 +433,7 @@ class EncoderDecoder1DBlock(nn.Module):
     z = aqt_flax_layers.LayerNormAqt(
         dtype=self.dtype,
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             y)
     z = MlpBlock(
         mlp_dim=self.mlp_dim,
@@ -441,7 +441,7 @@ class EncoderDecoder1DBlock(nn.Module):
         hparams=self.hparams.mlp_block,
         # inputs would be signed, called after attention layer.
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         dropout_rate=self.dropout_rate,
         deterministic=self.deterministic,
         name='mlp_block')(
@@ -499,7 +499,7 @@ class Encoder(nn.Module):
   qkv_dim: int
   mlp_dim: int
   train: bool
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dropout_rate: float
   attention_dropout_rate: float
 
@@ -540,7 +540,7 @@ class Encoder(nn.Module):
           name='input_embed',
           paxis_name='batch',
           train=self.train,
-          quant_context=self.quant_context)
+          dynamic_context=self.dynamic_context)
     else:
       input_embed = self.shared_embedding
     x = inputs.astype('int32')
@@ -562,7 +562,7 @@ class Encoder(nn.Module):
     for lyr in range(num_layers):
       x = Encoder1DBlock(
           train=self.train,
-          quant_context=self.quant_context,
+          dynamic_context=self.dynamic_context,
           qkv_dim=self.qkv_dim,
           mlp_dim=self.mlp_dim,
           num_heads=self.num_heads,
@@ -579,7 +579,7 @@ class Encoder(nn.Module):
         dtype=dtype,
         name='encoder_norm',
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             x)
     shape_utils.assert_shapes_equal(encoded.shape,
                                     (batch_size, sequence_length, self.emb_dim))
@@ -648,7 +648,7 @@ class Decoder(nn.Module):
   qkv_dim: int
   mlp_dim: int
   train: bool
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dropout_rate: float
   attention_dropout_rate: float
   paxis_name: Optional[str]
@@ -707,7 +707,7 @@ class Decoder(nn.Module):
           dtype=dtype,
           name='target_embed',
           train=self.train,
-          quant_context=self.quant_context,
+          dynamic_context=self.dynamic_context,
           paxis_name='batch')
     else:
       output_embed = self.shared_embedding
@@ -733,7 +733,7 @@ class Decoder(nn.Module):
     for lyr in range(num_layers):
       y = EncoderDecoder1DBlock(
           train=self.train,
-          quant_context=self.quant_context,
+          dynamic_context=self.dynamic_context,
           qkv_dim=self.qkv_dim,
           mlp_dim=self.mlp_dim,
           num_heads=self.num_heads,
@@ -754,7 +754,7 @@ class Decoder(nn.Module):
         dtype=dtype,
         name='encoderdecoder_norm',
         hparams=self.hparams.layer_norm,
-        quant_context=self.quant_context)(
+        dynamic_context=self.dynamic_context)(
             y)
     y = y.reshape((batch_size * target_sequence_length, channel_size))
     tgt_padding_mask = tgt_padding_mask.reshape(
@@ -776,7 +776,7 @@ class Decoder(nn.Module):
           dtype=dtype,
           paxis_name='batch',
           train=self.train,
-          quant_context=self.quant_context,
+          dynamic_context=self.dynamic_context,
           hparams=self.hparams.logits,
           kernel_init=nn.initializers.xavier_uniform(),
           bias_init=nn.initializers.normal(stddev=1e-6),
@@ -833,7 +833,7 @@ class Transformer(nn.Module):
   output_vocab_size: Optional[int]
   use_bfloat16: bool
   train: bool
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   dropout_rate: float
   attention_dropout_rate: float
   # We call this 'should_decode' instead of 'decode' so it doesn't conflict with
@@ -859,7 +859,7 @@ class Transformer(nn.Module):
           embedding_init=nn.initializers.normal(
               stddev=self.hparams.emb_dim**-0.5),
           train=self.train,
-          quant_context=self.quant_context,
+          dynamic_context=self.dynamic_context,
           paxis_name='batch')
     else:
       self.shared_embedding = None
@@ -875,7 +875,7 @@ class Transformer(nn.Module):
         mlp_dim=self.hparams.mlp_dim,
         max_len=self.max_len,
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
     )
@@ -892,7 +892,7 @@ class Transformer(nn.Module):
         mlp_dim=self.hparams.mlp_dim,
         max_len=self.max_len,
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
         paxis_name='batch',

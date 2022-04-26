@@ -57,7 +57,7 @@ class ModelsTest(parameterized.TestCase):
   def init_model(self, transformer_kwargs):
     model = models.Transformer(
         use_bfloat16=False,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             collect_acts_stats=False, update_bounds=False),
         dropout_rate=.1,
         attention_dropout_rate=.1,
@@ -845,7 +845,7 @@ class ModelsTest(parameterized.TestCase):
         quant_type=QuantType.FAKE_QUANT)
     module = models.Transformer(
         hparams=hparams,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=True, collect_acts_stats=True),
         vocab_size=3,
         output_vocab_size=3,
@@ -955,7 +955,7 @@ class ModelsTest(parameterized.TestCase):
     hparams.logits_via_embedding = False
     module = models.Transformer(
         hparams=hparams,
-        quant_context=quant_config.QuantContext(
+        dynamic_context=quant_config.DynamicContext(
             update_bounds=True, collect_acts_stats=True),
         vocab_size=3,
         output_vocab_size=3,

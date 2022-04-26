@@ -58,7 +58,7 @@ class PokeBNN(nn.Module):
   num_classes: int
   hparams: Any
   # Dynamic information on whether we should be quantizing already.
-  quant_context: quant_config.QuantContext
+  dynamic_context: quant_config.DynamicContext
   train: bool
   # Jax way of multi-machine distribution
   paxis_name: Any
@@ -89,7 +89,7 @@ class PokeBNN(nn.Module):
     op = aqt_flax_layers.ConvAqt(
         use_bias=use_bias,
         dtype=jnp.bfloat16,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         paxis_name=self.paxis_name,
         train=self.train,
         **kwargs)
@@ -100,7 +100,7 @@ class PokeBNN(nn.Module):
     op = aqt_flax_layers.DenseAqt(
         dtype=jnp.bfloat16,
         train=self.train,
-        quant_context=self.quant_context,
+        dynamic_context=self.dynamic_context,
         paxis_name=self.paxis_name,
         hparams=self.hparams.dense_layer,
         **kwargs)
@@ -461,7 +461,7 @@ def create_pokebnn(hparams, train, **kwargs):
   return PokeBNN(
       num_classes=1000,
       hparams=hparams,
-      quant_context=quant_config.QuantContext(
+      dynamic_context=quant_config.DynamicContext(
           update_bounds=False, quantize_weights=True),
       train=train,
       paxis_name='batch',
