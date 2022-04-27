@@ -1186,6 +1186,7 @@ def run_training(
         state_dict_summary_all = common_utils.get_metrics(
             state_dict_summary_all)
         lr = metrics_all.pop('learning_rate').mean()
+
         metrics_sums = jax.tree_map(jnp.sum, metrics_all)
         denominator = metrics_sums.pop('denominator')
         or_loss = metrics_sums.pop('or_loss').mean()
