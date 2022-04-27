@@ -52,10 +52,9 @@ flags.DEFINE_bool(
 # NOTE: if changing this to DEFINE_list, verify if the behavior is as expected.
 flags.DEFINE_multi_string(
     'additional_eval_datasets',
-    default=[
-        'wmt15_translate/de-en:test', 'wmt16_translate/de-en:test',
-        'wmt17_translate/de-en:test'
-    ],
+    default=[],
+    # [ 'wmt15_translate/de-en:test', 'wmt16_translate/de-en:test',
+    #  'wmt17_translate/de-en:test'],
     help='Names for additional eval datasets.')
 
 flags.DEFINE_bool(
