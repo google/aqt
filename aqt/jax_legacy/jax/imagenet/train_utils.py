@@ -86,13 +86,13 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
                learning_rate_fn, teacher):
   """Perform a single training step."""
 
-  # TODO(yichi): update the quantize_weights flag in quant_context
-  quant_context = dataclasses.replace(
-      model.quant_context,
+  # TODO(yichi): update the quantize_weights flag in dynamic_context
+  dynamic_context = dataclasses.replace(
+      model.dynamic_context,
       update_bounds=update_bounds,
       quantize_weights=quantize_weights)
 
-  model = dataclasses.replace(model, quant_context=quant_context)
+  model = dataclasses.replace(model, dynamic_context=dynamic_context)
 
   def loss_fn(params):
     """loss function used for training."""
@@ -158,10 +158,10 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
 
 # pylint: disable=missing-function-docstring
 def eval_step(model, state, batch, quantize_weights):
-  # TODO(yichi): update the quantize_weights flag in quant_context
-  quant_context = dataclasses.replace(
-      model.quant_context, quantize_weights=quantize_weights)
-  model = dataclasses.replace(model, quant_context=quant_context)
+  # TODO(yichi): update the quantize_weights flag in dynamic_context
+  dynamic_context = dataclasses.replace(
+      model.dynamic_context, quantize_weights=quantize_weights)
+  model = dataclasses.replace(model, dynamic_context=dynamic_context)
 
   variables = {'params': state.params, **state.mutable_vars}
   model = dataclasses.replace(model, train=False)
