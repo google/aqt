@@ -1,0 +1,403 @@
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Dataclass implementation of AQT configuration."""
+
+import dataclasses
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union
+
+import dacite
+
+
+class ConfigError(Exception):
+  pass
+
+
+T = TypeVar('T', bound='_BaseConfig')
+
+
+@dataclasses.dataclass
+class _BaseConfig:
+  """Adds serialization and primitive type checking to dataclasses."""
+
+  def to_dict(self) -> Dict[str, Any]:
+    """Converts a dataclass to dict while preserving dataclass-specific logic."""
+    dataclass_dict = {}
+    for field in dataclasses.fields(self):
+      attr = getattr(self, field.name)
+      if isinstance(attr, _BaseConfig):
+        dataclass_dict[field.name] = attr.to_dict()
+      elif isinstance(attr, list):
+        dataclass_dict[field.name] = [
+            a.to_dict() if isinstance(a, _BaseConfig) else a for a in attr
+        ]
+      else:
+        dataclass_dict[field.name] = attr
+
+    return dataclass_dict
+
+  @classmethod
+  def from_dict(cls: Type[T], data: Dict[str, Any]) -> T:
+    return dacite.from_dict(cls, data)
+
+  def validate(self):
+    pass
+
+
+def _validate_intervals(configs: List['AqtTensorConfig']):
+  """Ensures that the provided schedule specifies increasing time segments.
+
+  We require configs to be in sorted order with respect to
+  `(start_at_event, end_at_event)` intervals. This makes disjointness checking
+  easier.
+
+  Args:
+    configs: a list of tensor quantization configs.
+
+  Raises:
+    ConfigError: if any of the described conditions are not met.
+  """
+  previous_end = None
+  for i, config in enumerate(configs):
+    current_begin = config.begin_at_event
+    current_end = config.end_at_event
+
+    neither_none = current_begin is not None and current_end is not None
+    if neither_none and current_end < current_begin:
+      raise ConfigError(f'config[{i}].end_at_event ({current_end}) < '
+                        f'config[{i}].begin_at_event ({current_begin})')
+
+    if i > 0:
+      if current_begin is None:
+        raise ConfigError('only the first config may omit begin_at_event, but '
+                          f'config[{i}] does too')
+
+      if previous_end is None:
+        raise ConfigError('only the last config may omit end_at_event, but '
+                          f'config[{i-1}] does too')
+
+      if previous_end > current_begin:
+        raise ConfigError(f'config[{i-1}].end_at_event ({previous_end}) > '
+                          f'config[{i}].begin_at_event ({current_begin})')
+
+    if previous_end is not None and previous_end != current_begin:
+      raise ConfigError(
+          f'There is a gap between config[{i-1}].end_at_event ({previous_end}) '
+          f'and config[{i}].begin_at_event ({current_begin}). There must be '
+          f'always one active config.')
+
+    previous_end = current_end
+
+
+def _validate_alignment(
+    lhs_path: str,  #
+    lhs_configs: List['AqtTensorConfig'],
+    rhs_path: str,
+    rhs_configs: List['AqtTensorConfig']):
+  """Ensures that quantization schedules for both arguments are aligned.
+
+  For binary quantized operations, a quantization schedule for each argument
+  specifies the type of quantization that should be applied at a given time.
+
+  The configuration is assumed to specify equal-length lists of quantization
+  configurations for LHS and RHS configs, for which parallel entries must
+  have identical endpoints for quantization activation.
+
+  Args:
+    lhs_path: what to call the `lhs` in error strings.
+    lhs_configs: the tensor quantization schedule for the left argument.
+    rhs_path: what to call the `rhs` in error strings.
+    rhs_configs: the tensor quantization schedule for the right argument.
+
+  Raises:
+    ConfigError: if any of the described conditions are not met.
+  """
+  if len(lhs_configs) != len(rhs_configs):
+    raise ConfigError(f'lhs config len {len(lhs_configs)} must equal '
+                      f'rhs config len {len(rhs_configs)}')
+
+  for i, (lhs_config, rhs_config) in enumerate(zip(lhs_configs, rhs_configs)):
+
+    def _interval(config):
+      return config.begin_at_event, config.end_at_event
+
+    if _interval(lhs_config) != _interval(rhs_config):
+      raise ConfigError(
+          '(begin_at_event, end_at_event) intervals do not match: '
+          f'{lhs_path}[{i}] ({_interval(lhs_config)}) != '
+          f'{rhs_path}[{i}] ({_interval(rhs_config)})')
+
+
+@dataclasses.dataclass
+class IntQuantConfig(_BaseConfig):
+  # pyformat: disable
+  """Config for integer quantization in aqt_ops.
+
+  Attributes:
+    bits:
+      Number of bits to quantize to (e.g 4 for int4). Must be positive.
+    preserve_zero:
+      Whether or not zeros should be representable.
+  """
+  # pyformat: enable
+  bits: int
+  preserve_zero: bool = True
+
+  def validate(self):
+    if self.bits < 1:
+      raise ConfigError(f'expected bits={self.bits} > 0')
+
+  def compatible_with_int8(self) -> bool:
+    """Checks if the config is compatible with int8."""
+    return self.bits <= 8
+
+
+@dataclasses.dataclass
+class FloatConfig(_BaseConfig):
+  """Config for non quantization in aqt_ops.
+
+  Attributes:
+    use_bf16: Whether or not to use bfloat16.
+  """
+  use_bf16: bool = True
+
+
+@dataclasses.dataclass
+class StatsConfig(_BaseConfig):
+  # pyformat: disable
+  """Config for aqt_ops.Stats.
+
+  Attributes:
+    ema_update_count:
+      Scale calibration sample size.
+      The weight of the newest batch will be 1 / ema_update_count.
+      E.g. 1 means that only the current batch is used in calibration.
+      Weights of examples in a batch are also correctly taken into account.
+    share_stats_axes:
+      Bound sharing. Required for all contraction axes. Each axis in this list
+      must be in [0, rank) where rank is the rank of the tensor to quantize.
+      This list must also be strictly sorted.
+    filter_zeros:
+      Ignores zeros when computing statistics. Useful for distributions with a
+      zero spike like the output of Relu.
+    lp_order:
+      Defines moment used in lp_dev, needs to be even and positive.
+
+    update_count_prior:
+      Emulates a situation where some statistics have already been collected.
+      Default of `1.0` prevents division by zero in prod, while setting it to
+      `0` allows for precise logic in unit testing.
+    mean_prior:
+      Emulates a situation where some statistics have already been collected.
+    l1_dev_prior:
+      Emulates a situation where some statistics have already been collected.
+    lp_dev_prior:
+      Emulates a situation where some statistics have already been collected.
+    max_dev_prior:
+      Encode prior knowledge of the maximum absolute value observed; note that
+      the `update_count_prior` does not affect the prior weight for the max so
+      in practice this may be usually left at zero.
+
+    tpu_cross_replica_sum:
+      Setting it to false might improve performance, but note that checkpoint
+      might contain wrong value.
+  """
+  # pyformat: enable
+  ema_update_count: int
+  share_stats_axes: List[int]
+  filter_zeros: bool = True
+  lp_order: int = 2
+
+  update_count_prior: float = 1.0
+  mean_prior: float = 0.0
+  l1_dev_prior: float = 0.0
+  lp_dev_prior: float = 0.0
+  max_dev_prior: float = 0.0
+
+  tpu_cross_replica_sum: bool = True
+
+  def validate(self, data_shape: List[Optional[int]]):
+    """Validates this StatsConfig for the provided data shape.
+
+    Args:
+      data_shape: the shape of the input tensor which will be quantized with
+        self as the statistics configuration. If an entry is None, this
+        indicates a dimension whose size is unknown at graph compilation time.
+
+    Raises:
+      ConfigError: if any of the specified share_stats_axes are not between
+        [0, rank) where rank is len(data_shape), the share_stats_axes are
+        not sorted, don't contain all unknown dimensions (None in data_shape),
+        or if ema_update_count is not positive.
+    """
+    rank = len(data_shape)
+    if any(ax < 0 or ax >= rank for ax in self.share_stats_axes):  # pylint: disable=not-an-iterable
+      raise ConfigError(f'share_stats_axes ({self.share_stats_axes}) must be '
+                        f'between 0 and rank ({rank}), not including rank')
+    if not all(ax1 < ax2 for ax1, ax2 in zip(self.share_stats_axes[:-1],
+                                             self.share_stats_axes[1:])):
+      raise ConfigError(
+          f'share_stats_axes ({self.share_stats_axes}) must be strictly sorted')
+
+    unknown_axes = {i for i, dim in enumerate(data_shape) if dim is None}
+    shared_axes = set(self.share_stats_axes)
+    if not unknown_axes.issubset(shared_axes):
+      raise ConfigError(f'expected share_stats_axes ({self.share_stats_axes}) '
+                        'to contain unknown axes for given data shape '
+                        f'({data_shape})')
+
+    if self.ema_update_count < 1:
+      raise ConfigError(
+          f'expected ema_update_count={self.ema_update_count} >= 1')
+
+    if self.lp_order < 1:
+      raise ConfigError(f'expected lp_order={self.lp_order} >= 1')
+
+
+@dataclasses.dataclass
+class CalibrationConfig(_BaseConfig):
+  """Config for aqt_ops.Stats.
+
+  Attributes:
+    const_bound_coeff: Bias used in bound calibration.
+    l1_dev_coeff: Weight of the l1_dev in bound calibration.
+    lp_dev_coeff: Weight of the lp_dev in bound calibration.
+    max_dev_coeff: Weight of the max_dev in bound calibration.
+  """
+  const_bound_coeff: float = 0.0
+  l1_dev_coeff: float = 0.0
+  lp_dev_coeff: float = 0.0
+  max_dev_coeff: float = 0.0
+
+
+@dataclasses.dataclass
+class AqtTensorConfig(_BaseConfig):
+  """Config for aqt_ops.AqtTensor.
+
+  Attributes:
+    quant_config: Either IntQuantConfig or FloatConfig.
+    calibration_config: Calibration config.
+    freeze_scale_at_begin: Freezes the calibration when begin_at_event is
+      reached. This breaks the feedback look between calibration scale and
+      distribution observed by stats.
+    begin_at_event: Start of this quantization interval. You need to make sure
+      that there are enough updates before quantization is enabled with
+      begin_at_event or set a proper prior or use const_bound. This is very
+      important if freeze_scale_at_begin == true.
+    end_at_event: End of this quantization interval.
+  """
+  quant_config: Union[IntQuantConfig, FloatConfig]
+  calibration_config: CalibrationConfig
+  freeze_scale_at_begin: bool
+  begin_at_event: Optional[int] = None
+  end_at_event: Optional[int] = None
+
+  def validate(self):
+    """Validates this tensor config."""
+    if (self.begin_at_event is not None and self.end_at_event is not None and
+        self.begin_at_event > self.end_at_event):
+      raise ConfigError(f'expected begin_at_event={self.begin_at_event} <= '
+                        f'end_at_event={self.end_at_event}')
+
+    if not isinstance(self.quant_config, IntQuantConfig) and not isinstance(
+        self.quant_config, FloatConfig):
+      raise ConfigError(
+          'quant_config must be one of {int_quant_config, float_config}.'
+      )
+
+  def to_dict(self) -> Dict[str, Any]:
+    # AqtTensorConfig dataclass does not have `int_quant_config` and
+    # `float_config` which are present in proto. Instead, it comes with
+    # `quant_config`, but it is not a valid field in the corresponding proto.
+    # So, they are manually added/removed below for proper conversion.
+    dataclass_dict = dataclasses.asdict(self)
+    cfg_type = 'int_quant_config' if isinstance(
+        self.quant_config, IntQuantConfig) else 'float_config'
+    dataclass_dict[cfg_type] = dataclass_dict.pop('quant_config')
+    return dataclass_dict
+
+
+@dataclasses.dataclass
+class AqtScheduleConfig(_BaseConfig):
+  """Config for an `aqt_tensor.TensorQuantizer` configuration schedule.
+
+  Attributes:
+    stats_config: Statistics configs describing what statistics to track.
+    tensor_configs: Tensor configs to apply to the input tensor. *_at_event must
+      describe sorted and disjoint intervals. *_at_event must be identical in
+      the filter configs.
+    use_quantized_variable:
+      If true and in training mode, saves intermediate quantizations to
+      user-provided variables. During inference, quantized variables
+      are read from but not written to with new input values.
+    inference_config_index:
+      If not None, then the index into `tensor_configs` which indicates which
+      tensor configuration to use during inference. This allows for static
+      switching logic at inference time, which improves throughput. If None,
+      then the most recently trained-on config is the one that's used.
+  """
+  stats_config: StatsConfig
+  tensor_configs: List[AqtTensorConfig]
+  use_quantized_variable: bool = False
+  inference_config_index: Optional[int] = None
+
+  def validate(self, data_shape: List[Optional[int]]):
+    """Validates this AqtScheduleConfig for the provided data shape."""
+    _validate_intervals(self.tensor_configs)
+    if any(ax is None for ax in data_shape) and self.use_quantized_variable:
+      raise ConfigError(
+          'use of quantized variable with unknown dimensions is disallowed')
+    if self.inference_config_index is not None and not (
+        0 <= self.inference_config_index < len(self.tensor_configs)):
+      raise ConfigError(
+          f'inference_config_index ({self.inference_config_index}) must be '
+          'at least 0 and less than len(tensor_configs) '
+          f'({len(self.tensor_configs)})')
+
+  def fill_gaps_with_float_config(self):
+    """Fills gaps with FloatConfig to always have one active config."""
+    def create_float_config(begin, end):
+      tc = AqtTensorConfig(
+          quant_config=FloatConfig(),
+          calibration_config=CalibrationConfig(),
+          freeze_scale_at_begin=True,
+          begin_at_event=begin,
+          end_at_event=end)
+      return tc
+
+    previous_end = None
+    filled_configs = []
+    inference_config_index = None
+    for i, config in enumerate(self.tensor_configs):
+      current_begin = config.begin_at_event
+
+      if previous_end != current_begin and current_begin > 0:
+        filled_configs.append(create_float_config(previous_end, current_begin))
+
+      filled_configs.append(config)
+      previous_end = config.end_at_event
+
+      if self.inference_config_index == i:
+        inference_config_index = len(filled_configs) - 1
+
+    if previous_end is not None or not filled_configs:
+      filled_configs.append(create_float_config(previous_end, None))
+
+    self.tensor_configs = filled_configs
+    # Note that self.inference_config_index is either None or in [0, len)
+    # where len is the length of the previous self.tensor_configs. So the
+    # update below either keeps it set to None or updates the index to the
+    # reindexed value for the new self.tensor_configs.
+    self.inference_config_index = inference_config_index
+
