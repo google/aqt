@@ -45,9 +45,10 @@ def int_quant_config(bits, preserve_zero=True):
   return aqt_config.IntQuantConfig(bits=bits, preserve_zero=preserve_zero)
 
 
-def calibration_config(const_coeff):
+def calibration_config(const_coeff, max_dev_coeff):
   """Returns a calibration config with the given constant coeff."""
-  return aqt_config.CalibrationConfig(const_bound_coeff=const_coeff)
+  return aqt_config.CalibrationConfig(
+      const_bound_coeff=const_coeff, max_dev_coeff=max_dev_coeff)
 
 
 def stats_config(input_or_filter, filter_zeros=True):
@@ -60,12 +61,13 @@ def schedule_config(input_or_filter,
                     *,
                     const_coeff,
                     bits,
+                    max_dev_coeff=0,
                     filter_zeros=True,
                     preserve_zero=True):
   """Combines all helpers above to set schedule config."""
   tensor_config = aqt_config.AqtTensorConfig(
       quant_config=int_quant_config(bits, preserve_zero),
-      calibration_config=calibration_config(const_coeff),
+      calibration_config=calibration_config(const_coeff, max_dev_coeff),
       freeze_scale_at_begin=True)
   sc = stats_config(input_or_filter, filter_zeros)
   return aqt_config.AqtScheduleConfig(sc, [tensor_config])
@@ -134,13 +136,17 @@ class ConvTest(tf.test.TestCase, parameterized.TestCase):
     return x, w
 
   def exact_int8_conv_example(self,
+                              lhs_shape=(1, 3, 3, 1),
+                              rhs_shape=(2, 2, 1, 2),
+                              lhs_share_stats_axes=(1, 2, 3),
+                              rhs_share_stats_axes=(0, 1, 2),
                               lhs_use_quantized_variable=False,
                               rhs_use_quantized_variable=False):
     return aqt_test_shared_base.exact_int8_example(
-        lhs_shape=(1, 3, 3, 1),
-        rhs_shape=(2, 2, 1, 2),
-        lhs_share_stats_axes=[1, 2, 3],
-        rhs_share_stats_axes=[0, 1, 2],
+        lhs_shape=lhs_shape,
+        rhs_shape=rhs_shape,
+        lhs_share_stats_axes=list(lhs_share_stats_axes),
+        rhs_share_stats_axes=list(rhs_share_stats_axes),
         lhs_use_quantized_variable=lhs_use_quantized_variable,
         rhs_use_quantized_variable=rhs_use_quantized_variable)
 

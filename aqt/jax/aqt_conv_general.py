@@ -199,6 +199,20 @@ def _validate_inputs(
                                          'I')
 
 
+def _transpose_inv_scale(x, dimension_numbers_before, dimension_numbers_after):
+  """Changes the order of axes in x from dimension_numbers_before to dimension_numbers_after."""
+  assert (len(dimension_numbers_before) == len(dimension_numbers_after)), (
+      f'len(dimension_numbers_before) ({len(dimension_numbers_before)}) must ',
+      f'be equal to len(dimension_numbers_after) ({len(dimension_numbers_after)})'
+  )
+
+  axes = []
+  for axis in dimension_numbers_after:
+    axes.append(dimension_numbers_before.index(axis))
+
+  return jnp.transpose(x, axes)
+
+
 def conv_general_dilated(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
@@ -246,11 +260,10 @@ def conv_general_dilated(
   Returns:
     An array containing the result with the same dtype as 'lhs' and 'rhs'.
   """
-  _validate_inputs(lhs_quantizer, rhs_quantizer, dimension_numbers)
+  # TODO(jihwanlee): Support lax.ConvDimensionNumbers for dimension_numbers.
+  assert not isinstance(dimension_numbers, lax.ConvDimensionNumbers)
 
-  # TODO(b/230034254): Remove the assertion below once the bug is resolved.
-  assert dimension_numbers == ('NHWC', 'HWIO', 'NHWC'), (
-      "dimension_numbers must be ('NHWC', 'HWIO', 'NHWC').")
+  _validate_inputs(lhs_quantizer, rhs_quantizer, dimension_numbers)
 
   lhs = lhs_quantizer._to_quant(lhs, train)
   rhs = rhs_quantizer._to_quant(rhs, train)
@@ -270,4 +283,17 @@ def conv_general_dilated(
   lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
   rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
 
-  return conv * (lhs_inv_scale * rhs_inv_scale)
+  # Transpose both lhs_inv_scale and rhs_inv_scale such that they have `NHWC`
+  # and `HWIO` shapes, respectively, which allows them to be broadcastable no
+  # matter how they were shaped originally by `dimension_numbers`.
+  lhs_inv_scale = _transpose_inv_scale(lhs_inv_scale, dimension_numbers[0],
+                                       'NHWC')
+  rhs_inv_scale = _transpose_inv_scale(rhs_inv_scale, dimension_numbers[1],
+                                       'HWIO')
+  assert len(lhs_inv_scale.shape) == len(rhs_inv_scale.shape)
+
+  inv_scale = lhs_inv_scale * rhs_inv_scale
+  # Reverse the shape of inv_scale back to one specified by out_spec in
+  # `dimension_numbers`
+  inv_scale = _transpose_inv_scale(inv_scale, 'NHWC', dimension_numbers[2])
+  return conv * inv_scale
