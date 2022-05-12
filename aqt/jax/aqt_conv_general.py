@@ -19,7 +19,6 @@ from typing import Optional, Sequence, Tuple, Union
 
 from aqt.jax import aqt_tensor
 from aqt.jax import aqt_utils
-from aqt.tensorflow import aqt_common
 from aqt.tensorflow import aqt_config
 import jax
 from jax import lax
@@ -188,15 +187,22 @@ def _validate_inputs(
                                  'filter_quantizer.config.tensor_configs',
                                  filter_quantizer.config.tensor_configs)
 
-  if not isinstance(dimension_numbers, lax.ConvDimensionNumbers):
-    aqt_common.validate_conv_contraction(input_quantizer.config.stats_config,
-                                         'input_quantizer.config.stats_config',
-                                         dimension_numbers[0])
+  input_spec, filter_spec, _ = dimension_numbers  # pytype: disable=attribute-error
+  _, *input_contracted_dims = input_spec
+  _, *filter_contracted_dims = filter_spec
 
-    aqt_common.validate_conv_contraction(filter_quantizer.config.stats_config,
-                                         'filter_quantizer.config.stats_config',
-                                         dimension_numbers[1],
-                                         'I')
+  for axis in input_contracted_dims:
+    if axis not in input_quantizer.config.stats_config.share_stats_axes:
+      raise aqt_config.ConfigError(
+          f'expected contraction axis ({axis}) to be in '
+          f'input_quantizer.config.stats_config.share_stats_axes={input_quantizer.config.stats_config.share_stats_axes}'
+      )
+  for axis in filter_contracted_dims:
+    if axis not in filter_quantizer.config.stats_config.share_stats_axes:
+      raise aqt_config.ConfigError(
+          f'expected contraction axis ({axis}) to be in '
+          f'filter_quantizer.config.stats_config.share_stats_axes={filter_quantizer.config.stats_config.share_stats_axes}'
+      )
 
 
 def _transpose_inv_scale(x, dimension_numbers_before, dimension_numbers_after):
@@ -206,9 +212,9 @@ def _transpose_inv_scale(x, dimension_numbers_before, dimension_numbers_after):
       f'be equal to len(dimension_numbers_after) ({len(dimension_numbers_after)})'
   )
 
-  axes = []
-  for axis in dimension_numbers_after:
-    axes.append(dimension_numbers_before.index(axis))
+  axes = [0] * len(dimension_numbers_before)
+  for i, axis in enumerate(dimension_numbers_after):
+    axes[axis] = dimension_numbers_before[i]
 
   return jnp.transpose(x, axes)
 
@@ -222,8 +228,7 @@ def conv_general_dilated(
     padding: Union[str, Sequence[Tuple[int, int]]],
     lhs_dilation: Optional[Sequence[int]] = None,
     rhs_dilation: Optional[Sequence[int]] = None,
-    dimension_numbers: lax.ConvGeneralDilatedDimensionNumbers = ('NHWC', 'HWIO',
-                                                                 'NHWC'),
+    dimension_numbers: Optional[lax.ConvGeneralDilatedDimensionNumbers] = None,
     feature_group_count: int = 1,
     batch_group_count: int = 1,
     train: bool = True) -> jnp.ndarray:
@@ -260,8 +265,13 @@ def conv_general_dilated(
   Returns:
     An array containing the result with the same dtype as 'lhs' and 'rhs'.
   """
-  # TODO(jihwanlee): Support lax.ConvDimensionNumbers for dimension_numbers.
-  assert not isinstance(dimension_numbers, lax.ConvDimensionNumbers)
+  # TODO(jihwanlee): Support quantization for non-2D convolution.
+  if len(lhs.shape) != 4:
+    raise NotImplementedError('Currently, aqt_conv_general_dilated supports ',
+                              'only 2-D convolution.')
+
+  dimension_numbers = lax.conv_dimension_numbers(lhs.shape, rhs.shape,
+                                                 dimension_numbers)
 
   _validate_inputs(lhs_quantizer, rhs_quantizer, dimension_numbers)
 
@@ -286,14 +296,19 @@ def conv_general_dilated(
   # Transpose both lhs_inv_scale and rhs_inv_scale such that they have `NHWC`
   # and `HWIO` shapes, respectively, which allows them to be broadcastable no
   # matter how they were shaped originally by `dimension_numbers`.
+  dim_numbers = {
+      'NHWC': (0, 3, 1, 2),
+      'HWIO': (3, 2, 0, 1),
+  }
   lhs_inv_scale = _transpose_inv_scale(lhs_inv_scale, dimension_numbers[0],
-                                       'NHWC')
+                                       dim_numbers['NHWC'])
   rhs_inv_scale = _transpose_inv_scale(rhs_inv_scale, dimension_numbers[1],
-                                       'HWIO')
+                                       dim_numbers['HWIO'])
   assert len(lhs_inv_scale.shape) == len(rhs_inv_scale.shape)
 
   inv_scale = lhs_inv_scale * rhs_inv_scale
   # Reverse the shape of inv_scale back to one specified by out_spec in
   # `dimension_numbers`
-  inv_scale = _transpose_inv_scale(inv_scale, 'NHWC', dimension_numbers[2])
+  inv_scale = _transpose_inv_scale(inv_scale, dim_numbers['NHWC'],
+                                   dimension_numbers[2])
   return conv * inv_scale

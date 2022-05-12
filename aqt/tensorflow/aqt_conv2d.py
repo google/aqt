@@ -28,7 +28,6 @@ Further, note that we do not allow different weighting for kernel parameters,
 unlike the general :py:func:`aqt_ops.matmul`.
 """
 
-from aqt.tensorflow import aqt_common
 from aqt.tensorflow import aqt_config
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
@@ -63,6 +62,43 @@ def _assert_dilation_argument(lhs_quantizer, rhs_quantizer, dilations):
   return assert_op
 
 
+def _validate_contraction(
+    config: aqt_config.StatsConfig,  # Prevent python auto-formatting.
+    config_path: str,
+    data_format: str) -> None:
+  """Validates that conv2d contraction axes have shared stats.
+
+  The convolution operation can be viewed as a higher-order tensor contraction
+  along the height, width, and input channel axes for its input and filter.
+  When quantizing the convolution, we thus have to keep the same multiplicative
+  scale during calibration along these axes. Otherwise, we'd be changing the
+  implicit inner product the operation computes in a manner besides
+  quantization.
+
+  Args:
+    config: The configuration for recording conv2d argument statistics.
+    config_path: A string for clearer error messages, to refer to the config.
+    data_format: the format of the tensor, with H denoting height, W width, and
+      C input channels.
+
+  Raises:
+    aqt_config.ConfigError: `config.share_stats_axes` does not include any
+      of the contraction axes.
+  """
+
+  stats_axes = config.share_stats_axes
+
+  axis_names = ['height', 'width', 'channel']
+  dims = ['H', 'W', 'C']
+
+  for axis_name, dim in zip(axis_names, dims):
+    axis = data_format.index(dim)
+    if axis not in stats_axes:
+      raise aqt_config.ConfigError(
+          f'expected {axis_name} contraction axis ({axis}) to be in '
+          f'{config_path}.share_stats_axes={stats_axes}')
+
+
 def _validate_inputs(
     input_quantizer: aqt_tensor.TensorQuantizer,  #
     filter_quantizer: aqt_tensor.TensorQuantizer,
@@ -86,16 +122,14 @@ def _validate_inputs(
                                  'filter_quantizer.config.tensor_configs',
                                  filter_quantizer.config.tensor_configs)
 
-  aqt_common.validate_conv_contraction(input_quantizer.config.stats_config,
-                                       'input_quantizer.config.stats_config',
-                                       data_format)
+  _validate_contraction(input_quantizer.config.stats_config,
+                        'input_quantizer.config.stats_config', data_format)
 
   # Filters are always assumed to be in HWCO format, where
   # H - height, W - width, O - output channels, C - input channels.
   # Note input is NHWC or NCHW where N - batch size.
-  aqt_common.validate_conv_contraction(filter_quantizer.config.stats_config,
-                                       'filter_quantizer.config.stats_config',
-                                       'HWCO')
+  _validate_contraction(filter_quantizer.config.stats_config,
+                        'filter_quantizer.config.stats_config', 'HWCO')
 
 
 def conv2d(

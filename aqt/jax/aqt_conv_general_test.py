@@ -19,6 +19,7 @@ from typing import Iterable
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax import aqt_conv_general
 from aqt.jax import aqt_ops
 from aqt.jax import aqt_tensor
 from aqt.tensorflow import aqt_config
@@ -227,22 +228,11 @@ class ConvGeneralTest(aqt_conv_test_base.ConvTest):
   @parameterized.parameters(generate_nondefault_conv_args())
   def test_nondefault_conv_args(self, dimension_numbers, window_strides,
                                 padding):
-    def transpose(x, dimension_numbers_before, dimension_numbers_after):
-      axes = []
-      for axis in dimension_numbers_after:
-        axes.append(dimension_numbers_before.index(axis))
-      return jnp.transpose(x, axes)
-
-    def get_share_stats_axes(dimension_numbers, is_lhs):
+    def get_share_stats_axes(dimension_numbers):
       # Based on the dimension number of string format, create share_stats_axes
-      # which should be provided to stats config. Note that "N" and "O" are
-      # non-contracting dimensions for LHS and RHS, respectively.
-      share_stats_axes = []
-      non_contracting_dim = "N" if is_lhs else "O"
-      for i, dim in enumerate(dimension_numbers):
-        if dim != non_contracting_dim:
-          share_stats_axes.append(i)
-      return share_stats_axes
+      # which should be provided to stats config. Note that the first dimension
+      # is always non-contracting one: "N" for LHS and "O" for RHS.
+      return sorted(dimension_numbers[1:])
 
     # Create an input tensor of the shape (2, 3, 3, 1) and a filter tensor of
     # the shape (2, 2, 1, 2) with ("NHWC", "HWIO, "NHWC") dimension number.
@@ -264,13 +254,21 @@ class ConvGeneralTest(aqt_conv_test_base.ConvTest):
     filter_config = aqt_conv_test_base.schedule_config(
         "filter", const_coeff=0, bits=2, max_dev_coeff=1)
 
+    dimension_numbers = lax.conv_dimension_numbers(x.shape, w.shape,
+                                                   dimension_numbers)
     # Transpose the input and filter according to given dimension numbers.
-    x = transpose(x, "NHWC", dimension_numbers[0])
-    w = transpose(w, "HWIO", dimension_numbers[1])
+    dim_numbers = {
+        "NHWC": (0, 3, 1, 2),
+        "HWIO": (3, 2, 0, 1),
+    }
+    x = aqt_conv_general._transpose_inv_scale(x, dim_numbers["NHWC"],
+                                              dimension_numbers[0])
+    w = aqt_conv_general._transpose_inv_scale(w, dim_numbers["HWIO"],
+                                              dimension_numbers[1])
     input_config.stats_config.share_stats_axes = get_share_stats_axes(
-        dimension_numbers[0], True)
+        dimension_numbers[0])
     filter_config.stats_config.share_stats_axes = get_share_stats_axes(
-        dimension_numbers[1], False)
+        dimension_numbers[1])
 
     kwargs = dict(
         window_strides=window_strides,
@@ -288,18 +286,21 @@ class ConvGeneralTest(aqt_conv_test_base.ConvTest):
     w1 = jnp.array([[1, 0], [0, 0]], dtype=jnp.float32)
     w = jnp.stack([w0, w1])[:, :, jnp.newaxis, :]
 
-    x = transpose(x, "NHWC", dimension_numbers[0])
-    w = transpose(w, "HWIO", dimension_numbers[1])
+    x = aqt_conv_general._transpose_inv_scale(x, dim_numbers["NHWC"],
+                                              dimension_numbers[0])
+    w = aqt_conv_general._transpose_inv_scale(w, dim_numbers["HWIO"],
+                                              dimension_numbers[1])
 
     expected = self.conv_op_unquantized(x, w, **kwargs)
 
     batch_inv_scale = jnp.array([2, 0.5])[:, jnp.newaxis, jnp.newaxis,
                                           jnp.newaxis]
-    batch_inv_scale = transpose(batch_inv_scale, "NHWC", dimension_numbers[2])
+    batch_inv_scale = aqt_conv_general._transpose_inv_scale(
+        batch_inv_scale, dim_numbers["NHWC"], dimension_numbers[2])
     feature_inv_scale = jnp.array([10, 5])[jnp.newaxis, jnp.newaxis,
                                            jnp.newaxis, :]
-    feature_inv_scale = transpose(feature_inv_scale, "NHWC",
-                                  dimension_numbers[2])
+    feature_inv_scale = aqt_conv_general._transpose_inv_scale(
+        feature_inv_scale, dim_numbers["NHWC"], dimension_numbers[2])
     expected *= (batch_inv_scale * feature_inv_scale)
 
     self.assertAllEqual(actual, expected)
