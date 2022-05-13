@@ -401,3 +401,16 @@ class AqtScheduleConfig(_BaseConfig):
     # reindexed value for the new self.tensor_configs.
     self.inference_config_index = inference_config_index
 
+
+@dataclasses.dataclass
+class AqtMatmulConfig(_BaseConfig):
+  """Quantization config for a matmul.
+
+  Attributes:
+    lhs: quantization schedule for left-hand side argument
+    rhs: quantization schedule for right-hand side argument
+  """
+  lhs: AqtScheduleConfig
+  rhs: AqtScheduleConfig
+
+
