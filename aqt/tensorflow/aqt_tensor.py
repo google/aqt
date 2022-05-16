@@ -22,8 +22,8 @@ quantization.
 
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
-from aqt.tensorflow import aqt_common
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_common
+from aqt.common import aqt_config
 import tensorflow.compat.v1 as tf
 import tensorflow.compat.v1.tpu as tpu_ops
 

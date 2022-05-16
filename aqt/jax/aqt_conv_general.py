@@ -17,9 +17,9 @@
 import functools
 from typing import Optional, Sequence, Tuple, Union
 
+from aqt.common import aqt_config
 from aqt.jax import aqt_tensor
 from aqt.jax import aqt_utils
-from aqt.tensorflow import aqt_config
 import jax
 from jax import lax
 import jax.numpy as jnp

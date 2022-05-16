@@ -16,8 +16,8 @@
 
 from absl.testing import absltest
 from aqt.jax import aqt_tensor
-from aqt.tensorflow import aqt_stats_test_base
-from aqt.tensorflow import aqt_tensor_test_base
+from aqt.test import aqt_stats_test_base
+from aqt.test import aqt_tensor_test_base
 import jax
 import jax.numpy as jnp
 import numpy as np

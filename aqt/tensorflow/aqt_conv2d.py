@@ -28,7 +28,7 @@ Further, note that we do not allow different weighting for kernel parameters,
 unlike the general :py:func:`aqt_ops.matmul`.
 """
 
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 

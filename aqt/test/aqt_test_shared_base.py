@@ -18,8 +18,8 @@ import copy
 from typing import List, Tuple, Union
 
 from absl import flags
-from aqt.tensorflow import aqt_common
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_common
+from aqt.common import aqt_config
 import numpy as np
 
 flags.DEFINE_bool("use_tpu", False, "Set it to enable TPU-only tests.")

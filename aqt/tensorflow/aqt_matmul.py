@@ -24,7 +24,7 @@ For details on quantized operations and common configuration arguments, see
 
 from typing import Callable
 
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 

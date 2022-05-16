@@ -17,10 +17,10 @@
 from typing import Set
 
 from absl.testing import absltest
-from aqt.tensorflow import aqt_config
-from aqt.tensorflow import aqt_stats_test_base
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_tensor
-from aqt.tensorflow import aqt_tensor_test_base
+from aqt.test import aqt_stats_test_base
+from aqt.test import aqt_tensor_test_base
 import numpy as np
 import tensorflow.compat.v1 as tf
 

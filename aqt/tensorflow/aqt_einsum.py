@@ -37,7 +37,7 @@ label are contracting.
 import string
 from typing import Tuple
 
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 

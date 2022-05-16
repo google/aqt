@@ -18,10 +18,10 @@ from typing import Any, Dict, Iterable, Sequence
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.common import aqt_config
 from aqt.jax import aqt_ops
 from aqt.jax import aqt_tensor
-from aqt.tensorflow import aqt_config
-from aqt.tensorflow import aqt_test_shared_base
+from aqt.test import aqt_test_shared_base
 from flax import linen as nn
 import jax
 from jax import lax

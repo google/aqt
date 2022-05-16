@@ -19,11 +19,11 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_matmul
 from aqt.tensorflow import aqt_ops
 from aqt.tensorflow import aqt_tensor
-from aqt.tensorflow import aqt_test_shared_base
+from aqt.test import aqt_test_shared_base
 import numpy as np
 import tensorflow.compat.v1 as tf
 

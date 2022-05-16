@@ -29,7 +29,7 @@ from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
 
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_ops
 from aqt.tensorflow import aqt_tensor
 import numpy as np

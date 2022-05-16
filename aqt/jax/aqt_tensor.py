@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Tuple
 
+from aqt.common import aqt_common
+from aqt.common import aqt_config
 from aqt.jax_legacy.jax.flax import struct as flax_struct
-from aqt.tensorflow import aqt_common
-from aqt.tensorflow import aqt_config
 from flax import linen as nn
 import jax
 import jax.numpy as jnp

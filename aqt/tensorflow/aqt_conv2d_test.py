@@ -15,9 +15,9 @@
 """Tests for conv2d."""
 
 from absl.testing import absltest
-from aqt.tensorflow import aqt_conv_test_base
 from aqt.tensorflow import aqt_ops
 from aqt.tensorflow import aqt_tensor
+from aqt.test import aqt_conv_test_base
 import tensorflow.compat.v1 as tf
 
 

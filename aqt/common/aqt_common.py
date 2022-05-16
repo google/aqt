@@ -16,7 +16,7 @@
 
 from typing import Optional, Sequence
 
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_config
 
 
 def check_shapes_conformal(actual: Sequence[Optional[int]],

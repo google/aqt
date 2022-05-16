@@ -14,8 +14,8 @@
 
 """Common utilities for Jax AQTp."""
 
+from aqt.common import aqt_config
 from aqt.jax import aqt_tensor
-from aqt.tensorflow import aqt_config
 import jax.numpy as jnp
 
 # pylint: disable=protected-access

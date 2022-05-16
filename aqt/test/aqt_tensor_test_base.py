@@ -19,8 +19,8 @@ import itertools
 
 from absl import logging
 from absl.testing import parameterized
-from aqt.tensorflow import aqt_common
-from aqt.tensorflow import aqt_config
+from aqt.common import aqt_common
+from aqt.common import aqt_config
 import numpy as np
 import tensorflow.compat.v1 as tf
 
