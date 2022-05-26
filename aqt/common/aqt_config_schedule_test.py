@@ -37,7 +37,8 @@ import tensorflow.compat.v1 as tf
 
 
 def make_config_schedule_cases():
-
+  # TODO(vladf): migrate this test to the class-based api once
+  # conv2d and einsum have a class-based op version.
   matmul = {
       "lhs_share_stats": [0, 1],
       "rhs_share_stats": [0, 1],

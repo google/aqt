@@ -21,7 +21,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.common import aqt_config
 from aqt.tensorflow import aqt_matmul
-from aqt.tensorflow import aqt_ops
 from aqt.tensorflow import aqt_tensor
 from aqt.test import aqt_test_shared_base
 import numpy as np
@@ -80,12 +79,19 @@ def config_from_schedule(schedule):
   return aqt_config.AqtScheduleConfig(test_stats_config(), tensor_configs)
 
 
-def update_event_count(quantizer, event_count: int):
+def update_event_count(matmul, event_count_int: int):
   """Update the quantizer's event count without changing stats."""
-  sample = tf.zeros(quantizer.data_shape)
-  weights = tf.zeros([1] * len(quantizer.data_shape))
-  event_count = tf.constant(event_count, tf.int64)
-  quantizer.update(sample, weights, event_count).run()
+  for quantizer in [matmul.lhs_quantizer, matmul.rhs_quantizer]:
+    sample = tf.zeros(quantizer.data_shape)
+    weights = tf.zeros([1] * len(quantizer.data_shape))
+    event_count = tf.constant(event_count_int, tf.int64)
+    quantizer.update(sample, weights, event_count).run()
+
+
+def matmul_config(matmul):
+  """Creates an AqtMatmulConfig corresponding to a Matmul."""
+  return aqt_config.AqtMatmulConfig(matmul.lhs_quantizer.config,
+                                    matmul.rhs_quantizer.config)
 
 
 class IntNarrowedMatMulTest(tf.test.TestCase, parameterized.TestCase):
@@ -148,12 +154,10 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
     lhs = tf.constant(lhs, tf.float32)
     rhs = tf.constant(rhs, tf.float32)
 
-    lhs_quantizer = aqt_tensor.TensorQuantizer(
-        lhs.shape, lhs_config, name="lhs")
-    rhs_quantizer = aqt_tensor.TensorQuantizer(
-        rhs.shape, rhs_config, name="rhs")
+    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config)
+    mm = aqt_matmul.Matmul(config, lhs.shape, rhs.shape)
 
-    return lhs_quantizer, lhs, rhs_quantizer, rhs
+    return mm, lhs, rhs
 
   # No quantization and float config give aqt_matmul = tf.matmul
   def test_matmul_none(self):
@@ -166,19 +170,18 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
                                                 [float_config_tc])
 
     lhs = np.random.uniform(-1.0, 1.0, size=(2, 3)).astype(np.float32)
-    lhs_tq = aqt_tensor.TensorQuantizer(lhs.shape, no_quant_config, name="lhs")
-    lhs_float_tq = aqt_tensor.TensorQuantizer(
-        lhs.shape, float_config, name="lhs_float")
     lhs = tf.constant(lhs)
 
     rhs = np.random.uniform(-1.0, 1.0, size=(3, 4)).astype(np.float32)
-    rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, no_quant_config, name="rhs")
-    rhs_float_tq = aqt_tensor.TensorQuantizer(
-        rhs.shape, float_config, name="rhs_float")
     rhs = tf.constant(rhs)
 
-    no_quant_ret = aqt_ops.aqt_matmul(lhs_tq, lhs, rhs_tq, rhs)
-    float_config_ret = aqt_ops.aqt_matmul(lhs_float_tq, lhs, rhs_float_tq, rhs)
+    config = aqt_config.AqtMatmulConfig(no_quant_config, no_quant_config)
+    mm_no_quant = aqt_matmul.Matmul(config, lhs.shape, rhs.shape, "no_quant")
+    config = aqt_config.AqtMatmulConfig(float_config, float_config)
+    mm_float = aqt_matmul.Matmul(config, lhs.shape, rhs.shape, "float")
+
+    no_quant_ret = mm_no_quant.apply(lhs, rhs)
+    float_config_ret = mm_float.apply(lhs, rhs)
     expected_ret = tf.matmul(lhs, rhs)
 
     with self.cached_session():
@@ -222,21 +225,22 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
             ],
             dtype=np.float32))
 
-    return lhs_config, lhs, qlhs, rhs_config, rhs, qrhs
+    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config)
+
+    return config, lhs, qlhs, rhs, qrhs
 
   def test_basic_matmul(self):
-    lhs_config, lhs, qlhs, rhs_config, rhs, qrhs = self.basic_quant_example()
+    config, lhs, qlhs, rhs, qrhs = self.basic_quant_example()
 
-    lhs_tq = aqt_tensor.TensorQuantizer(lhs.shape, lhs_config, name="lhs")
-    rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, rhs_config, name="rhs")
+    mm = aqt_matmul.Matmul(config, lhs.shape, rhs.shape)
 
     event_count = tf.constant(0, tf.int64)
     updates = [
-        lhs_tq.update(lhs, None, event_count),
-        rhs_tq.update(rhs, None, event_count)
+        mm.update_lhs(lhs, None, event_count),
+        mm.update_rhs(rhs, None, event_count)
     ]
     with tf.control_dependencies(updates):
-      actual = aqt_ops.aqt_matmul(lhs_tq, lhs, rhs_tq, rhs)
+      actual = mm.apply(lhs, rhs)
     expected = tf.matmul(qlhs, qrhs)
 
     with self.cached_session() as sess, sess.as_default():
@@ -245,23 +249,22 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
 
   @parameterized.parameters([dict(lhs_float=True), dict(lhs_float=False)])
   def test_float_config_basic_matmul(self, lhs_float):
-    lhs_config, lhs, qlhs, rhs_config, rhs, qrhs = self.basic_quant_example()
+    config, lhs, qlhs, rhs, qrhs = self.basic_quant_example()
 
     if lhs_float:
-      lhs_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
+      config.lhs.tensor_configs[0].quant_config = aqt_config.FloatConfig()
     else:
-      rhs_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
+      config.rhs.tensor_configs[0].quant_config = aqt_config.FloatConfig()
 
-    lhs_tq = aqt_tensor.TensorQuantizer(lhs.shape, lhs_config, name="lhs")
-    rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, rhs_config, name="rhs")
+    mm = aqt_matmul.Matmul(config, lhs.shape, rhs.shape)
 
     event_count = tf.constant(0, tf.int64)
     updates = [
-        lhs_tq.update(lhs, None, event_count),
-        rhs_tq.update(rhs, None, event_count)
+        mm.update_lhs(lhs, None, event_count),
+        mm.update_rhs(rhs, None, event_count)
     ]
     with tf.control_dependencies(updates):
-      actual = aqt_ops.aqt_matmul(lhs_tq, lhs, rhs_tq, rhs)
+      actual = mm.apply(lhs, rhs)
 
     if lhs_float:
       qlhs = lhs  # lhs is not quantized
@@ -273,39 +276,39 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
       tf.global_variables_initializer().run()
       self.assertAllEqual(expected, actual)
 
-  def with_config(self, quantizer, config):
-    """Returns new quantizer with the new config but otherwise the same."""
+  def with_config(self, mm, config):
+    """Returns new Matmul with the new config but otherwise the same."""
     with tf.variable_scope(None, default_name="uniqued"):
-      return aqt_tensor.TensorQuantizer(quantizer.data_shape, config)
+      return aqt_matmul.Matmul(config, mm.lhs_quantizer.data_shape,
+                               mm.rhs_quantizer.data_shape, mm.name,
+                               mm.lhs_name, mm.rhs_name)
 
   def test_validates_contraction(self):
-    lhs_quantizer, lhs, rhs_quantizer, rhs = self.exact_int8_matmul_example()
+    mm, _, _ = self.exact_int8_matmul_example()
 
-    config = copy.deepcopy(rhs_quantizer.config)
-    config.stats_config.share_stats_axes = [1]
-    bad_rhs_quantizer = self.with_config(rhs_quantizer, config)
+    config = copy.deepcopy(matmul_config(mm))
+    config.rhs.stats_config.share_stats_axes = [1]
     with self.assertRaisesRegex(aqt_config.ConfigError,
                                 "expected rhs matmul contraction axis"):
-      aqt_ops.aqt_matmul(lhs_quantizer, lhs, bad_rhs_quantizer, rhs)
+      self.with_config(mm, config)
 
-    config = copy.deepcopy(lhs_quantizer.config)
-    config.stats_config.share_stats_axes = [0]
-    bad_lhs_quantizer = self.with_config(rhs_quantizer, config)
+    config = copy.deepcopy(matmul_config(mm))
+    config.lhs.stats_config.share_stats_axes = [0]
     with self.assertRaisesRegex(aqt_config.ConfigError,
                                 "expected lhs matmul contraction axis"):
-      aqt_ops.aqt_matmul(bad_lhs_quantizer, lhs, rhs_quantizer, rhs)
+      self.with_config(mm, config)
 
   def test_validates_rank2(self):
-    lhs_quantizer, lhs, rhs_quantizer, rhs = self.exact_int8_matmul_example()
+    mm, lhs, rhs = self.exact_int8_matmul_example()
 
-    rhs_quantizer.data_shape.append(1)
+    mm.rhs_quantizer.data_shape.append(1)
     with self.assertRaisesRegex(aqt_config.ConfigError, "rhs data shape"):
-      aqt_ops.aqt_matmul(lhs_quantizer, lhs, rhs_quantizer, rhs)
-    rhs_quantizer.data_shape = rhs_quantizer.data_shape[:-1]
+      mm.apply(lhs, rhs)
+    mm.rhs_quantizer.data_shape = mm.rhs_quantizer.data_shape[:-1]
 
-    lhs_quantizer.data_shape += (1,)
+    mm.lhs_quantizer.data_shape += (1,)
     with self.assertRaisesRegex(aqt_config.ConfigError, "lhs data shape"):
-      aqt_ops.aqt_matmul(lhs_quantizer, lhs, lhs_quantizer, lhs)
+      mm.apply(lhs, rhs)
 
   @parameterized.named_parameters(
       aqt_test_shared_base.generate_unaligned_schedule_intervals())
@@ -315,27 +318,21 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
     rhs_intervals = [(start, stop, bits) for start, stop in rhs_intervals]
     lhs_config = config_from_schedule(lhs_intervals)
     rhs_config = config_from_schedule(rhs_intervals)
+    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config)
 
-    lhs = rhs = np.ones((1, 1)).astype(np.float32)
-    lhs_quantizer = aqt_tensor.TensorQuantizer(
-        lhs.shape, lhs_config, name="lhs")
-    rhs_quantizer = aqt_tensor.TensorQuantizer(
-        rhs.shape, rhs_config, name="rhs")
     with self.assertRaisesRegex(aqt_config.ConfigError,
                                 "intervals do not match|config len"):
-      lhs = tf.constant(lhs)
-      rhs = tf.constant(rhs)
-      aqt_ops.aqt_matmul(lhs_quantizer, lhs, rhs_quantizer, rhs)
+      aqt_matmul.Matmul(config, (1, 1), (1, 1))
 
   def test_vars_dont_kill_grads(self):
-    lhs_q_novar, lhs, rhs_q_novar, rhs = self.exact_int8_matmul_example()
+    mm, lhs, rhs = self.exact_int8_matmul_example()
 
-    unsaved_matmul = aqt_ops.aqt_matmul(lhs_q_novar, lhs, rhs_q_novar, rhs)
+    unsaved_matmul = mm.apply(lhs, rhs)
 
     with tf.variable_scope("with_var"):
-      lhs_q, _, rhs_q, _ = self.exact_int8_matmul_example(True, True)
+      mm_q, _, _ = self.exact_int8_matmul_example(True, True)
 
-    saved_matmul = aqt_ops.aqt_matmul(lhs_q, lhs, rhs_q, rhs)
+    saved_matmul = mm_q.apply(lhs, rhs)
 
     saved_grads = tf.gradients([saved_matmul], [lhs, rhs])
     unsaved_grads = tf.gradients([unsaved_matmul], [lhs, rhs])
@@ -343,8 +340,8 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
     with self.cached_session():
       tf.global_variables_initializer().run()
 
-      for q in [lhs_q_novar, lhs_q, rhs_q_novar, rhs_q]:
-        update_event_count(q, 0)
+      for matmul in [mm, mm_q]:
+        update_event_count(matmul, 0)
 
       zipped_grads = zip(saved_grads, unsaved_grads)
       for actual_grad, expected_grad in zipped_grads:
@@ -359,71 +356,94 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
   ])
   def test_vars_over_inputs_at_inference(self, lhs_use_quantized_variable):
     rhs_use_quantized_variable = not lhs_use_quantized_variable
-    lhs_quantizer, tf_lhs, rhs_quantizer, tf_rhs = self.exact_int8_matmul_example(
+    mm, tf_lhs, tf_rhs = self.exact_int8_matmul_example(
         lhs_use_quantized_variable, rhs_use_quantized_variable)
     with tf.variable_scope("no_quantize"):
-      lhs_quantizer_train, _, rhs_quantizer_train, _ = self.exact_int8_matmul_example(
+      mm_train, _, _ = self.exact_int8_matmul_example(
           lhs_use_quantized_variable=False, rhs_use_quantized_variable=False)
-
-    mm = aqt_ops.aqt_matmul(lhs_quantizer, tf_lhs, rhs_quantizer, tf_rhs,
-                            train=False)
 
     with self.cached_session():
       tf.global_variables_initializer().run()
-      update_event_count(lhs_quantizer, 0)
-      update_event_count(rhs_quantizer, 0)
-      actual = mm.eval()
+      update_event_count(mm, 0)
+      actual = mm.apply(tf_lhs, tf_rhs, train=False).eval()
       expected = np.zeros_like(actual)
       # Rely on zero initialization for variables as opposed to non-zero inputs.
       self.assertAllEqual(actual, expected)
 
       # But if train then use input instead.
-      actual = aqt_ops.aqt_matmul(lhs_quantizer, tf_lhs, rhs_quantizer, tf_rhs,
-                                  train=True)
-      update_event_count(lhs_quantizer_train, 0)
-      update_event_count(rhs_quantizer_train, 0)
-      expected = aqt_ops.aqt_matmul(lhs_quantizer_train, tf_lhs,
-                                    rhs_quantizer_train, tf_rhs)
+      actual = mm.apply(tf_lhs, tf_rhs, train=True).eval()
+
+      update_event_count(mm_train, 0)
+      expected = mm_train.apply(tf_lhs, tf_rhs)
       self.assertAllEqual(actual, expected)
 
   def test_float_config_not_save_quantized_var(self):
-    lhs_quantizer, lhs, rhs_quantizer, rhs = self.exact_int8_matmul_example(
+    mm, lhs, rhs = self.exact_int8_matmul_example(
         lhs_use_quantized_variable=True, rhs_use_quantized_variable=True)
 
     fc = aqt_config.FloatConfig()
-    lhs_quantizer.config.tensor_configs[0].quant_config = fc
+    mm.lhs_quantizer.config.tensor_configs[0].quant_config = fc
 
     with self.cached_session():
       tf.global_variables_initializer().run()
       event_count = tf.constant(0, tf.int64)
-      lhs_quantizer.update(lhs, None, event_count).run()
-      rhs_quantizer.update(rhs, None, event_count).run()
+      mm.update_lhs(lhs, None, event_count).run()
+      mm.update_rhs(rhs, None, event_count).run()
 
-      actual = aqt_ops.aqt_matmul(
-          lhs_quantizer, lhs, rhs_quantizer, rhs, train=False)
+      actual = mm.apply(lhs, rhs, train=False)
       expected = tf.zeros_like(actual)
-      # Althoguh lhs config sets use_quantized_variable to True, lhs has
+      # Although lhs config sets use_quantized_variable to True, lhs has
       # a float config, and thus it uses zero-initialized quantized var.
       self.assertAllEqual(actual, expected)
 
   def test_exact_grads(self):
-    lhs_quantizer, lhs, rhs_quantizer, rhs = self.exact_int8_matmul_example()
+    mm, lhs, rhs = self.exact_int8_matmul_example()
 
-    aqt_mm = aqt_ops.aqt_matmul(lhs_quantizer, lhs, rhs_quantizer, rhs)
+    aqt_mm = mm.apply(lhs, rhs)
     aqt_mm_grads = tf.gradients([tf.reduce_sum(aqt_mm**2)], [lhs, rhs])
 
-    mm = tf.matmul(lhs, rhs)
-    mm_grads = tf.gradients([tf.reduce_sum(mm**2)], [lhs, rhs])
+    mm_exact = tf.matmul(lhs, rhs)
+    mm_grads = tf.gradients([tf.reduce_sum(mm_exact**2)], [lhs, rhs])
 
     with self.cached_session():
       tf.global_variables_initializer().run()
-      update_event_count(lhs_quantizer, 0)
-      update_event_count(rhs_quantizer, 0)
+      update_event_count(mm, 0)
 
       for aqt_grad, tf_grad in zip(aqt_mm_grads, mm_grads):
         actual = aqt_grad.eval()
         expected = tf_grad.eval()
 
+        self.assertAllEqual(actual, expected)
+
+  def test_diagnostics(self):
+    mm, lhs, rhs = self.exact_int8_matmul_example()
+
+    with self.cached_session():
+      tf.global_variables_initializer().run()
+      update_event_count(mm, 0)
+
+      d = mm.diagnostics(lhs, rhs)
+      quantizers = {"lhs": mm.lhs_quantizer, "rhs": mm.rhs_quantizer}
+      for qname, quantizer in quantizers.items():
+
+        for name, expected in quantizer.calibration_variables().items():
+          actual = d[f"aqt/{qname}/{name}"]
+          self.assertAllEqual(actual, expected)
+
+        actual = d[f"aqt/{qname}/clipped_proportion"]
+        expected = 0.0
+        self.assertAllEqual(actual, expected)
+
+        actual = d[f"aqt/{qname}/clip"]
+        expected = quantizer.clip_range()
+        self.assertAllEqual(actual, expected)
+
+      out_of_range_lhs, out_of_range_rhs = (
+          tf.ones_like(x) * 512.0 for x in (lhs, rhs))
+      d = mm.diagnostics(out_of_range_lhs, out_of_range_rhs)
+      for arg in ["lhs", "rhs"]:
+        actual = d[f"aqt/{arg}/clipped_proportion"]
+        expected = 1.0
         self.assertAllEqual(actual, expected)
 
 
