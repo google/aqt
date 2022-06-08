@@ -350,7 +350,7 @@ class PokeBNN(nn.Module):
         }
 
       elif name == 'dense':
-        _, xs, ys, (kwargs, hparams) = op
+        _, xs, ys, (kwargs, hparams) = op  # pytype: disable=bad-unpacking
         adders = hparams.weight_prec * hparams.quant_act.prec
         dense_ace += xs[1] * ys[1] * adders
         dense_stats[name] = {
