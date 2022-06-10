@@ -140,7 +140,7 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     quant = self.make_tensor_quantizer(data_shape=x.shape, config=config)
     event_count = np.iinfo(np.int64).min
     with self.assertRaisesRegex(Exception,
-                                "event_count cannot be int64.min"):
+                                "event_count cannot be"):
       self.update_quantizer(quant, x, None, event_count)
 
   def test_single_quant_simple(self):
