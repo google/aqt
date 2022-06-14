@@ -415,6 +415,68 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
 
         self.assertAllEqual(actual, expected)
 
+  def test_grad_linearity(self):
+    """Validates gradients are correct on basic example."""
+    float_config_tc = aqt_config.AqtTensorConfig(
+        freeze_scale_at_begin=True,
+        quant_config=aqt_config.FloatConfig(),
+        calibration_config=calibration_config(1))
+    float_config = aqt_config.AqtScheduleConfig(test_stats_config(),
+                                                [float_config_tc])
+    scale = 10.0
+    int_config = _schedule_config(8, scale, (0, 1))
+
+    lhs_config, rhs_config = int_config, float_config
+    contract_dim = 10
+    lhs_shape = (1, contract_dim)
+    rhs_shape = (contract_dim, 1)
+    target_shape = lhs_shape[:1] + rhs_shape[1:]
+
+    lhs_ph = tf.placeholder(tf.float32, shape=lhs_shape)
+    rhs_ph = tf.placeholder(tf.float32, shape=rhs_shape)
+    target_ph = tf.placeholder(tf.float32, shape=target_shape)
+
+    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config)
+    mm = aqt_matmul.Matmul(config, lhs_shape, rhs_shape)
+
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+
+      event_count = tf.constant(0, tf.int64)
+      updates = [
+          mm.update_lhs(tf.ones(lhs_shape), None, event_count),
+          mm.update_rhs(tf.ones(rhs_shape), None, event_count)
+      ]
+      with tf.control_dependencies(updates):
+        aqt_mm = mm.apply(lhs_ph, rhs_ph)
+
+      aqt_diff = aqt_mm - target_ph
+      aqt_loss = tf.reduce_sum(aqt_diff**2) / 2
+      aqt_mm_grad = tf.gradients([aqt_loss], [rhs_ph])[0]
+
+      rng = np.random.default_rng(1234)
+      for i in range(10):
+        lhs = rng.standard_normal(lhs_shape).astype(np.float32)
+        rhs = rng.standard_normal(rhs_shape).astype(np.float32)
+        target = rng.standard_normal(target_shape).astype(np.float32)
+
+        feed_dict = {lhs_ph: lhs, rhs_ph: rhs, target_ph: target}
+
+        aqtd, aqt_grad = sess.run([aqt_diff, aqt_mm_grad], feed_dict=feed_dict)
+
+        # Notice aqt gradient at position i is quantized(lhs)[i] * aqtd
+        # assuming linearity of gradients.
+        grad_factor = aqtd.ravel()
+        float_grad = lhs.ravel() * grad_factor
+        true_grad = aqt_grad.ravel()
+        diff = np.abs(float_grad - true_grad)
+        bucket_width = scale * 2 / 255
+        for j, err in enumerate(diff):
+          self.assertLessEqual(
+              err,
+              bucket_width * abs(grad_factor),
+              msg=f"trial {i} position {j}")
+
   def test_diagnostics(self):
     mm, lhs, rhs = self.exact_int8_matmul_example()
 

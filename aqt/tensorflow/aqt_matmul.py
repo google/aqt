@@ -287,24 +287,77 @@ def matmul(
   """
   _validate_inputs(lhs_quantizer, rhs_quantizer)
 
-  with tf.name_scope('AqtMatMul'):
-    with tf.name_scope('to_quant'):
-      with tf.name_scope('lhs'):
-        lhs = lhs_quantizer._to_quant(lhs, train)
-      with tf.name_scope('rhs'):
-        rhs = rhs_quantizer._to_quant(rhs, train)
+  def fwd(lhs, rhs):
+    with tf.name_scope('AqtMatMul'):
+      with tf.name_scope('to_quant'):
+        with tf.name_scope('lhs'):
+          lhs = lhs_quantizer._to_quant(lhs, train)
+        with tf.name_scope('rhs'):
+          rhs = rhs_quantizer._to_quant(rhs, train)
 
-    with tf.name_scope('matmul'):
-      mm = _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train)
+      with tf.name_scope('matmul'):
+        mm = _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train)
 
-    with tf.name_scope('from_quant'):
-      with tf.name_scope('lhs'):
-        lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
-      with tf.name_scope('rhs'):
-        rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
+      with tf.name_scope('from_quant'):
+        with tf.name_scope('lhs'):
+          lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
+        with tf.name_scope('rhs'):
+          rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
 
-    with tf.name_scope('inv_scale'):
-      return mm * (lhs_inv_scale * rhs_inv_scale)
+      with tf.name_scope('inv_scale'):
+        # TODO(b/236024344): consider alternative multiply associations here.
+        inv_scale = (lhs_inv_scale * rhs_inv_scale)
+        out = mm * inv_scale
+
+    return out
+
+  @tf.custom_gradient
+  def qmatmul(lhs, rhs):
+
+    out = fwd(lhs, rhs)
+
+    def bwd(grad):
+      # Make sure to build all backprop results after fprop is computed.
+      # Since we rely on variables being updated, this is important for
+      # consistency. For instance, the forward pass might be computed under
+      # a user-added control dependency from Matmul.update_{lhs,rhs}; the
+      # backward pass should also share this dependency transitively.
+      with tf.control_dependencies([out]):
+
+        # Note the differences between autograd and what we
+        # have implemented below:
+        #
+        # (1) We re-quantize lhs, rhs to save memory between
+        #     fprop and bprop, this is manual rematerialization.
+        # (2) Each bprop matmul can avoid a multiplication
+        #     by an scale and inverse scale of an fprop argument
+        #     due to cancellation.
+
+        with tf.name_scope('BwdAqtMatMul'):
+
+          with tf.name_scope('from_quant'):
+            with tf.name_scope('lhs'):
+              lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
+            with tf.name_scope('rhs'):
+              rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
+
+          with tf.name_scope('lhs'):
+            qrhs = rhs_quantizer._to_quant(rhs, train)
+            lhs_bwd = tf.matmul(grad * rhs_inv_scale, tf.transpose(qrhs))
+            lhs_bwd = tf.where_v2(
+                lhs_quantizer._clip_mask(lhs, train), 0.0, lhs_bwd)
+
+          with tf.name_scope('rhs'):
+            qlhs = lhs_quantizer._to_quant(lhs, train)
+            rhs_bwd = tf.matmul(tf.transpose(qlhs), grad * lhs_inv_scale)
+            rhs_bwd = tf.where_v2(
+                rhs_quantizer._clip_mask(rhs, train), 0.0, rhs_bwd)
+
+        return [lhs_bwd, rhs_bwd]
+
+    return out, bwd
+
+  return qmatmul(lhs, rhs)
 
 
 class Matmul:

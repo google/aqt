@@ -398,62 +398,69 @@ class TensorQuantizer:
     with tf.control_dependencies(updates):
       return tf.constant(0)
 
+  def _quantization_params(self, train):
+    """Returns parameters for AQT quantization routine."""
+
+    def qparams(
+        config: aqt_config.AqtTensorConfig,
+        check_active: bool = True
+    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+      """Returns quant parameters for fixed AQT config."""
+
+      should_quantize = tf.constant(0.0)
+      clip_bound = tf.constant(0.0)
+      shift_before = tf.constant(0.0)
+      shift_after = tf.constant(0.0)
+
+      config_active = is_config_active(config, self._last_update.read_value())
+      config_active = not check_active or config_active
+
+      if isinstance(config.quant_config, aqt_config.FloatConfig):
+        clip_bound = tf.where_v2(config_active, float('inf'), 0.0)
+        return should_quantize, clip_bound, shift_before, shift_after
+
+      config_active = tf.cast(config_active, tf.float32)
+      should_quantize += config_active
+
+      # TODO(vladf): some serving environments, such as adbrain,
+      # automatically rewrite constants from f32 to bf16, which makes the
+      # epsilon used in the function below invalid, so that
+      # safe_clip_bound == clip_bound (incorrectly). We should solve for
+      # that through some configuration.
+      clip_bound += config_active * aqt_common.safe_clip_bound(
+          config.quant_config)
+
+      if config.quant_config.preserve_zero:
+        shift_before += config_active * 0.5
+      else:
+        shift_after += config_active * 0.5
+
+      return should_quantize, clip_bound, shift_before, shift_after
+
+    if not train and self.config.inference_config_index is not None:
+      should_quantize, clip_bound, shift_before, shift_after = qparams(
+          self.config.tensor_configs[self.config.inference_config_index],
+          check_active=False)
+    elif self.config.tensor_configs:
+      should_quantize, clip_bound, shift_before, shift_after = zip(
+          *map(qparams, self.config.tensor_configs))
+      should_quantize = tf.add_n(should_quantize)
+      clip_bound = tf.add_n(clip_bound)
+      shift_before = tf.add_n(shift_before)
+      shift_after = tf.add_n(shift_after)
+    else:
+      should_quantize = clip_bound = shift_before = shift_after = tf.constant(
+          0.0)
+
+    should_quantize = tf.cast(should_quantize, tf.bool)
+    return should_quantize, clip_bound, shift_before, shift_after
+
   def _to_quant(self, x: tf.Tensor, train: bool) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity."""
     with tf.variable_scope('to_quant'):
+      should_quantize, clip_bound, shift_before, shift_after = (
+          self._quantization_params(train))
 
-      def qparams(
-          config: aqt_config.AqtTensorConfig,
-          check_active: bool = True
-      ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        """Returns parameters for AQT quantization routine."""
-
-        should_quantize = tf.constant(0.0)
-        clip_bound = tf.constant(0.0)
-        shift_before = tf.constant(0.0)
-        shift_after = tf.constant(0.0)
-
-        config_active = is_config_active(config, self._last_update.read_value())
-        config_active = not check_active or config_active
-
-        if isinstance(config.quant_config, aqt_config.FloatConfig):
-          clip_bound = tf.where_v2(config_active, float('inf'), 0.0)
-          return should_quantize, clip_bound, shift_before, shift_after
-
-        config_active = tf.cast(config_active, tf.float32)
-        should_quantize += config_active
-
-        # TODO(vladf): some serving environments, such as adbrain,
-        # automatically rewrite constants from f32 to bf16, which makes the
-        # epsilon used in the function below invalid, so that
-        # safe_clip_bound == clip_bound (incorrectly). We should solve for
-        # that through some configuration.
-        clip_bound += config_active * aqt_common.safe_clip_bound(
-            config.quant_config)
-
-        if config.quant_config.preserve_zero:
-          shift_before += config_active * 0.5
-        else:
-          shift_after += config_active * 0.5
-
-        return should_quantize, clip_bound, shift_before, shift_after
-
-      if not train and self.config.inference_config_index is not None:
-        should_quantize, clip_bound, shift_before, shift_after = qparams(
-            self.config.tensor_configs[self.config.inference_config_index],
-            check_active=False)
-      elif self.config.tensor_configs:
-        should_quantize, clip_bound, shift_before, shift_after = zip(
-            *map(qparams, self.config.tensor_configs))
-        should_quantize = tf.add_n(should_quantize)
-        clip_bound = tf.add_n(clip_bound)
-        shift_before = tf.add_n(shift_before)
-        shift_after = tf.add_n(shift_after)
-      else:
-        should_quantize = clip_bound = shift_before = shift_after = tf.constant(
-            0.0)
-
-      should_quantize = tf.cast(should_quantize, tf.bool)
       scale = tf.where_v2(  #
           should_quantize, self._scale.read_value(),
           tf.ones_like(self._scale.read_value()))
@@ -471,6 +478,18 @@ class TensorQuantizer:
       x += shift_after
 
       return x
+
+  def _clip_mask(self, x: tf.Tensor, train: bool) -> tf.Tensor:
+    """Returns which entries of x are clipped in _to_quant(x)."""
+    # TODO(vladf): we should consider re-using the same clip mask
+    # computation in _to_quant to derive this clip mask instead of a separate
+    # method.
+    with tf.variable_scope('clip_mask'):
+      should_quantize, clip_bound, _, _ = (self._quantization_params(train))
+      scale = tf.where_v2(  #
+          should_quantize, self._scale.read_value(),
+          tf.ones_like(self._scale.read_value()))
+      return tf.abs(scale * x) > clip_bound
 
   def _from_quant_scale(self, train: bool) -> tf.Tensor:
     """Scale to dequantize the active quant config, if any, else ones."""
