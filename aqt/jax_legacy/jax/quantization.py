@@ -698,18 +698,25 @@ def _canonicalize_feature_axes(axis: Union[int, Tuple[int, ...]],
   return axis
 
 
+@dataclass
+class QuantW:
+  quantized_w: jnp.ndarray
+  scale: jnp.ndarray
+
+
 # TODO(shivaniagrawal): extend it for generic dot_dimenson_numbers
-def quantized_dot_general(
-    *,
-    w: jnp.ndarray,
-    act: jnp.ndarray,
-    quant_type: QuantType,
-    weight_params: QuantOps.WeightParams,
-    act_hparams: Optional[QuantOps.ActHParams],
-    get_bounds_params: Optional[get_bounds.GetBounds.Params],
-    prefer_int8_to_int32_dot: bool,
-    dimension_numbers: lax.DotDimensionNumbers,
-    dot_precision: Optional[PrecisionType] = None) -> jnp.ndarray:
+def quantized_dot_general(*,
+                          w: Optional[jnp.ndarray],
+                          act: jnp.ndarray,
+                          quant_type: QuantType,
+                          weight_params: QuantOps.WeightParams,
+                          act_hparams: Optional[QuantOps.ActHParams],
+                          get_bounds_params: Optional[
+                              get_bounds.GetBounds.Params],
+                          prefer_int8_to_int32_dot: bool,
+                          dimension_numbers: lax.DotDimensionNumbers,
+                          dot_precision: Optional[PrecisionType] = None,
+                          quant_w: Optional[QuantW] = None) -> jnp.ndarray:
   """LAX dot general with optionally quantized weights and activations.
 
   Wraps LAX's `Dot General
@@ -733,6 +740,8 @@ def quantized_dot_general(
     dot_precision: Optional. Either ``None``, which means the default precision
       for the backend, or a ``lax.Precision`` enum value (``Precision.DEFAULT``,
       ``Precision.HIGH`` or ``Precision.HIGHEST``).
+    quant_w: Quantization weights and scales, provided as class QuantW. If
+      provided, quantization variables are used directly. Defaults to None.
 
   Returns:
     An array containing the result with the same dtype as 'w' and 'act'.
@@ -756,31 +765,34 @@ def quantized_dot_general(
     # lax.dot accepts any combination of 1d and 2d arguments for its lhs and rhs
     # input. To simplify the AQT implementation, we only accept 2d arguments for
     # now.
-    if act.shape[-1] != w.shape[0]:
-      raise ValueError(
-          'AQT is currently only implemented for matrix*matrix operations')
-    num_input_channels = act.shape[-1]
+    if w is not None:
+      if act.shape[-1] != w.shape[0]:
+        raise ValueError(
+            'AQT is currently only implemented for matrix*matrix operations')
+      num_input_channels = act.shape[-1]
 
-    if weight_params.axis is None:
-      out_channel_shape = ()
+      if weight_params.axis is None:
+        out_channel_shape = ()
+      else:
+        axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)
+        out_channel_shape = tuple(
+            [w.shape[i] for i in range(w.ndim) if i not in axes])
+
+      # The ValueError raised in the guard at the beginning of this function
+      # should have already checked that the weight matrix has a number of rows
+      # equal to the number of channels in the activation.
+      assert w.shape[0] == num_input_channels
+
+      # We carry out all intermediate calculations using the same dtype as the
+      # inputs. We want to be careful to not take a model configured to be
+      # trained in bf16 and accidentally train it in fp32 by virtue of the scale
+      # dtype being fp32.
+      if act.dtype != w.dtype:
+        raise TypeError(
+            f'Activations and weight must have the same dtype, but got {act.dtype} and {w.dtype}'
+        )
     else:
-      axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)
-      out_channel_shape = tuple(
-          [w.shape[i] for i in range(w.ndim) if i not in axes])
-
-    # The ValueError raised in the guard at the beginning of this function
-    # should have already checked that the weight matrix has a number of rows
-    # equal to the number of channels in the activation.
-    assert w.shape[0] == num_input_channels
-
-    # We carry out all intermediate calculations using the same dtype as the
-    # inputs. We want to be careful to not take a model configured to be trained
-    # in bf16 and accidentally train it in fp32 by virtue of the scale dtype
-    # being fp32.
-    if act.dtype != w.dtype:
-      raise TypeError(
-          f'Activations and weight must have the same dtype, but got {act.dtype} and {w.dtype}'
-      )
+      assert quant_w is not None
     input_dtype = act.dtype
 
     is_act_quantized = False
@@ -822,8 +834,6 @@ def quantized_dot_general(
         # appropriately across the columns of 'w'.
         act_scale = act_scale.reshape(num_input_channels, 1)
       # Now we calculate s^-1 * w.
-      w_scaled_rows = ((1 / act_scale) * w).astype(input_dtype)
-
       # TODO(shivaniagrawal): This section repeats code from the 'else' block.
       # The code is repeated twice because quantization can either be disabled
       # dynamically by setting the clipping bound to -1 (see comments on
@@ -831,40 +841,52 @@ def quantized_dot_general(
       # to None. This block deals with the dynamic case (hence necessitating the
       # use of the dynamic 'lax.cond') while the 'else' block handles the static
       # case. Ultimately, we should unify them.
-      act_quantized, w_scaled_rows = lax.cond(
-          is_act_quantized, lambda _: (act_quantized, w_scaled_rows), lambda _:  # pylint: disable=g-long-lambda
-          (act, w), None)
+      act_quantized, act_scale = lax.cond(
+          is_act_quantized,
+          lambda _: (act_quantized, act_scale),
+          lambda _:  # pylint: disable=g-long-lambda
+          (act, jnp.ones_like(act_scale)),
+          None)
     else:
       # In this case, activations are not being quantized; only weights. There
       # is no need to absorb activation scales into the rows of the weight
       # matrix so 'w_scaled_rows' can just be set to the original weight matrix.
       act_quantized = act
-      w_scaled_rows = w
+      act_scale = jnp.array(1.0, dtype=SCALE_DTYPE)
 
     is_weight_quantized = False
     if weight_params is not None and weight_params.prec is not None:
       is_weight_quantized = True
-      # Calculate 'r' from (s^-1) * w
-      weight_op = QuantOps.create_weights_ops(
-          w_scaled_rows, weight_params=weight_params)
-      weight_scale = weight_op.get_scale_for_aqt(allow_per_channel_scales=True)
-      # Similar to 'act_scale' above, the weight_scale can either be a single
-      # scalar or be a matrix with shape (1, out_channel_shape), corresponding
-      # to a per-channel scale factor for the weight matrix. We verify it here.
-      if weight_scale.ndim != 0:
-        shape_utils.assert_shapes_equal(weight_scale.shape,
-                                        (1,) + out_channel_shape)
-        if act.ndim != 0:
-          weight_scale_shape = (1,) * (act.ndim - 1) + out_channel_shape
-          weight_scale = weight_scale.reshape(weight_scale_shape)
+      if quant_w is not None:
+        weight_quantized = quant_w.quantized_w.astype(input_dtype)
+        weight_scale = quant_w.scale
+      else:
+        # Calculate 'r' from (s^-1) * w
+        w_scaled_rows = ((1 / act_scale) * w).astype(input_dtype)
+        weight_op = QuantOps.create_weights_ops(
+            w_scaled_rows, weight_params=weight_params)
+        weight_scale = weight_op.get_scale_for_aqt(
+            allow_per_channel_scales=True)
+        # Similar to 'act_scale' above, the weight_scale can either be a single
+        # scalar or be a matrix with shape (1, out_channel_shape), corresponding
+        # to a per-channel scale factor for the weight matrix. We verify it
+        # here.
+        if weight_scale.ndim != 0:
+          shape_utils.assert_shapes_equal(weight_scale.shape,
+                                          (1,) + out_channel_shape)
+          if act.ndim != 0:
+            weight_scale_shape = (1,) * (act.ndim - 1) + out_channel_shape
+            weight_scale = weight_scale.reshape(weight_scale_shape)
 
-      # Quantize weight matrix by calculating RoundAndClip(s^-1 * w * t)
-      # TODO(malmaud): See comment on 'act_op.to_quantized' above, which applies
-      # here as well.
-      weight_quantized = weight_op.to_quantized(
-          w_scaled_rows, dtype=input_dtype)
+        # Quantize weight matrix by calculating RoundAndClip(s^-1 * w * t)
+        # TODO(malmaud): See comment on 'act_op.to_quantized' above, which
+        # applies here as well.
+        weight_quantized = weight_op.to_quantized(
+            w_scaled_rows, dtype=input_dtype)
     else:
-      weight_quantized = w_scaled_rows
+      assert w is not None, ('w can not be None if weight quantization is not '
+                             'specified.')
+      weight_quantized = ((1 / act_scale) * w).astype(input_dtype)
       weight_scale = jnp.array(1.0, dtype=SCALE_DTYPE)
 
     # Use metadata context to annotate op metadata with quantization info
@@ -899,6 +921,7 @@ def quantized_dot_general(
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
           lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True)
+
     with metadata_context:
       # Calculate matmul(...)
       out_quantized = dot_general_aqt(
@@ -922,6 +945,10 @@ def quantized_dot_general(
     return (out_quantized * (1 / weight_scale)).astype(input_dtype)
 
   elif quant_type in (QuantType.FAKE_QUANT, QuantType.FAKE_QUANT_WITH_INT):
+    if quant_w is not None:
+      raise ValueError(
+          'quantized vars are not supported in `fake_quant` style quantization.'
+      )
     if quant_type == QuantType.FAKE_QUANT_WITH_INT:
       fake_dependency = act
     # create a dependency on fake input to control constant folding

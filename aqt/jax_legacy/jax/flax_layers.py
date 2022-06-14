@@ -108,6 +108,7 @@ class DenseAqt(nn.Module):
   bias_init: InitializerType = nn.initializers.zeros
   precision: Optional[lax.Precision] = jax.lax.Precision.DEFAULT
   kernel_axis_names: Optional[Sequence[str]] = None
+  possibly_use_quantized_vars: bool = False
 
   # TODO(shivaniagrawal): Changed the strategy to AQT if quant_type is aqt.
 
@@ -163,11 +164,36 @@ class DenseAqt(nn.Module):
         raise ValueError(f"Kernel axis names {kernel_axis_names} doesn't match "
                          f'kernel shape {kernel_shape}.')
 
-    kernel = partitioning.param_with_axes(
-        'kernel', self.kernel_init, kernel_shape, axes=tuple(kernel_axis_names))
-
     inputs = jnp.asarray(inputs, self.dtype)
-    kernel = jnp.asarray(kernel, self.dtype)
+
+    use_quantized_vars_for_inference = self.possibly_use_quantized_vars and not self.train
+    if use_quantized_vars_for_inference:
+      qkernel = partitioning.param_with_axes(
+          'qkernel',
+          nn.initializers.zeros,
+          kernel_shape,
+          jax.numpy.int8,
+          axes=tuple(kernel_axis_names))
+
+      # Initialization of scale does not matter so we are initializing with
+      # bias_init.
+      scale_axis_names = list(kernel_axis_names)
+      scale_axis_names[0] += '_qscale'
+      qscale = partitioning.param_with_axes(
+          'qscale',
+          self.bias_init, (1,) + features,
+          axes=tuple(scale_axis_names))
+      qscale = jnp.asarray(qscale, self.dtype)
+      quant_w = quantization.QuantW(qkernel, qscale)
+      kernel = None
+    else:
+      quant_w = None
+      kernel = partitioning.param_with_axes(
+          'kernel',
+          self.kernel_init,
+          kernel_shape,
+          axes=tuple(kernel_axis_names))
+      kernel = jnp.asarray(kernel, self.dtype)
 
 
     get_bounds_params = get_bounds.GetBounds.Params(
@@ -213,7 +239,8 @@ class DenseAqt(nn.Module):
         get_bounds_params=get_bounds_params,
         dimension_numbers=(contracting_dims, batch_dims),
         dot_precision=self.precision,
-        prefer_int8_to_int32_dot=self.dynamic_context.prefer_int8_to_int32_dot)
+        prefer_int8_to_int32_dot=self.dynamic_context.prefer_int8_to_int32_dot,
+        quant_w=quant_w)
 
     # bias
     if self.use_bias:
