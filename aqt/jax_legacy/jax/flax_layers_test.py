@@ -14,6 +14,7 @@
 
 """Tests for aqt.jax.flax_layers."""
 
+import functools
 import itertools
 from typing import Any, Dict, Mapping
 from unittest import mock
@@ -36,12 +37,16 @@ from flax import linen as nn
 from flax import traverse_util
 from flax.core import frozen_dict
 import jax
+from jax import config
+from jax import dtypes
 from jax import lax
 from jax import random
-import jax.config as config
 from jax.nn import initializers
 import jax.numpy as jnp
 import numpy as onp
+
+from google3.nlp.nlx.infrastructure.flaxformer import sharding
+
 
 FLAGS = flags.FLAGS
 
@@ -1056,7 +1061,7 @@ class DenseAqtTest(parameterized.TestCase):
 class EmbedLayerTest(parameterized.TestCase):
   """Tests for AQT Embed layer."""
 
-  # TODO(shivaniagrawal/malmaud): we are not raising error on jax rank
+  # TODO(shivaniagrawal): we are not raising error on jax rank
   # promotion. For EmbedAqt tests; in AQT style inputs and output are not be
   # of same shape; require more work to avoid rank promotion.
   @parameterized.named_parameters(
@@ -1287,6 +1292,84 @@ class LayerNormTest(parameterized.TestCase):
     x = jnp.ones((2, 5))
     y = layer_norm.apply({}, x)
     onp.testing.assert_equal(onp.array(y), onp.zeros(x.shape))
+
+
+def assert_same_tree(a, b):
+  jax.tree_map(
+      functools.partial(onp.testing.assert_allclose, atol=1e-6, rtol=1e-6), a,
+      b)
+
+
+class DenseGeneralTest(parameterized.TestCase):
+
+  # pylint: disable=unused-argument
+  def _mock_initializer(self, key, shape, dtype=jnp.float_, val=1.0):  # pylint: disable=g-unreachable-test-method
+    return jnp.ones(shape, dtypes.canonicalize_dtype(dtype)) * val
+  # pylint: enable=unused-argument
+
+  def test_dense_general_no_bias(self):
+    rng = random.PRNGKey(0)
+    x = jnp.ones((1, 3))
+    model = flax_layers.DenseGeneralAqt(
+        features=4,
+        use_bias=False,
+        kernel_init=initializers.ones,
+    )
+    y, _ = model.init_with_output(rng, x)
+    self.assertEqual(y.shape, (1, 4))
+    onp.testing.assert_allclose(y, onp.full((1, 4), 3.))
+
+  def test_dense_general_with_bias(self):
+    rng = random.PRNGKey(0)
+    x = jnp.ones((1, 3))
+    model = flax_layers.DenseGeneralAqt(
+        features=4,
+        use_bias=True,
+        kernel_init=initializers.ones,
+        bias_init=initializers.ones,
+    )
+    y, _ = model.init_with_output(rng, x)
+    self.assertEqual(y.shape, (1, 4))
+    onp.testing.assert_allclose(y, onp.full((1, 4), 4.))
+
+  def test_dense_general_two_features(self):
+    rng = random.PRNGKey(0)
+    x = jnp.ones((1, 3))
+    model = flax_layers.DenseGeneralAqt(
+        features=(2, 2),
+        use_bias=False,
+        kernel_init=initializers.ones,
+        bias_init=initializers.ones,
+        kernel_axis_names=('a', 'b', 'c'),
+    )
+    y, variables = model.init_with_output(rng, x)
+    # We transform the last input dimension to two output dimensions (2, 2).
+    onp.testing.assert_allclose(y, onp.full((1, 2, 2), 3.))
+
+    # The output sharding dimensions have been collapsed.
+    sharding.check_params_and_axis_names_match(variables)
+    self.assertEqual(variables['params_axes']['kernel_axes'],
+                     sharding.axis_names('a', 'b * c'))
+
+  def test_dense_general_two_axes(self):
+    rng = random.PRNGKey(0)
+    x = jnp.ones((1, 2, 2))
+    model = flax_layers.DenseGeneralAqt(
+        features=3,
+        use_bias=False,
+        axis=(-2, 2),  # Note: this is the same as (1, 2).
+        kernel_init=initializers.ones,
+        bias_init=initializers.ones,
+        kernel_axis_names=('a', 'b', 'c'),
+    )
+    y, variables = model.init_with_output(rng, x)
+    # We transform the last two input dimensions (2, 2) to one output dimension.
+    onp.testing.assert_allclose(y, onp.full((1, 3), 4.))
+
+    # The input sharding dimensions have been collapsed.
+    sharding.check_params_and_axis_names_match(variables)
+    self.assertEqual(variables['params_axes']['kernel_axes'],
+                     sharding.axis_names('a * b', 'c'))
 
 
 if __name__ == '__main__':

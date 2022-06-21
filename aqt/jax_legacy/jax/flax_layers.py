@@ -20,7 +20,7 @@ Extends flax layers flax.linen.Dense.
 import contextlib
 import dataclasses
 import typing
-from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Tuple, Type, Union
 
 from absl import flags
 from aqt.jax_legacy.jax import compute_cost_utils
@@ -38,6 +38,7 @@ from aqt.jax_legacy.jax.quantization import QuantOps
 from aqt.jax_legacy.jax.quantization import QuantType
 import flax
 from flax import linen as nn
+from flax.core import frozen_dict
 from flax.linen import partitioning
 import jax
 from jax import lax
@@ -54,6 +55,14 @@ InitializerType = Callable[[jnp.ndarray, Iterable[int], Type[Any]], jnp.ndarray]
 default_kernel_init = nn.initializers.lecun_normal()
 
 dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+
+Array = jnp.ndarray
+DType = jnp.dtype
+PRNGKey = jnp.ndarray
+Shape = Iterable[int]
+Initializer = Callable[[PRNGKey, Shape, DType], Array]
+PrecisionLike = Union[None, str, lax.Precision, Tuple[str, str],
+                      Tuple[lax.Precision, lax.Precision]]
 
 
 # Based on flax.linen.Dense
@@ -253,6 +262,134 @@ class DenseAqt(nn.Module):
       # (batch_size, features)
       y = y + bias[jnp.newaxis, :]
     return y
+
+
+def _canonicalize_tuple(x):
+  if isinstance(x, Iterable):
+    return tuple(x)
+  else:
+    return (x,)
+
+
+# The Flaxformer sharding API emits some names that are too detailed, so we
+# remap them here. Any values that don't match keys here are unchanged.
+_RESHAPED_KERNEL_AXIS_NAME_MAP = frozen_dict.freeze({
+    'heads * kv': 'joined_kv',
+})
+
+
+def _normalize_axes(axes: Iterable[int], ndim: int) -> Tuple[int, ...]:
+  # A tuple by convention. len(axes_tuple) then also gives the rank efficiently.
+  return tuple([ax if ax >= 0 else ndim + ax for ax in axes])
+
+
+# Based on flaxformer DenseGeneral
+class DenseGeneralAqt(nn.Module):
+  """A linear transformation with flexible axes.
+
+    Kernel stored as 2d parameter for compatibility with Adafactor optimizer.
+
+    Attributes:
+      features: tuple with numbers of output features.
+      use_bias: whether to add a bias to the output (default: False).
+      axis: tuple with axes to apply the transformation on.
+      dtype: the dtype of the computation (default: float32).
+      kernel_init: initializer function for the weight matrix.
+      bias_init: initializer function for the bias.
+      precision: numerical precision of the computation see `jax.lax.Precision`
+        for details.
+      kernel_axis_names: logical axis names to use for kernel sharding. Each
+        should be one of _VALID_AXIS_NAMES in sharding.py.
+      reshaped_kernel_axis_name_map: Rules for renaming fused kernel axes. We
+        keep this as a separate parameter than kernel_axis_names so that
+        experiments can toggle `reshape_kernel` without having to keep
+        `kernel_axis_names` in sync.
+      reshape_kernel: whether to reshape the kernel parameter to 2D for
+        Adafactor.
+  """
+  features: Union[Iterable[int], int]
+  use_bias: bool
+  axis: Union[Iterable[int], int] = -1
+  dtype: DType = jnp.float32
+  kernel_init: Initializer = default_kernel_init
+  bias_init: Initializer = nn.initializers.zeros
+  precision: Any = None
+  kernel_axis_names: Optional[Sequence[str]] = None
+  reshaped_kernel_axis_name_map: Mapping[str, str] = (
+      _RESHAPED_KERNEL_AXIS_NAME_MAP)
+  reshape_kernel: bool = True
+
+  @nn.compact
+  def __call__(self, inputs: Array) -> Array:
+    """Applies a linear transformation to the inputs along multiple dimensions.
+
+    Args:
+      inputs: The nd-array to be transformed.
+
+    Returns:
+      The transformed input.
+    """
+    features = _canonicalize_tuple(self.features)
+    axis = _canonicalize_tuple(self.axis)
+
+    inputs = jnp.asarray(inputs, self.dtype)
+    axis = _normalize_axes(axis, inputs.ndim)
+
+    kernel_shape = tuple([inputs.shape[ax] for ax in axis]) + features
+    if self.reshape_kernel:
+      kernel_param_shape = (np.prod([inputs.shape[ax] for ax in axis]),
+                            np.prod(features))
+    else:
+      kernel_param_shape = kernel_shape
+
+    # Determine axes names metadata for partitioning/adafactor rules.
+    if self.kernel_axis_names is None:
+      kernel_axis_names = ['unmodeled'] * len(kernel_param_shape)
+    else:
+      kernel_axis_names = self.kernel_axis_names
+      if len(kernel_axis_names) != len(kernel_shape):
+        raise ValueError(f"Kernel axis names {kernel_axis_names} doesn't match "
+                         f'kernel shape {kernel_shape}.')
+      if self.reshape_kernel:
+
+        def _reshaped_axis_names(names):
+          result = ' * '.join(names)
+          return self.reshaped_kernel_axis_name_map.get(result, result)
+
+        kernel_axis_names = (
+            _reshaped_axis_names(kernel_axis_names[:len(axis)]),
+            _reshaped_axis_names(kernel_axis_names[len(axis):]),
+        )
+
+    kernel = partitioning.param_with_axes(
+        'kernel',
+        self.kernel_init,
+        kernel_param_shape,
+        jnp.float32,
+        axes=tuple(kernel_axis_names))
+
+    kernel = jnp.asarray(kernel, self.dtype)
+    kernel = jnp.reshape(kernel, kernel_shape)
+
+    contract_ind = tuple(range(0, len(axis)))
+    out = lax.dot_general(
+        inputs,
+        kernel, ((axis, contract_ind), ((), ())),
+        precision=self.precision)
+    if self.use_bias:
+      bias = partitioning.param_with_axes(
+          'bias',
+          self.bias_init, (np.prod(features),),
+          jnp.float32,
+          axes=(kernel_axis_names[-1],))
+      bias = jnp.asarray(bias, self.dtype)
+      bias = jnp.reshape(bias, features)
+      # Reshape bias for broadcast.
+      expand_dims = sorted(set(range(inputs.ndim)) - set(axis))
+      for ax in expand_dims:
+        bias = jnp.expand_dims(bias, ax)
+      out = out + bias
+    return out
 
 
 # Based on flax.linen.Conv
