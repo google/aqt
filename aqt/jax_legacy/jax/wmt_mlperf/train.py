@@ -563,13 +563,15 @@ def eval_step(params: Mapping[str, Any], batch, state: Mapping[str, Any],
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       should_decode=False)
-  logits = model.apply({
-      'params': params,
-      **state
-  },
-                       inputs,
-                       targets,
-                       mutable=False)
+  mutable = False
+  logits = model.apply(
+      {
+          'params': params,
+          **state
+      },
+      inputs,
+      targets,
+      mutable=mutable)
   return compute_metrics(logits, targets, weights)
 
 
