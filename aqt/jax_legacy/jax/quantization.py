@@ -704,6 +704,83 @@ class QuantW:
   scale: jnp.ndarray
 
 
+def flaxformer_dot_general(*,
+                           act: jnp.ndarray,
+                           w: Optional[jnp.ndarray],
+                           dimension_numbers: lax.DotDimensionNumbers,
+                           weight_params: QuantOps.WeightParams,
+                           dot_precision: Optional[PrecisionType] = None,
+                           quant_w: Optional[QuantW] = None) -> jnp.ndarray:
+  """Flaxformer dot general with optionally quantized weights and activations."""
+  input_dtype = act.dtype
+
+  if weight_params is not None and weight_params.prec is not None:
+    if quant_w is not None:
+      weight_quantized = quant_w.quantized_w.astype(input_dtype)
+      weight_scale = quant_w.scale
+    else:
+      # Calculate 'r' from (s^-1) * w
+      weight_op = QuantOps.create_weights_ops(w, weight_params=weight_params)
+      weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access
+
+      if weight_params.expected_scale_shape:
+        shape_utils.assert_shapes_equal(weight_scale.shape,
+                                        weight_params.expected_scale_shape)
+
+      # Quantize weight matrix by calculating RoundAndClip(s^-1 * w * t)
+      # TODO(malmaud): See comment on 'act_op.to_quantized' above, which
+      # applies here as well.
+      weight_quantized = weight_op.to_quantized(w, dtype=input_dtype)
+  else:
+    assert w is not None, ('w can not be None if weight quantization is not '
+                           'specified.')
+    weight_quantized = w
+
+  weight_prec = None if weight_params is None else weight_params.prec
+  metadata_context = contextlib.suppress()
+  if flags.FLAGS.metadata_enabled:
+    metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
+        lhs_prec=None, rhs_prec=weight_prec, rhs_is_weight=True)
+  # Use metadata context to annotate op metadata with quantization info
+
+  # To decide whether to use an integer-domain dot operation, we first check
+  # if the static quantization parameters are compatible with it by seeing if
+  # they request that both inputs be quantized 8bits or less. Then check if
+  # the dynamic parameters are compatible with it. ie, in a training run with
+  # quantization enabled, are we past the activation start step yet.
+
+  # We also do not use int8_to_int32_dot if activation has positive
+  # distribution and prec=8, since we would not be able to fit uint8 range in
+  # int8.
+  # TODO(shivaniagrawal): A proper solution for this would be to have mixed
+  # dot(uint8, int8) -> int32 in XLA.
+
+  with metadata_context:
+    # Calculate matmul(...)
+    # we are not quantizing activations yet, hence not using int8 matmul
+    out_quantized = lax.dot_general(
+        act,
+        weight_quantized,
+        dimension_numbers=dimension_numbers,
+        precision=dot_precision)
+
+  if weight_params is not None and weight_params.prec is not None:
+    (axis, _), (_, _) = dimension_numbers
+    act_scale_shape = tuple([
+        act.shape[dim] if dim not in axis else 1 for dim in range(0, act.ndim)
+    ])
+    act_scale = jnp.ones(act_scale_shape, act.dtype)
+
+    inv_scale = lax.dot_general(
+        (1 / act_scale),
+        (1 / weight_scale),
+        dimension_numbers=dimension_numbers,
+    )
+    return out_quantized * inv_scale
+  else:
+    return out_quantized
+
+
 # TODO(shivaniagrawal): extend it for generic dot_dimenson_numbers
 def quantized_dot_general(*,
                           w: Optional[jnp.ndarray],
@@ -1266,6 +1343,7 @@ def dot_general_aqt(lhs, rhs, dimension_numbers, dot_precision,
   # the original inputs, which are typically bfloat16 or float32. The second
   # converts the inputs to int8 tensors and accumulates results to an int32
   # output.
+
   def dot_general_fp(ops):
     lhs_, rhs_ = ops
     return lax.dot_general(

@@ -307,6 +307,22 @@ class DenseGeneralAqt(nn.Module):
       reshape_kernel: whether to reshape the kernel parameter to 2D for
         Adafactor.
   """
+
+  @dataclass
+  class HParams:
+    """Hyperparameter class to quantize Dense Layer."""
+    # Target integer precision of weights in bits.
+    # If None, no weight quantization will be applied.
+    weight_prec: Union[None, int, QuantOps.FloatQuant]
+    # half_shift flag for weights
+    weight_half_shift: bool
+    # QuantOps hyperparameter to quantize inputs. If None, no activation
+    # quantization will be applied.
+    quant_act: Optional[QuantOps.ActHParams]
+    weight_quant_granularity: quant_config.QuantGranularity
+
+  hparams: HParams
+  train: bool
   features: Union[Iterable[int], int]
   use_bias: bool
   axis: Union[Iterable[int], int] = -1
@@ -318,6 +334,7 @@ class DenseGeneralAqt(nn.Module):
   reshaped_kernel_axis_name_map: Mapping[str, str] = (
       _RESHAPED_KERNEL_AXIS_NAME_MAP)
   reshape_kernel: bool = True
+  possibly_use_quantized_vars: bool = False
 
   @nn.compact
   def __call__(self, inputs: Array) -> Array:
@@ -335,12 +352,27 @@ class DenseGeneralAqt(nn.Module):
     inputs = jnp.asarray(inputs, self.dtype)
     axis = _normalize_axes(axis, inputs.ndim)
 
+    hparams = self.hparams
+    if hparams.quant_act is not None:
+      raise ValueError(
+          'activation quantization is not yet supported for DenseGeneralAqt')
+
+    if (hparams.weight_prec is not None and
+        isinstance(hparams.weight_prec, int) and hparams.weight_prec > 8):
+      raise NotImplementedError(
+          'If you want to use more than 8bits for quantization, please revisit '
+          'jax.lax.Precision.DEFAULT to determine whether it is still sufficient.'
+      )
+
     kernel_shape = tuple([inputs.shape[ax] for ax in axis]) + features
+    scale_shape = (1,) * len(axis) + features
     if self.reshape_kernel:
       kernel_param_shape = (np.prod([inputs.shape[ax] for ax in axis]),
                             np.prod(features))
+      scale_param_shape = (1, np.prod(features))
     else:
       kernel_param_shape = kernel_shape
+      scale_param_shape = scale_shape
 
     # Determine axes names metadata for partitioning/adafactor rules.
     if self.kernel_axis_names is None:
@@ -361,21 +393,74 @@ class DenseGeneralAqt(nn.Module):
             _reshaped_axis_names(kernel_axis_names[len(axis):]),
         )
 
-    kernel = partitioning.param_with_axes(
-        'kernel',
-        self.kernel_init,
-        kernel_param_shape,
-        jnp.float32,
-        axes=tuple(kernel_axis_names))
+    use_quantized_vars_for_inference = self.possibly_use_quantized_vars and not self.train
+    if use_quantized_vars_for_inference:
+      qkernel = partitioning.param_with_axes(
+          'qkernel',
+          nn.initializers.zeros,
+          kernel_param_shape,
+          jax.numpy.int8,
+          axes=tuple(kernel_axis_names))
+      qkernel = jnp.reshape(qkernel, kernel_shape)
 
-    kernel = jnp.asarray(kernel, self.dtype)
-    kernel = jnp.reshape(kernel, kernel_shape)
+      # Initialization of scale does not matter so we are initializing with
+      # bias_init.
+      scale_axis_names = list(kernel_axis_names)
+      len_contracted_dims = 1 if self.reshape_kernel else len(axis)
+      for ax in range(0, len_contracted_dims):
+        scale_axis_names[ax] += '_qscale'
+      qscale = partitioning.param_with_axes(
+          'qscale',
+          self.bias_init,
+          scale_param_shape,
+          axes=tuple(scale_axis_names))
+      qscale = jnp.asarray(qscale, self.dtype)
+      qscale = jnp.reshape(qscale, scale_shape)
+      quant_w = quantization.QuantW(qkernel, qscale)
+      kernel = None
+    else:
+      quant_w = None
+      kernel = partitioning.param_with_axes(
+          'kernel',
+          self.kernel_init,
+          kernel_param_shape,
+          jnp.float32,
+          axes=tuple(kernel_axis_names))
+      kernel = jnp.asarray(kernel, self.dtype)
+      kernel = jnp.reshape(kernel, kernel_shape)
 
     contract_ind = tuple(range(0, len(axis)))
-    out = lax.dot_general(
-        inputs,
-        kernel, ((axis, contract_ind), ((), ())),
-        precision=self.precision)
+
+    weight_quant_granularity = hparams.weight_quant_granularity
+
+    if weight_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
+      # Compute scale factors by reducing over the rows of the weight matrix,
+      # resulting in one scale factor per column. This results in one scale
+      # factor per output channel.
+      expected_scale_shape = (1,) * len(axis) + features
+      weight_quant_axis = contract_ind
+    elif weight_quant_granularity == quant_config.QuantGranularity.PER_TENSOR:
+      # Compute a single scale factor for the entire weight matrix.
+      expected_scale_shape = (1,) * len(kernel_shape)
+      weight_quant_axis = None
+    else:
+      raise ValueError(
+          f'Invalid quantization granularity {weight_quant_granularity}.')
+
+    weight_params = QuantOps.WeightParams(
+        prec=hparams.weight_prec,
+        half_shift=hparams.weight_half_shift,
+        axis=weight_quant_axis,
+        expected_scale_shape=expected_scale_shape)
+
+    out = quantization.flaxformer_dot_general(
+        act=inputs,
+        w=kernel,
+        dimension_numbers=((axis, contract_ind), ((), ())),
+        weight_params=weight_params,
+        dot_precision=self.precision,
+        quant_w=quant_w)
+
     if self.use_bias:
       bias = partitioning.param_with_axes(
           'bias',

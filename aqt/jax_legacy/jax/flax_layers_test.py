@@ -1300,6 +1300,297 @@ def assert_same_tree(a, b):
       b)
 
 
+class DenseGeneralAqtTest(parameterized.TestCase):
+  """Tests for DenseGeneralAqt layer."""
+
+  def setUp(self):
+    super(DenseGeneralAqtTest, self).setUp()
+    test_utils.configure_jax()
+    quantization.DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING = True
+    self.rng_key = random.PRNGKey(0)
+
+  def tearDown(self):
+    config.update('jax_numpy_rank_promotion', 'warn')
+    super(DenseGeneralAqtTest, self).tearDown()
+
+  def init_model_with_1_layer(self,
+                              inputs,
+                              num_features,
+                              axis=(1,),
+                              kernel_init=flax_layers.default_kernel_init,
+                              weight_prec=None,
+                              weight_half_shift=False,
+                              kernel_axis_names=None,
+                              reshape_kernel=True):
+    """Create and initialize a flax model with a single DenseAqt layer."""
+    layer_kwargs = {
+        'kernel_init': kernel_init,
+        'features': num_features,
+        'axis': axis,
+        'use_bias': False,
+        'train': False,
+        'dtype': jnp.float32,
+        'kernel_axis_names': kernel_axis_names,
+        'reshape_kernel': reshape_kernel,
+    }
+    layer_kwargs['hparams'] = flax_layers.DenseGeneralAqt.HParams(
+        weight_prec=weight_prec,
+        quant_act=None,
+        weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL,
+        weight_half_shift=weight_half_shift)
+
+    dense_module = flax_layers.DenseGeneralAqt(**layer_kwargs)
+    initial_state = dense_module.init(self.rng_key, jnp.zeros(inputs.shape))
+    return dense_module, initial_state
+
+  @parameterized.named_parameters(
+      dict(testcase_name='float', weight_prec=None),
+      dict(
+          testcase_name='quant_fp143_scaled',
+          weight_prec=fp143_scaled,
+      ),
+      dict(
+          testcase_name='quant_fp143',
+          weight_prec=fp143_unscaled,
+      ),
+      dict(testcase_name='quant_8bit', weight_prec=8),
+      dict(testcase_name='quant_4bit', weight_prec=4),
+      dict(testcase_name='quant_4bit_no_reshape', weight_prec=4, reshape=False),
+      dict(testcase_name='quant_2bit', weight_prec=2),
+  )
+  def test_ones_weights_should_give_precise_output(self,
+                                                   weight_prec,
+                                                   reshape=True):
+    """If all weights are 1, no quantization error should be introduced."""
+    inputs = random.uniform(self.rng_key, shape=(2, 3, 4))
+    axis = (1, 2)
+    model, state = self.init_model_with_1_layer(
+        inputs,
+        num_features=5,
+        axis=axis,
+        kernel_init=initializers.ones,
+        weight_prec=weight_prec,
+        weight_half_shift=False,
+        reshape_kernel=reshape)
+    outputs = model.apply(state, inputs)
+    contract_ind = tuple(range(0, len(axis)))
+    exp_outputs = lax.dot_general(
+        inputs,
+        jnp.reshape(state['params']['kernel'], (3, 4, 5)),
+        dimension_numbers=((axis, contract_ind), ((), ())))
+    onp.testing.assert_array_almost_equal(outputs, exp_outputs)
+
+  @parameterized.named_parameters(
+      dict(testcase_name='reshape_kernel', reshape_kernel=True),
+      dict(testcase_name='no_reshape', reshape_kernel=False),
+  )
+  def test_logical_axis_names(self, reshape_kernel):
+    inputs = random.uniform(self.rng_key, shape=(2, 3, 1, 4))
+    _, state = self.init_model_with_1_layer(
+        inputs,
+        num_features=4,
+        axis=(2, 3),
+        kernel_init=initializers.ones,
+        weight_prec=8,
+        weight_half_shift=False,
+        kernel_axis_names=('embed', 'head', 'mlp'),
+        reshape_kernel=reshape_kernel)
+
+    expected_shape_axes = [
+        'float32', 'embed * head=4', 'mlp=4'
+    ] if reshape_kernel else ['float32', 'embed=1', 'head=4', 'mlp=4']
+
+    self.assertDictEqual(
+        param_dtypes_shapes_axes(state['params'], state['params_axes']),
+        {'kernel': expected_shape_axes})
+
+  @parameterized.named_parameters(
+      dict(testcase_name='dense_quant_8bit', weight_prec=8),
+      dict(testcase_name='dense_quant_4bit', weight_prec=4),
+      dict(testcase_name='dense_quant_2bit', weight_prec=2),
+  )
+  def test_full_range_integer_weights_should_give_precise_output(
+      self, weight_prec):
+    # If weights are ints (already quantized) and
+    # max(abs(weights[:, ch])) == 2**(prec-1)-1 in each channel,
+    # no quantization error should be introduced.
+    num_features = 256
+    input_dim = 1024
+    inputs = random.uniform(self.rng_key, shape=(2, input_dim))
+    model, state = self.init_model_with_1_layer(
+        inputs,
+        num_features,
+        axis=(1,),
+        weight_prec=weight_prec,
+        weight_half_shift=False)
+    minval = -2**(weight_prec - 1) + 1
+    maxval = 2**(weight_prec - 1) - 1
+
+    full_range_integer_weights = random.randint(self.rng_key,
+                                                (input_dim, num_features),
+                                                minval, maxval + 1)
+
+    # manually set one value in each output dim of weights to be exactly maxval
+    full_range_integer_weights = full_range_integer_weights.at[0, :].set(maxval)
+    state = state.unfreeze()
+    state['params']['kernel'] = full_range_integer_weights
+    state = flax.core.freeze(state)
+    outputs = model.apply(state, inputs)
+    exp_outputs = jnp.matmul(inputs, state['params']['kernel'])
+    onp.testing.assert_array_equal(outputs, exp_outputs)
+
+  @parameterized.named_parameters(
+      # TODO(shivaniagrawal): this test is flaky and fails with rtol=0.0004
+      # with given rtol=0.0001
+      # dict(
+      #     testcase_name='dense_quant_8bit',
+      #     layer_class=flax_layers.DenseAqt,
+      #     weight_prec=8),
+      dict(testcase_name='dense_quant_4bit', weight_prec=4),
+      dict(testcase_name='dense_quant_2bit', weight_prec=2),
+  )
+  def test_full_range_integer_weights_with_float_scale_should_give_close_output(
+      self, weight_prec):
+    # If weights are ints (already quantized) with
+    # max(abs(weights[:, ch])) == 2**(prec-1)-1 in each channel
+    # and if these integer weights are multiplied by a float scale,
+    # the resulting error should still be very small (just float rounding).
+
+    num_features = 256
+    input_dim = 1024
+    inputs = random.uniform(self.rng_key, shape=(2, input_dim))
+    model, state = self.init_model_with_1_layer(
+        inputs, num_features, axis=(1,), weight_prec=weight_prec)
+    minval = -2**(weight_prec - 1) + 1
+    maxval = 2**(weight_prec - 1) - 1
+
+    full_range_integer_weights = random.randint(self.rng_key,
+                                                (input_dim, num_features),
+                                                minval, maxval + 1)
+
+    # manually set one value in each output dim of weights to be exactly maxval
+    full_range_integer_weights = full_range_integer_weights.at[0, :].set(maxval)
+
+    float_scale = jax.random.uniform(self.rng_key, (1, num_features))
+    state = state.unfreeze()
+    state['params']['kernel'] = full_range_integer_weights * float_scale
+    state = flax.core.freeze(state)
+    outputs = model.apply(state, inputs)
+    exp_outputs = jnp.matmul(inputs, state['params']['kernel'])
+    # TODO(wanglisa): Determine how much noise is expected for following test.
+    # We know that the noise should be proportional to the square root of
+    # input_dim and inversely proportional to 2**weight_prec.
+    # The following tol_const was obtained experimentally and should be derived
+    # more systematically.
+    tol_const = 8e-04
+    onp.testing.assert_allclose(
+        outputs,
+        exp_outputs,
+        rtol=jnp.sqrt(input_dim) * 2**(-weight_prec) * tol_const)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='dense_quant_fp143_scaled',
+          weight_prec=fp143_scaled,
+          weight_scale=onp.array([1, 2, 4, 8]),
+      ),
+      dict(
+          testcase_name='dense_quant_8bit',
+          weight_prec=8,
+          weight_scale=onp.array([1, 2, 4, 8])),
+      dict(
+          testcase_name='dense_quant_4bit',
+          weight_prec=4,
+          weight_scale=onp.array([1, 2, 4, 8])),
+      dict(
+          testcase_name='dense_quant_2bit',
+          weight_prec=2,
+          weight_scale=onp.array([1, 2, 4, 8])),
+  )
+  def test_weight_invariance_to_power_of_2_weight_scaling(
+      self, weight_prec, weight_scale):
+    # Scaling the weights before quantization by a power of 2 per channel should
+    # also scale the output exactly by the same scale.
+
+    inputs = random.uniform(self.rng_key, shape=(2, 3))
+    model, state = self.init_model_with_1_layer(
+        inputs, num_features=4, axis=(1,), weight_prec=weight_prec)
+    weights = random.uniform(self.rng_key, shape=(3, 4))
+    weight_scale = weight_scale[jnp.newaxis, :]
+    state = state.unfreeze()
+    state['params']['kernel'] = weights
+    state = flax.core.freeze(state)
+    outputs_without_scaling = model.apply(state, inputs)
+    state = state.unfreeze()
+    state['params']['kernel'] = jnp.multiply(weights, weight_scale)
+    state = flax.core.freeze(state)
+    outputs_with_scaling = model.apply(state, inputs)
+
+    onp.testing.assert_array_equal(outputs_without_scaling * weight_scale,
+                                   outputs_with_scaling)
+
+  def test_1_bit_makes_all_weight_equal_to_zero(self):
+    inputs = random.uniform(self.rng_key, shape=(2, 3))
+    model, state = self.init_model_with_1_layer(
+        inputs, num_features=4, axis=(1,), weight_prec=1)
+    weights = random.uniform(
+        self.rng_key, shape=state['params']['kernel'].shape)
+    state = state.unfreeze()
+    state['params']['kernel'] = weights
+    state = flax.core.freeze(state)
+    outputs = model.apply(state, inputs)
+    onp.testing.assert_array_equal(outputs, onp.zeros((2, 4)))
+
+  # TODO(shivaniagrawal): change mock tests to check for QuantOps than
+  # primitives.
+  @parameterized.named_parameters(
+      dict(testcase_name='dense_quant_8bit', weight_prec=8),
+      dict(testcase_name='dense_quant_4bit', weight_prec=4),
+      dict(testcase_name='dense_quant_2bit', weight_prec=2),
+  )
+  @mock.patch.object(primitives, 'round_with_gradient')
+  @mock.patch.object(primitives, 'floor_with_gradient')
+  def test_quantized_weights_should_call_clip_and_round(self,
+                                                        floor_with_gradient,
+                                                        round_with_gradient,
+                                                        weight_prec):
+
+    round_with_gradient.side_effect = lambda x: x
+    floor_with_gradient.side_effect = lambda x: x
+
+    num_features = 4
+    inputs = jnp.ones((2, 3), dtype=jnp.float32)
+    model, state = self.init_model_with_1_layer(
+        inputs, num_features, weight_prec=weight_prec, weight_half_shift=False)
+
+    round_with_gradient.assert_called_with(mock.ANY)
+    self.assertEqual(round_with_gradient.call_count, 1)
+    floor_with_gradient.assert_not_called()
+
+    round_with_gradient.reset_mock()
+    floor_with_gradient.reset_mock()
+
+    outputs = model.apply(state, inputs)
+
+    self.assertEqual(outputs.shape, (inputs.shape[0], num_features))
+    round_with_gradient.assert_called_with(mock.ANY)
+    self.assertEqual(round_with_gradient.call_count, 1)
+    floor_with_gradient.assert_not_called()
+
+  @mock.patch.object(primitives, 'round_with_gradient')
+  @mock.patch.object(primitives, 'floor_with_gradient')
+  def test_without_quantized_weights_should_not_call_quantization_ops(
+      self, floor_with_gradient, round_with_gradient):
+
+    round_with_gradient.side_effect = lambda x: x
+    floor_with_gradient.side_effect = lambda x: x
+    inputs = jnp.ones((2, 3), dtype=jnp.float32)
+    model, state = self.init_model_with_1_layer(inputs, num_features=4)
+    _ = model.apply(state, inputs)
+    round_with_gradient.assert_not_called()
+    floor_with_gradient.assert_not_called()
+
+
 class DenseGeneralTest(parameterized.TestCase):
 
   # pylint: disable=unused-argument
@@ -1307,10 +1598,20 @@ class DenseGeneralTest(parameterized.TestCase):
     return jnp.ones(shape, dtypes.canonicalize_dtype(dtype)) * val
   # pylint: enable=unused-argument
 
+  def setUp(self):
+    super(DenseGeneralTest, self).setUp()
+    self.hparams = flax_layers.DenseGeneralAqt.HParams(
+        weight_prec=None,
+        quant_act=None,
+        weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL,
+        weight_half_shift=False)
+
   def test_dense_general_no_bias(self):
     rng = random.PRNGKey(0)
     x = jnp.ones((1, 3))
     model = flax_layers.DenseGeneralAqt(
+        hparams=self.hparams,
+        train=False,
         features=4,
         use_bias=False,
         kernel_init=initializers.ones,
@@ -1323,6 +1624,8 @@ class DenseGeneralTest(parameterized.TestCase):
     rng = random.PRNGKey(0)
     x = jnp.ones((1, 3))
     model = flax_layers.DenseGeneralAqt(
+        hparams=self.hparams,
+        train=False,
         features=4,
         use_bias=True,
         kernel_init=initializers.ones,
@@ -1336,6 +1639,8 @@ class DenseGeneralTest(parameterized.TestCase):
     rng = random.PRNGKey(0)
     x = jnp.ones((1, 3))
     model = flax_layers.DenseGeneralAqt(
+        hparams=self.hparams,
+        train=False,
         features=(2, 2),
         use_bias=False,
         kernel_init=initializers.ones,
@@ -1355,6 +1660,8 @@ class DenseGeneralTest(parameterized.TestCase):
     rng = random.PRNGKey(0)
     x = jnp.ones((1, 2, 2))
     model = flax_layers.DenseGeneralAqt(
+        hparams=self.hparams,
+        train=False,
         features=3,
         use_bias=False,
         axis=(-2, 2),  # Note: this is the same as (1, 2).
