@@ -53,9 +53,6 @@ def should_int8_quantize(
     rhs_quantizer: aqt_tensor.TensorQuantizer) -> bool:
   """Determines whether or not to quantize."""
 
-  assert lhs_quantizer._last_update.value == rhs_quantizer._last_update.value, (
-      'lhs_quantizer._last_update != rhs_quantizer._last_update')
-
   lhs_configs = lhs_quantizer.config.tensor_configs
   rhs_configs = rhs_quantizer.config.tensor_configs
 

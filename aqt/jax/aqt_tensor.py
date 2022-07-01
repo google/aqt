@@ -20,8 +20,8 @@ from typing import Iterable, List, Optional, Tuple
 
 from aqt.common import aqt_common
 from aqt.common import aqt_config
-from aqt.jax_legacy.jax.flax import struct as flax_struct
 from flax import linen as nn
+from flax import struct
 import jax
 import jax.numpy as jnp
 
@@ -32,19 +32,19 @@ def pass_through(x: jnp.ndarray, fn) -> jnp.ndarray:
   return x - jax.lax.stop_gradient(x) + jax.lax.stop_gradient(fn(x))
 
 
-@flax_struct.dataclass
+@struct.dataclass
 class Stats:
   """Manages efficient gatherting of running statistics."""
 
   data_shape: List[int]
-  stats_shape: List[int]
-  config: aqt_config.StatsConfig
   ema_update_count: int
   sum_of_ones: jnp.ndarray
   sum_of_vals: jnp.ndarray
   max_of_abs_vals: jnp.ndarray
   sum_of_l1_vals: jnp.ndarray
   sum_of_lp_vals: jnp.ndarray
+  stats_shape: List[int] = struct.field(pytree_node=False)
+  config: aqt_config.StatsConfig = struct.field(pytree_node=False)
 
   @classmethod
   def init_stats(
@@ -117,7 +117,7 @@ class Stats:
         else:
           s = s * weight
       reduce_fn = jnp.max if reduce_max else jnp.sum
-      s = reduce_fn(s, axis=list(self.config.share_stats_axes), keepdims=True)
+      s = reduce_fn(s, axis=self.config.share_stats_axes, keepdims=True)
       if self.config.tpu_cross_replica_sum:
         raise NotImplementedError(
             'support for tpu_cross_replica_sum=True is not implemented')
@@ -204,7 +204,7 @@ class TensorQuantizer(nn.Module):
 
   TensorQuantizer assumes the supplied `event_count` strictly monotonically
   increases across `TensorQuantizer.update` calls and starts out strictly
-  greater than `tf.int64.min`.
+  greater than `int32.min`.
 
   Attributes:
     data_shape: the shape of input tensor. Some dimensions may be of unknown
@@ -235,7 +235,7 @@ class TensorQuantizer(nn.Module):
                                               'quantized_variable',
                                               lambda: None)
     self._last_update = self.variable('TensorQuantizer', 'last_update',
-                                      lambda: jnp.iinfo(jnp.int64).min)
+                                      lambda: jnp.iinfo(jnp.int32).min)
 
   def __call__(self):
     # Keep __call__() just not to require users to explicitly specify which
@@ -326,14 +326,14 @@ class TensorQuantizer(nn.Module):
     was_previously_inactive = not is_config_active(config,
                                                    self._last_update.value)
 
-    # We rely on jnp.int64.min being an illegal event count value, so that
-    # even if is_config_active(config, jnp.int64.min), we still update scale.
+    # We rely on jnp.int32.min being an illegal event count value, so that
+    # even if is_config_active(config, jnp.int32.min), we still update scale.
     # This could happen if the very first update happens for a config which
     # has freeze_scale_at_begin and begin=None.
-    assert event_count > jnp.iinfo(jnp.int64).min, ('event_count cannot be '
-                                                    'int64.min')
+    assert event_count > jnp.iinfo(jnp.int32).min, ('event_count cannot be '
+                                                    'int32.min')
 
-    first_event = jnp.array(self._last_update.value == jnp.iinfo(jnp.int64).min)
+    first_event = jnp.array(self._last_update.value == jnp.iinfo(jnp.int32).min)
 
     return was_previously_inactive | first_event
 
