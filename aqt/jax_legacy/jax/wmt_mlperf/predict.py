@@ -53,14 +53,18 @@ def step(inputs, params, cache, state, eos_token, max_decode_len,
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       use_bfloat16=False)
-  encoded_inputs = decode.flat_batch_beam_expand(
-      model.apply({
+  # Yucheng: Adding sparsity to the mutable list, to enable
+  # evaluation phase masking
+  new_logits, _ = model.apply(
+      {
           'params': params,
           **state
       },
-                  inputs,
-                  method=model.encode,
-                  mutable=False), beam_size)
+      inputs,
+      method=model.encode,
+      mutable=['sparsity'])
+  encoded_inputs = decode.flat_batch_beam_expand(
+      new_logits, beam_size)
 
   def tokens_ids_to_logits(flat_ids, flat_cache):
     """Token slice to logits from decoder model."""
@@ -74,6 +78,8 @@ def step(inputs, params, cache, state, eos_token, max_decode_len,
         dropout_rate=0.0,
         attention_dropout_rate=0.0,
         use_bfloat16=False)
+    # Yucheng: Adding sparsity to the mutable list, to enable
+    # evaluation phase masking
     flat_logits, new_vars = model.apply(
         {
             'params': params,
@@ -85,7 +91,7 @@ def step(inputs, params, cache, state, eos_token, max_decode_len,
         targets=flat_ids,
         tgt_padding_mask=tgt_padding_mask,
         method=model.decode,
-        mutable=['cache'])
+        mutable=['cache', 'sparsity'])
     new_flat_cache = new_vars['cache']
 
     return flat_logits, new_flat_cache

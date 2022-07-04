@@ -563,13 +563,16 @@ def eval_step(params: Mapping[str, Any], batch, state: Mapping[str, Any],
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       should_decode=False)
-  logits = model.apply({
-      'params': params,
-      **state
-  },
-                       inputs,
-                       targets,
-                       mutable=False)
+  # Yucheng: Adding sparsity to the mutable list, to enable
+  # evaluation phase masking
+  logits, _ = model.apply(
+      {
+          'params': params,
+          **state
+      },
+      inputs,
+      targets,
+      mutable=['sparsity'])
   return compute_metrics(logits, targets, weights)
 
 
