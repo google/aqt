@@ -175,17 +175,39 @@ class DenseAqt(nn.Module):
 
     inputs = jnp.asarray(inputs, self.dtype)
 
-    use_quantized_vars_for_inference = self.possibly_use_quantized_vars and not self.train
-    if use_quantized_vars_for_inference:
+    # Here are 3 possible conditions:
+    #   1. not quantization: init normal kernel, quant_w = None
+    #   2. quantization and train mode: init normal kernel, quantized kernel
+    #      with bfloat16 to avoid gradient on integer and quant_w = None.
+    #   3. quantization and inference mode: no normal kernel, init quantized
+    #      kernel with int8 and quant_w = (qkernel, qscale).
+    quant_w = None
+    if (not self.possibly_use_quantized_vars) or (
+        self.possibly_use_quantized_vars and self.train):
+      kernel = partitioning.param_with_axes(
+          'kernel',
+          self.kernel_init,
+          kernel_shape,
+          axes=tuple(kernel_axis_names))
+      kernel = jnp.asarray(kernel, self.dtype)
+
+
+    if self.possibly_use_quantized_vars:
+      qkernel_dtype = self.dtype
+      qkernel_initializer = self.kernel_init
+      if not self.train:
+        qkernel_dtype = jax.numpy.int8
+        qkernel_initializer = nn.initializers.zeros
+
       qkernel = partitioning.param_with_axes(
           'qkernel',
-          nn.initializers.zeros,
+          qkernel_initializer,
           kernel_shape,
-          jax.numpy.int8,
+          qkernel_dtype,
           axes=tuple(kernel_axis_names))
-
+      qkernel = jnp.asarray(qkernel, qkernel_dtype)
       # Initialization of scale does not matter so we are initializing with
-      # bias_init.
+      # bias_init. And here only support quantizing on first dimension.
       scale_axis_names = list(kernel_axis_names)
       scale_axis_names[0] += '_qscale'
       qscale = partitioning.param_with_axes(
@@ -193,16 +215,9 @@ class DenseAqt(nn.Module):
           self.bias_init, (1,) + features,
           axes=tuple(scale_axis_names))
       qscale = jnp.asarray(qscale, self.dtype)
-      quant_w = quantization.QuantW(qkernel, qscale)
-      kernel = None
-    else:
-      quant_w = None
-      kernel = partitioning.param_with_axes(
-          'kernel',
-          self.kernel_init,
-          kernel_shape,
-          axes=tuple(kernel_axis_names))
-      kernel = jnp.asarray(kernel, self.dtype)
+      if not self.train:
+        quant_w = quantization.QuantW(qkernel, qscale)
+        kernel = None
 
 
     get_bounds_params = get_bounds.GetBounds.Params(
@@ -393,14 +408,37 @@ class DenseGeneralAqt(nn.Module):
             _reshaped_axis_names(kernel_axis_names[len(axis):]),
         )
 
-    use_quantized_vars_for_inference = self.possibly_use_quantized_vars and not self.train
-    if use_quantized_vars_for_inference:
+    # Here are 3 possible conditions:
+    #   1. not quantization: init normal kernel, quant_w = None
+    #   2. quantization and train mode: init normal kernel, quantized kernel
+    #      with bfloat16 to avoid gradient on integer and quant_w = None.
+    #   3. quantization and inference mode: no normal kernel, init quantized
+    #      kernel with int8 and quant_w = (qkernenl, qscale).
+    quant_w = None
+    if (not self.possibly_use_quantized_vars) or (
+        self.possibly_use_quantized_vars and self.train):
+      kernel = partitioning.param_with_axes(
+          'kernel',
+          self.kernel_init,
+          kernel_param_shape,
+          jnp.float32,
+          axes=tuple(kernel_axis_names))
+      kernel = jnp.asarray(kernel, self.dtype)
+      kernel = jnp.reshape(kernel, kernel_shape)
+
+    if self.possibly_use_quantized_vars:
+      qkernel_dtype = self.dtype
+      qkernel_initializer = self.kernel_init
+      if not self.train:
+        qkernel_dtype = jax.numpy.int8
+        qkernel_initializer = nn.initializers.zeros
       qkernel = partitioning.param_with_axes(
           'qkernel',
-          nn.initializers.zeros,
+          qkernel_initializer,
           kernel_param_shape,
-          jax.numpy.int8,
+          qkernel_dtype,
           axes=tuple(kernel_axis_names))
+      qkernel = jnp.asarray(qkernel, qkernel_dtype)
       qkernel = jnp.reshape(qkernel, kernel_shape)
 
       # Initialization of scale does not matter so we are initializing with
@@ -416,18 +454,9 @@ class DenseGeneralAqt(nn.Module):
           axes=tuple(scale_axis_names))
       qscale = jnp.asarray(qscale, self.dtype)
       qscale = jnp.reshape(qscale, scale_shape)
-      quant_w = quantization.QuantW(qkernel, qscale)
-      kernel = None
-    else:
-      quant_w = None
-      kernel = partitioning.param_with_axes(
-          'kernel',
-          self.kernel_init,
-          kernel_param_shape,
-          jnp.float32,
-          axes=tuple(kernel_axis_names))
-      kernel = jnp.asarray(kernel, self.dtype)
-      kernel = jnp.reshape(kernel, kernel_shape)
+      if not self.train:
+        quant_w = quantization.QuantW(qkernel, qscale)
+        kernel = None
 
     contract_ind = tuple(range(0, len(axis)))
 

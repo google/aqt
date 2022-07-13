@@ -514,7 +514,10 @@ class DenseAqtTest(parameterized.TestCase):
                               weight_prec=None,
                               quant_act=None,
                               weight_half_shift=False,
-                              kernel_axis_names=None):
+                              kernel_axis_names=None,
+                              train=False,
+                              possibly_use_quantized_vars=False,
+                              quant_type=QuantType.FAKE_QUANT):
     """Create and initialize a flax model with a single DenseAqt layer."""
     dynamic_context = quant_config.DynamicContext(
         update_bounds=False, collect_acts_stats=False)
@@ -524,14 +527,15 @@ class DenseAqtTest(parameterized.TestCase):
         'use_bias': False,
         'dynamic_context': dynamic_context,
         'paxis_name': 'batch',
-        'train': False,
+        'train': train,
         'dtype': jnp.float32,
-        'kernel_axis_names': kernel_axis_names
+        'kernel_axis_names': kernel_axis_names,
+        'possibly_use_quantized_vars': possibly_use_quantized_vars
     }
     layer_kwargs['hparams'] = flax_layers.DenseAqt.HParams(
         weight_prec=weight_prec,
         quant_act=quant_act,
-        quant_type=QuantType.FAKE_QUANT,
+        quant_type=quant_type,
         weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL,
         weight_half_shift=weight_half_shift)
 
@@ -1056,6 +1060,54 @@ class DenseAqtTest(parameterized.TestCase):
     layer.apply(state, x, padding_mask=None)
     weight_params = mock_quantized_dot_general.call_args[1]['weight_params']
     self.assertEqual(weight_params.axis, axis)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='train_quant',
+          train=True,
+          possibly_use_quantized_vars=True,
+          param_info={
+              'kernel': ['float32', 'embed=3', 'mlp=3'],
+              'qkernel': ['float32', 'embed=3', 'mlp=3'],
+              'qscale': ['float32', 'embed_qscale=1', 'mlp=3']
+          }),
+      dict(
+          testcase_name='inference_quant',
+          train=False,
+          possibly_use_quantized_vars=True,
+          param_info={
+              'qkernel': ['int8', 'embed=3', 'mlp=3'],
+              'qscale': ['float32', 'embed_qscale=1', 'mlp=3']
+          }),
+      dict(
+          testcase_name='train_without_quant',
+          train=True,
+          possibly_use_quantized_vars=False,
+          param_info={'kernel': ['float32', 'embed=3', 'mlp=3']}),
+      dict(
+          testcase_name='inference_without_quant',
+          train=True,
+          possibly_use_quantized_vars=False,
+          param_info={'kernel': ['float32', 'embed=3', 'mlp=3']}),
+  )
+  def test_train_inference_differentiation(self, train,
+                                           possibly_use_quantized_vars,
+                                           param_info):
+    num_features = 3
+    inputs = random.uniform(self.rng_key, shape=(2, 3))
+
+    _, state = self.init_model_with_1_layer(
+        inputs,
+        num_features=num_features,
+        weight_prec=8,
+        train=train,
+        possibly_use_quantized_vars=possibly_use_quantized_vars,
+        kernel_axis_names=('embed', 'mlp'),
+        quant_type=QuantType.AQT)
+
+    self.assertDictEqual(
+        param_dtypes_shapes_axes(state['params'], state['params_axes']),
+        param_info)
 
 
 class EmbedLayerTest(parameterized.TestCase):
