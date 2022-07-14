@@ -194,7 +194,7 @@ class DenseAqt(nn.Module):
 
     if self.possibly_use_quantized_vars:
       qkernel_dtype = self.dtype
-      qkernel_initializer = self.kernel_init
+      qkernel_initializer = nn.initializers.zeros
       if not self.train:
         qkernel_dtype = jax.numpy.int8
         qkernel_initializer = nn.initializers.zeros
@@ -428,7 +428,7 @@ class DenseGeneralAqt(nn.Module):
 
     if self.possibly_use_quantized_vars:
       qkernel_dtype = self.dtype
-      qkernel_initializer = self.kernel_init
+      qkernel_initializer = nn.initializers.zeros
       if not self.train:
         qkernel_dtype = jax.numpy.int8
         qkernel_initializer = nn.initializers.zeros
