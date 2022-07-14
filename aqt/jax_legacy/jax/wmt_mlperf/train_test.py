@@ -144,7 +144,7 @@ class TrainTest(parameterized.TestCase):
     training_state_restored = training_state_initial.restore_checkpoint(
         model_dir=ckpt_dir)
 
-    leaf_equality_tree = jax.tree_multimap(lambda x, y: jnp.all(x == y),
+    leaf_equality_tree = jax.tree_map(lambda x, y: jnp.all(x == y),
                                            training_state.flax_state,
                                            training_state_restored.flax_state)
     self.assertTrue(

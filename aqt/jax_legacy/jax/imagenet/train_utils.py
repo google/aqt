@@ -143,11 +143,11 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
     # if is_fin == False the gradients contain Inf/NaNs and the old optimizer
     # state should be restored.
     new_state = new_state.replace(
-        opt_state=jax.tree_multimap(
+        opt_state=jax.tree_map(
             functools.partial(jnp.where, is_fin),
             new_state.opt_state,
             state.opt_state),
-        params=jax.tree_multimap(
+        params=jax.tree_map(
             functools.partial(jnp.where, is_fin),
             new_state.params,
             state.params))
