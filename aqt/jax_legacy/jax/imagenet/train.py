@@ -42,9 +42,9 @@ from aqt.jax_legacy.utils import summary_utils
 
 from flax import jax_utils
 from flax.metrics import tensorboard
-from flax.optim import dynamic_scale as dynamic_scale_lib
 from flax.training import checkpoints
 from flax.training import common_utils
+from flax.training import dynamic_scale as dynamic_scale_lib
 import jax
 from jax import random
 import jax.nn
