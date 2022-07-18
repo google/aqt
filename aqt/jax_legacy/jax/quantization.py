@@ -728,10 +728,50 @@ def flaxformer_dot_general(*,
                            w: Optional[jnp.ndarray],
                            dimension_numbers: lax.DotDimensionNumbers,
                            weight_params: QuantOps.WeightParams,
+                           act_hparams: Optional[QuantOps.ActHParams],
+                           bounds_params: Union[None,
+                                                get_bounds.DynamicBounds.Params,
+                                                get_bounds.GetBounds.Params],
                            dot_precision: Optional[PrecisionType] = None,
                            quant_w: Optional[QuantW] = None) -> jnp.ndarray:
   """Flaxformer dot general with optionally quantized weights and activations."""
   input_dtype = act.dtype
+  is_weight_quantized = False
+  is_act_quantized = False
+  (axis, _), (_, _) = dimension_numbers
+  act_scale_shape = tuple(
+      [act.shape[dim] if dim not in axis else 1 for dim in range(0, act.ndim)])
+  if w is not None:
+    weight_scale_shape = (1,) * len(axis) + tuple(
+        [w.shape[dim] for dim in range(len(axis), w.ndim)])
+  elif quant_w is not None:
+    weight_scale_shape = (1,) * len(axis) + tuple([
+        quant_w.quantized_w.shape[dim]
+        for dim in range(len(axis), quant_w.quantized_w.ndim)
+    ])
+  else:
+    raise ValueError('Either of w or quant_w must be not None')
+
+  if act_hparams is not None and act_hparams.prec is not None:
+    # Calculate 's', the per-column scale factor on activations.
+    act_op = QuantOps.create_input_ops(
+        act, hparams=act_hparams, bounds_params=bounds_params)
+    act_quantized = act_op.to_quantized(act, dtype=input_dtype)
+
+    # Now calculate s^-1.  First we extract s, the activation scale factor,
+    # into a  variable called 'act_scale'. We extract it from 'act_op', the
+    # QuantOps instance that calculated the scale factors for the activation
+    # matrix.
+    act_scale = act_op._scale.astype(input_dtype)  # pylint: disable=protected-access
+    is_act_quantized = True
+  else:
+    act_scale = jnp.ones(act_scale_shape, act.dtype)
+
+    # In this case, activations are not being quantized; only weights. There
+    # is no need to absorb activation scales into the rows of the weight
+    # matrix so 'w_scaled_rows' can just be set to the original weight matrix.
+    act_quantized = act
+    act_scale = jnp.ones(act_scale_shape, act.dtype)
 
   if weight_params is not None and weight_params.prec is not None:
     if quant_w is not None:
@@ -750,10 +790,12 @@ def flaxformer_dot_general(*,
       # TODO(malmaud): See comment on 'act_op.to_quantized' above, which
       # applies here as well.
       weight_quantized = weight_op.to_quantized(w, dtype=input_dtype)
+      is_weight_quantized = True
   else:
     assert w is not None, ('w can not be None if weight quantization is not '
                            'specified.')
     weight_quantized = w
+    weight_scale = jnp.ones(weight_scale_shape, w.dtype)
 
   weight_prec = None if weight_params is None else weight_params.prec
   metadata_context = contextlib.suppress()
@@ -778,17 +820,14 @@ def flaxformer_dot_general(*,
     # Calculate matmul(...)
     # we are not quantizing activations yet, hence not using int8 matmul
     out_quantized = lax.dot_general(
-        act,
+        act_quantized,
         weight_quantized,
         dimension_numbers=dimension_numbers,
         precision=dot_precision)
 
-  if weight_params is not None and weight_params.prec is not None:
-    (axis, _), (_, _) = dimension_numbers
-    act_scale_shape = tuple([
-        act.shape[dim] if dim not in axis else 1 for dim in range(0, act.ndim)
-    ])
-    act_scale = jnp.ones(act_scale_shape, act.dtype)
+  if is_weight_quantized or is_act_quantized:
+    if act_scale.ndim == 0 or act_scale.ndim == 1:
+      act_scale = act_scale.reshape((1,) * act.ndim)
 
     inv_scale = lax.dot_general(
         (1 / act_scale),

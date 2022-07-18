@@ -39,7 +39,8 @@ class DynamicBounds(nn.Module):
 
   @dataclass
   class Hyper:
-    """Hyperparameters for GetBounds."""
+    """Hyperparameters for DynamicBounds."""
+    granularity: quant_config.QuantGranularity
     # Clipping coefficient applied during dynamic quantization.
     # E.g. if it is 0.9 then dynamic scale will be reduced by 10%.
     clipping_coeff: float = 1.0
@@ -75,7 +76,24 @@ class DynamicBounds(nn.Module):
 
     x = jnp.asarray(x, jnp.float32)
 
-    abs_max_x = primitives.max_abs_weights(x, axis=bounds_params.quant_axis)
+    hyper = self.hyper
+
+    if bounds_params.quant_axis is not None:
+      quant_axis = bounds_params.quant_axis
+    else:
+      if hyper.granularity == quant_config.QuantGranularity.PER_TENSOR:
+        # Equivalently, this could be written as
+        # quant_axis = tuple(range(x.ndim))
+        quant_axis = None
+      elif hyper.granularity == quant_config.QuantGranularity.PER_CHANNEL:
+        # Quantize by aggregating activation statistics across all dimensions of
+        # the activation tensor EXCEPT the batch dimension. Also known as per
+        # example statistics
+        quant_axis = tuple(range(1, x.ndim))
+      else:
+        raise ValueError(f'Unknown granularity {hyper.granularity}')
+
+    abs_max_x = primitives.max_abs_weights(x, axis=quant_axis)
 
     return abs_max_x * self.hyper.clipping_coeff
 
