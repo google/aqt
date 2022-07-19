@@ -404,10 +404,11 @@ class TensorQuantizer:
     def qparams(
         config: aqt_config.AqtTensorConfig,
         check_active: bool = True
-    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
       """Returns quant parameters for fixed AQT config."""
 
       should_quantize = tf.constant(0.0)
+      is_unsigned = tf.constant(0.0)
       clip_bound = tf.constant(0.0)
       shift_before = tf.constant(0.0)
       shift_after = tf.constant(0.0)
@@ -417,10 +418,12 @@ class TensorQuantizer:
 
       if isinstance(config.quant_config, aqt_config.FloatConfig):
         clip_bound = tf.where_v2(config_active, float('inf'), 0.0)
-        return should_quantize, clip_bound, shift_before, shift_after
+        return should_quantize, is_unsigned, clip_bound, shift_before, shift_after
 
       config_active = tf.cast(config_active, tf.float32)
       should_quantize += config_active
+      is_unsigned = tf.cast(not config.quant_config.use_signed_int_bound,
+                            tf.float32) * should_quantize
 
       # TODO(vladf): some serving environments, such as adbrain,
       # automatically rewrite constants from f32 to bf16, which makes the
@@ -435,30 +438,32 @@ class TensorQuantizer:
       else:
         shift_after += config_active * 0.5
 
-      return should_quantize, clip_bound, shift_before, shift_after
+      return should_quantize, is_unsigned, clip_bound, shift_before, shift_after
 
     if not train and self.config.inference_config_index is not None:
-      should_quantize, clip_bound, shift_before, shift_after = qparams(
+      should_quantize, is_unsigned, clip_bound, shift_before, shift_after = qparams(
           self.config.tensor_configs[self.config.inference_config_index],
           check_active=False)
     elif self.config.tensor_configs:
-      should_quantize, clip_bound, shift_before, shift_after = zip(
+      should_quantize, is_unsigned, clip_bound, shift_before, shift_after = zip(
           *map(qparams, self.config.tensor_configs))
       should_quantize = tf.add_n(should_quantize)
+      is_unsigned = tf.add_n(is_unsigned)
       clip_bound = tf.add_n(clip_bound)
       shift_before = tf.add_n(shift_before)
       shift_after = tf.add_n(shift_after)
     else:
-      should_quantize = clip_bound = shift_before = shift_after = tf.constant(
+      should_quantize = is_unsigned = clip_bound = shift_before = shift_after = tf.constant(
           0.0)
 
     should_quantize = tf.cast(should_quantize, tf.bool)
-    return should_quantize, clip_bound, shift_before, shift_after
+    is_unsigned = tf.cast(is_unsigned, tf.bool)
+    return should_quantize, is_unsigned, clip_bound, shift_before, shift_after
 
   def _to_quant(self, x: tf.Tensor, train: bool) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity."""
     with tf.variable_scope('to_quant'):
-      should_quantize, clip_bound, shift_before, shift_after = (
+      should_quantize, is_unsigned, clip_bound, shift_before, shift_after = (
           self._quantization_params(train))
 
       scale = tf.where_v2(  #
@@ -472,9 +477,20 @@ class TensorQuantizer:
       # and there's no branching on ops including the input tensor x. This
       # results in significant memory reduction, see cl/415355150.
       x = scale * x
-      x = tf.clip_by_value(x, -clip_bound, clip_bound)
-      x += shift_before
-      x = tf.grad_pass_through(maybe_floor)(x)
+
+      def clip_to_signed_int(x):
+        x = tf.clip_by_value(x, -clip_bound, clip_bound)
+        x += shift_before
+        x = tf.grad_pass_through(maybe_floor)(x)
+        return x
+
+      def clip_to_unsigned_int(x):
+        x = tf.grad_pass_through(maybe_floor)(x)
+        x = tf.clip_by_value(x, 0, clip_bound - 1)
+        return x
+
+      x = tf.cond(is_unsigned, lambda: clip_to_unsigned_int(x),
+                  lambda: clip_to_signed_int(x))
       x += shift_after
 
       return x
@@ -485,11 +501,17 @@ class TensorQuantizer:
     # computation in _to_quant to derive this clip mask instead of a separate
     # method.
     with tf.variable_scope('clip_mask'):
-      should_quantize, clip_bound, _, _ = (self._quantization_params(train))
+      should_quantize, is_unsigned, clip_bound, _, _ = (
+          self._quantization_params(train))
       scale = tf.where_v2(  #
           should_quantize, self._scale.read_value(),
           tf.ones_like(self._scale.read_value()))
-      return tf.abs(scale * x) > clip_bound
+      x_scaled = scale * x
+      mask = tf.where_v2(
+          is_unsigned,  #
+          (x_scaled < 0) | (x_scaled > (clip_bound - 1)),
+          tf.abs(x_scaled) > clip_bound)
+      return mask
 
   def _from_quant_scale(self, train: bool) -> tf.Tensor:
     """Scale to dequantize the active quant config, if any, else ones."""

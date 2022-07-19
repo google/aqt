@@ -178,8 +178,8 @@ def _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train):
   def is_int8_compatible(lhs_config, rhs_config):
     return (isinstance(lhs_config.quant_config, aqt_config.IntQuantConfig) and
             isinstance(rhs_config.quant_config, aqt_config.IntQuantConfig) and
-            lhs_config.quant_config.bits <= 8 and
-            rhs_config.quant_config.bits <= 8)
+            lhs_config.quant_config.compatible_with_int8() and
+            rhs_config.quant_config.compatible_with_int8())
 
   lhs_index = lhs_quantizer.config.inference_config_index
   rhs_index = rhs_quantizer.config.inference_config_index

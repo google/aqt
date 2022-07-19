@@ -52,6 +52,8 @@ def get_clip_bound(config: aqt_config.IntQuantConfig) -> float:
   config.validate()
   assert config.bits <= 23, 'Too many bits, float32 has less precision.'
   bucket_count = 2.0**config.bits
+  if not config.use_signed_int_bound:
+    return bucket_count
   if config.preserve_zero:
     bucket_count -= 1.0
   return bucket_count / 2.0
@@ -75,6 +77,8 @@ def safe_clip_bound(config: aqt_config.IntQuantConfig) -> float:
     A value slightly below `get_clip_bound()`.
   """
   cb_unsafe = get_clip_bound(config)
+  if not config.use_signed_int_bound:
+    return cb_unsafe
   # It is essential that x is not clipped to cb_unsafe, but a smaller number.
   # Clipping to cb_unsafe moves the return value to a new and incorrect bucket.
   # The max supported (config.bits)-sized signed int is (2**(config.bits-1)-1).

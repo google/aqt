@@ -149,10 +149,13 @@ class IntQuantConfig(_BaseConfig):
       Number of bits to quantize to (e.g 4 for int4). Must be positive.
     preserve_zero:
       Whether or not zeros should be representable.
+    use_signed_int_bound:
+      Whether or not signed int bounds are used.
   """
   # pyformat: enable
   bits: int
   preserve_zero: bool = True
+  use_signed_int_bound: bool = True
 
   def validate(self):
     if self.bits < 1:
@@ -160,7 +163,7 @@ class IntQuantConfig(_BaseConfig):
 
   def compatible_with_int8(self) -> bool:
     """Checks if the config is compatible with int8."""
-    return self.bits <= 8
+    return self.bits <= 8 and self.use_signed_int_bound
 
 
 @dataclasses.dataclass

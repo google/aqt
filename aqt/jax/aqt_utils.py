@@ -61,8 +61,8 @@ def should_int8_quantize(
     for rhs_config in rhs_configs:
       if (isinstance(lhs_config.quant_config, aqt_config.IntQuantConfig) and
           isinstance(rhs_config.quant_config, aqt_config.IntQuantConfig) and
-          lhs_config.quant_config.bits <= 8 and
-          rhs_config.quant_config.bits <= 8):
+          lhs_config.quant_config.compatible_with_int8() and
+          rhs_config.quant_config.compatible_with_int8()):
         should_quantize |= (
             aqt_tensor.is_config_active(lhs_config,
                                         lhs_quantizer._last_update.value)

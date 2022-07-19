@@ -343,10 +343,11 @@ class TensorQuantizer(nn.Module):
     def qparams(
         config: aqt_config.AqtTensorConfig,
         check_active: bool = True
-    ) -> Tuple[bool, jnp.array, jnp.array, jnp.array]:
+    ) -> Tuple[bool, bool, jnp.array, jnp.array, jnp.array]:
       """Returns parameters for AQT quantization routine."""
 
       should_quantize = False
+      is_unsigned = False
       clip_bound = jnp.array(0.0)
       shift_before = jnp.array(0.0)
       shift_after = jnp.array(0.0)
@@ -356,10 +357,12 @@ class TensorQuantizer(nn.Module):
 
       if isinstance(config.quant_config, aqt_config.FloatConfig):
         clip_bound = jnp.where(config_active, float('inf'), 0.0)
-        return should_quantize, clip_bound, shift_before, shift_after
+        return should_quantize, is_unsigned, clip_bound, shift_before, shift_after
 
       should_quantize |= config_active
       config_active = jnp.float32(config_active)
+      is_unsigned = (
+          not config.quant_config.use_signed_int_bound) & should_quantize
 
       clip_bound += config_active * aqt_common.safe_clip_bound(
           config.quant_config)
@@ -369,22 +372,24 @@ class TensorQuantizer(nn.Module):
       else:
         shift_after += config_active * 0.5
 
-      return should_quantize, clip_bound, shift_before, shift_after
+      return should_quantize, is_unsigned, clip_bound, shift_before, shift_after
 
     if not train and self.config.inference_config_index is not None:
-      should_quantize, clip_bound, shift_before, shift_after = qparams(
+      should_quantize, is_unsigned, clip_bound, shift_before, shift_after = qparams(
           self.config.tensor_configs[self.config.inference_config_index],
           check_active=False)
     elif self.config.tensor_configs:
-      should_quantize, clip_bound, shift_before, shift_after = zip(
+      should_quantize, is_unsigned, clip_bound, shift_before, shift_after = zip(
           *map(qparams, self.config.tensor_configs))
       should_quantize = any(should_quantize)
+      is_unsigned = any(is_unsigned)
       clip_bound = sum(clip_bound)
       shift_before = sum(shift_before)
       shift_after = sum(shift_after)
     else:
       clip_bound = shift_before = shift_after = 0.0
       should_quantize = False
+      is_unsigned = False
 
     scale = jnp.where(should_quantize, self._scale.value,
                       jnp.ones_like(self._scale.value))
@@ -395,9 +400,20 @@ class TensorQuantizer(nn.Module):
     # and there's no branching on ops including the input tensor x. This
     # results in significant memory reduction, see cl/415355150.
     x = scale * x
-    x = jnp.clip(x, -clip_bound, clip_bound)
-    x += shift_before
-    x = pass_through(x, maybe_floor)
+
+    def clip_to_signed_int(x):
+      x = jnp.clip(x, -clip_bound, clip_bound)
+      x += shift_before
+      x = pass_through(x, maybe_floor)
+      return x
+
+    def clip_to_unsigned_int(x):
+      x = pass_through(x, maybe_floor)
+      x = jnp.clip(x, 0, clip_bound - 1)
+      return x
+
+    x = jax.lax.cond(is_unsigned, lambda: clip_to_unsigned_int(x),
+                     lambda: clip_to_signed_int(x))
     # TODO(b/219778053): Add a test that validates the shift of values. Mutants
     # found that removing the line below doesn't affect any tests.
     x += shift_after
