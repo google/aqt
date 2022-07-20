@@ -558,3 +558,82 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     update(1, q_index_1)
     check_quant(q_index_1, train=True)
     check_quant(q_index_1, train=False)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="1bit", prec=1), dict(testcase_name="2bit", prec=2),
+      dict(testcase_name="4bit", prec=4), dict(testcase_name="8bit", prec=8))
+  def test_clip_to_unsigned_int(self, prec):
+    """Checks if an input gets clipped to [0, 2**prec-1] when use_signed_int_bound=False."""
+    iqc = aqt_config.IntQuantConfig(
+        bits=prec, preserve_zero=True, use_signed_int_bound=False)
+    cc = aqt_config.CalibrationConfig(const_bound_coeff=2**prec)
+    sc = aqt_config.StatsConfig(
+        ema_update_count=1,
+        share_stats_axes=[0, 1],
+        tpu_cross_replica_sum=False)
+    tc = aqt_config.AqtTensorConfig(
+        quant_config=iqc,
+        calibration_config=cc,
+        freeze_scale_at_begin=True)
+    config = aqt_config.AqtScheduleConfig(sc, [tc])
+
+    x = f32(2.0**8 * np.random.uniform(0, 1.0, size=(1024, 1)))
+    quant = self.make_tensor_quantizer(
+        data_shape=x.shape, config=config, name="quantizer")
+    self.init()
+    event_count = np.array(0, dtype=np.int64)
+    self.update_quantizer(quant, x, None, event_count)
+    qx = self.to_quant(quant, x)
+    self.assertGreaterEqual(np.min(qx), 0.0)
+    self.assertLessEqual(np.max(qx), np.float32(2**prec - 1))
+    np.testing.assert_allclose(qx, np.around(qx))
+
+  def test_single_quant_with_unsigned_int_bound(self):
+    """Compares quantization with unsigned int bound to hand-computed example."""
+    iqc = aqt_config.IntQuantConfig(bits=3, use_signed_int_bound=False)
+    cc = aqt_config.CalibrationConfig(const_bound_coeff=8)
+    sc = aqt_config.StatsConfig(
+        ema_update_count=1,
+        share_stats_axes=[0, 1],
+        tpu_cross_replica_sum=False,
+    )
+    config = aqt_config.AqtTensorConfig(
+        quant_config=iqc,
+        calibration_config=cc,
+        freeze_scale_at_begin=True,
+    )
+    config = aqt_config.AqtScheduleConfig(sc, [config])
+    # representable values: 0, 1, 2, ..., 6, 7,
+
+    x = f32([
+        [0.99, 1.01, 1.99, 2.01],  #
+        [2.99, 3.01, 3.99, 4.01],  #
+        [4.99, 5.01, 5.99, 6.01],  #
+        [6.99, 7.01, 7.99, 8.01],  #
+        [-0.99, -1.01, -1.99, -2.01],  #
+        [-2.99, -3.01, -3.99, -4.01],  #
+        [-4.99, -5.01, -5.99, -6.01],  #
+        [-6.99, -7.01, -7.99, -8.01],  #
+    ])
+    expected_output = f32([
+        [0.00, 1.00, 1.00, 2.00],  #
+        [2.00, 3.00, 3.00, 4.00],  #
+        [4.00, 5.00, 5.00, 6.00],  #
+        [6.00, 7.00, 7.00, 7.00],  #
+        [-0.00, -0.00, -0.00, -0.00],  #
+        [-0.00, -0.00, -0.00, -0.00],  #
+        [-0.00, -0.00, -0.00, -0.00],  #
+        [-0.00, -0.00, -0.00, -0.00],  #
+    ])
+
+    quant = self.make_tensor_quantizer(data_shape=[8, 4], config=config)
+
+    self.init()
+    event_count = np.array(0, dtype=np.int64)
+    self.update_quantizer(quant, x, np.full((1, 1), 1, dtype=np.float32),
+                          event_count)
+    ix = self.to_quant(quant, x)
+    qx = self.from_quant_scale(quant) * ix
+    self.assertAllEqual(self.get_scale(quant), np.full((1, 1), 1.0,
+                                                       dtype=np.float32))
+    self.assertAllEqual(qx, expected_output)
