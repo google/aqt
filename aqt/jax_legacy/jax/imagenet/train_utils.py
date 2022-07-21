@@ -29,8 +29,8 @@ from aqt.jax_legacy.jax.imagenet import pokebnn
 import flax
 from flax import jax_utils
 from flax import struct
-from flax.optim import dynamic_scale as dynamic_scale_lib
 from flax.training import common_utils
+from flax.training import dynamic_scale as dynamic_scale_lib
 import jax
 from jax import lax
 import jax.nn
