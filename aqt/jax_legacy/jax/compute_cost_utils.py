@@ -24,7 +24,6 @@ from jax._src.lax import convolution as lax_convolution
 from jax._src.lax import lax
 from jax.interpreters import ad
 from jax.interpreters import batching
-from jax.interpreters import masking
 from jax.interpreters import mlir
 import numpy as onp
 # pylint: disable=g-direct-tensorflow-import
@@ -70,7 +69,6 @@ class DotMetadataMonkeyPatch(contextlib.ContextDecorator):
     ad.defbilinear(lax.dot_general_p, lax._dot_general_transpose_lhs,
                    lax._dot_general_transpose_rhs)
     batching.primitive_batchers[lax.dot_general_p] = lax._dot_general_batch_rule
-    masking.masking_rules[lax.dot_general_p] = lax._dot_general_masking_rule
     mlir.register_lowering(lax.dot_general_p, lax._dot_general_lower)
     # pylint: enable=protected-access
 
@@ -117,8 +115,6 @@ class ConvMetadataMonkeyPatch(contextlib.ContextDecorator):
                    lax_convolution._conv_general_dilated_transpose_rhs)
     batching.primitive_batchers[lax_convolution.conv_general_dilated_p] = (
         lax_convolution._conv_general_dilated_batch_rule)
-    masking.masking_rules[lax_convolution.conv_general_dilated_p] = (
-        lax_convolution._conv_general_dilated_masking_rule)
     # pylint: enable=protected-access
 
   def __exit__(self, *exc):
