@@ -364,7 +364,7 @@ def dot_product_attention(query,
     shape_utils.assert_shapes_equal(query_padding_mask_transposed.shape,
                                     (batch_size, 1, query_sequence_length, 1))
 
-  key_get_bounds_params = get_bounds.GetBounds.Params(
+  key_bounds_params = get_bounds.GetBounds.Params(
       update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
@@ -387,7 +387,7 @@ def dot_product_attention(query,
         channel_axis=None, name='attn_act_v', update_stats=train)(
             value, mask=value_padding_mask_transposed)
 
-  value_get_bounds_params = get_bounds.GetBounds.Params(
+  value_bounds_params = get_bounds.GetBounds.Params(
       update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
@@ -404,7 +404,7 @@ def dot_product_attention(query,
         channel_axis=None, name='attn_act_q', update_stats=train)(
             query, mask=query_padding_mask_transposed)
 
-  query_get_bounds_params = get_bounds.GetBounds.Params(
+  query_bounds_params = get_bounds.GetBounds.Params(
       update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
@@ -420,9 +420,9 @@ def dot_product_attention(query,
       dot_precision=precision,
       quant_type=hparams.quant_type,
       lhs_act_hparams=hparams.attn_act_q,
-      lhs_get_bounds_params=query_get_bounds_params,
+      lhs_bounds_params=query_bounds_params,
       rhs_act_hparams=hparams.attn_act_k,
-      rhs_get_bounds_params=key_get_bounds_params,
+      rhs_bounds_params=key_bounds_params,
   )
   # NOTE(shivaniagrawal): we do per-layer quantization here since that's the
   # only way for activation*activation matmuls to be aqt compatible since we use
@@ -471,7 +471,7 @@ def dot_product_attention(query,
         'act quantization bounds should '
         'be set to fix value 1.0 to '
         'match Softmax range.')
-  probs_get_bounds_params = get_bounds.GetBounds.Params(
+  probs_bounds_params = get_bounds.GetBounds.Params(
       update_bounds=dynamic_context.update_bounds,
       update_stats=train,
       paxis_name=paxis_name,
@@ -487,9 +487,9 @@ def dot_product_attention(query,
       dot_precision=precision,
       quant_type=hparams.quant_type,
       lhs_act_hparams=hparams.attn_act_probs,
-      lhs_get_bounds_params=probs_get_bounds_params,
+      lhs_bounds_params=probs_bounds_params,
       rhs_act_hparams=hparams.attn_act_v,
-      rhs_get_bounds_params=value_get_bounds_params,
+      rhs_bounds_params=value_bounds_params,
   )
   # NOTE(shivaniagrawal): we do per-layer quantization here since that's the
   # only way for activation*activation matmuls to be aqt compatible since we

@@ -133,9 +133,9 @@ class ComputeCostUtilsTest(parameterized.TestCase):
           bounds=get_bounds_hyper,
           prec=rhs_prec,
           half_shift=False)
-      lhs_get_bounds_params = get_bounds.GetBounds.Params(
+      lhs_bounds_params = get_bounds.GetBounds.Params(
           update_stats=False, update_bounds=False, module_name='lhs')
-      rhs_get_bounds_params = get_bounds.GetBounds.Params(
+      rhs_bounds_params = get_bounds.GetBounds.Params(
           update_stats=False, update_bounds=False, module_name='rhs')
       output = quantization.quantized_dynamic_dot_general(
           lhs_act=lhs_act,
@@ -144,8 +144,8 @@ class ComputeCostUtilsTest(parameterized.TestCase):
           rhs_act_hparams=rhs_act_hparams,
           dot_dimension_numbers=(((1,), (0,)), ((), ())),
           quant_type=QuantType.AQT,
-          lhs_get_bounds_params=lhs_get_bounds_params,
-          rhs_get_bounds_params=rhs_get_bounds_params)
+          lhs_bounds_params=lhs_bounds_params,
+          rhs_bounds_params=rhs_bounds_params)
       return output
 
   @parameterized.named_parameters(

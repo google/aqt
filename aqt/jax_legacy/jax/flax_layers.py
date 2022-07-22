@@ -220,7 +220,7 @@ class DenseAqt(nn.Module):
         kernel = None
 
 
-    get_bounds_params = get_bounds.GetBounds.Params(
+    bounds_params = get_bounds.GetBounds.Params(
         update_bounds=self.dynamic_context.update_bounds,
         update_stats=self.train,
         paxis_name=self.paxis_name,
@@ -260,7 +260,7 @@ class DenseAqt(nn.Module):
         quant_type=hparams.quant_type,
         weight_params=weight_params,
         act_hparams=hparams.quant_act,
-        get_bounds_params=get_bounds_params,
+        bounds_params=bounds_params,
         dimension_numbers=(contracting_dims, batch_dims),
         dot_precision=self.precision,
         prefer_int8_to_int32_dot=self.dynamic_context.prefer_int8_to_int32_dot,
@@ -606,7 +606,7 @@ class ConvAqt(nn.Module):
       inputs = QuantOps.create_inputs_fake_quant(
           inputs=inputs,
           hparams=hparams.quant_act,
-          get_bounds_params=get_bounds.GetBounds.Params(
+          bounds_params=get_bounds.GetBounds.Params(
               update_bounds=self.dynamic_context.update_bounds,
               update_stats=self.train,
               paxis_name=self.paxis_name))
@@ -839,7 +839,7 @@ class EmbedAqt(nn.Module):
 
     # TODO(malmaud): Remove the 'mask' field from this struct so we can
     # make this struct a hyperparameter of the EncoderAqt class.
-    get_bounds_params = get_bounds.GetBounds.Params(
+    bounds_params = get_bounds.GetBounds.Params(
         update_bounds=self.dynamic_context.update_bounds,
         update_stats=self.train,
         paxis_name=self.paxis_name,
@@ -849,7 +849,7 @@ class EmbedAqt(nn.Module):
     out = self.quantized_dot(
         act=query,
         w=jnp.transpose(embedding),
-        get_bounds_params=get_bounds_params)
+        bounds_params=bounds_params)
 
     return out
 

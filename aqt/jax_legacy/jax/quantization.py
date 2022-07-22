@@ -53,7 +53,8 @@ dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.d
 
 # ActBounds can be an Jax array of floats with a shape that is broadcastable to
 # the shape of activation tensors.
-ActsBoundT = Union[float, jnp.ndarray, get_bounds.GetBounds.Hyper, None]
+ActsBoundT = Union[float, jnp.ndarray, get_bounds.GetBounds.Hyper,
+                   get_bounds.DynamicBounds.Hyper, None]
 
 
 @dataclass
@@ -464,13 +465,15 @@ class QuantOps:
   @classmethod
   def create_input_ops(
       cls, inputs: jnp.ndarray, *, hparams: ActHParams,
-      get_bounds_params: Optional[get_bounds.GetBounds.Params]) -> 'QuantOps':
+      bounds_params: Union[get_bounds.GetBounds.Params,
+                           get_bounds.DynamicBounds.Params, None]
+  ) -> 'QuantOps':
     """Create a QuantOps that can quantize and dequantize an activation tensor.
 
     Args:
       inputs: The inputs to quantize.
       hparams: Input hyperparameter (ActHParams).
-      get_bounds_params: GetBoundsParams. Parameters for GetBounds.
+      bounds_params: BoundsParams. Parameters for GetBounds or DynamicBounds.
 
     Returns:
       Quantized and rescaled inputs using fake quant approach.
@@ -499,15 +502,28 @@ class QuantOps:
     # activation statistics to avoid the need to rely on special bounds values
     # when disabling quantization.
     if isinstance(hparams.bounds, get_bounds.GetBounds.Hyper):
-      if not get_bounds_params:
+      if not bounds_params and not isinstance(bounds_params,
+                                              get_bounds.GetBounds.Params):
         raise ValueError(
             'act_hparams.bounds is of type GetBounds.Hyper, user must '
-            'provide get_bounds_params, parameters for GetBounds.')
+            'provide bounds_params, parameters for GetBounds.')
       clip_bounds = get_bounds.GetBounds(
-          hyper=hparams.bounds, name=get_bounds_params.module_name)(
+          hyper=hparams.bounds, name=bounds_params.module_name)(
               inputs,
-              bounds_params=get_bounds_params,
+              bounds_params=bounds_params,
           )
+    elif isinstance(hparams.bounds, get_bounds.DynamicBounds.Hyper):
+      if not bounds_params and not isinstance(bounds_params,
+                                              get_bounds.DynamicBounds.Params):
+        raise ValueError(
+            'act_hparams.bounds is of type DynamicBounds.Hyper, user must '
+            'provide bounds_params, parameters for DynamicBounds.')
+      clip_bounds = get_bounds.DynamicBounds(
+          hyper=hparams.bounds, name=bounds_params.module_name)(
+              inputs,
+              bounds_params=bounds_params,
+          )
+
     elif isinstance(hparams.bounds, (float, jnp.ndarray)):
       clip_bounds = hparams.bounds
     else:
@@ -525,9 +541,9 @@ class QuantOps:
     else:
       assert False, "can't happen."
 
-    if get_bounds_params and get_bounds_params.expected_bounds_shape is not None:
+    if bounds_params and bounds_params.expected_bounds_shape is not None:
       if isinstance(hparams.bounds, get_bounds.GetBounds.Hyper):
-        ops.assert_scale_shape_is(shape=get_bounds_params.expected_bounds_shape)
+        ops.assert_scale_shape_is(shape=bounds_params.expected_bounds_shape)
       else:
         logging.info(
             'Ignoring value of argument expected_scale_shape. Scale for fixed '
@@ -537,13 +553,15 @@ class QuantOps:
   @classmethod
   def create_inputs_fake_quant(
       cls, inputs: jnp.ndarray, *, hparams: ActHParams,
-      get_bounds_params: Optional[get_bounds.GetBounds.Params]) -> jnp.ndarray:
+      bounds_params: Union[None, get_bounds.GetBounds.Params,
+                           get_bounds.DynamicBounds.Params]
+  ) -> jnp.ndarray:
     """Quantize input with fake quant approach.
 
     Args:
       inputs: The inputs to quantize.
       hparams: Input hyperparameter (ActHParams).
-      get_bounds_params: GetBoundsParams. Parameters for GetBounds.
+      bounds_params: GetBounds or DynamicBounds Params.
 
     Returns:
       Quantized and rescaled inputs using fake quant approach.
@@ -554,7 +572,7 @@ class QuantOps:
       return inputs
 
     ops = cls.create_input_ops(
-        inputs, hparams=hparams, get_bounds_params=get_bounds_params)
+        inputs, hparams=hparams, bounds_params=bounds_params)
 
     quantized_inputs = ops.fake_quant(inputs, quantized_type=SCALE_DTYPE)
     return lax.cond(ops.should_quantize(), lambda _: quantized_inputs,
@@ -615,7 +633,8 @@ def quantized_dot(*,
                   quant_type: QuantType,
                   weight_params: QuantOps.WeightParams,
                   act_hparams: Optional[QuantOps.ActHParams],
-                  get_bounds_params: Optional[get_bounds.GetBounds.Params],
+                  bounds_params: Union[get_bounds.GetBounds.Params,
+                                       get_bounds.DynamicBounds.Params, None],
                   prefer_int8_to_int32_dot: bool,
                   dot_precision: Optional[PrecisionType] = None) -> jnp.ndarray:
   """LAX dot with optionally quantized weights and activations.
@@ -632,8 +651,8 @@ def quantized_dot(*,
       quantization.
     act_hparams: Optional activation quantization hyperparamers; instance of
       QuantOps.ActHParams. None would mean no activation quantization.
-    get_bounds_params: Optional get bounds params for auto activation
-      quantization; instance of GetBounds.Params.
+    bounds_params: Optional bounds params for auto activation
+      quantization; instance of GetBounds.Params or DynamicBounds.Params.
     prefer_int8_to_int32_dot:  Whether to feed lax.dot inputs with an int8 dtype
       and accumulate to int32 dtype if quantizing to 8bits or 4bits. If False,
       inputs are always foating-point.
@@ -673,7 +692,7 @@ def quantized_dot(*,
       quant_type=quant_type,
       weight_params=weight_params,
       act_hparams=act_hparams,
-      get_bounds_params=get_bounds_params,
+      bounds_params=bounds_params,
       prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,
       dimension_numbers=dot_dimension_numbers,
       dot_precision=dot_precision)
@@ -788,8 +807,9 @@ def quantized_dot_general(*,
                           quant_type: QuantType,
                           weight_params: QuantOps.WeightParams,
                           act_hparams: Optional[QuantOps.ActHParams],
-                          get_bounds_params: Optional[
-                              get_bounds.GetBounds.Params],
+                          bounds_params: Union[None,
+                                               get_bounds.GetBounds.Params,
+                                               get_bounds.DynamicBounds.Params],
                           prefer_int8_to_int32_dot: bool,
                           dimension_numbers: lax.DotDimensionNumbers,
                           dot_precision: Optional[PrecisionType] = None,
@@ -807,8 +827,8 @@ def quantized_dot_general(*,
       quantization.
     act_hparams: Optional activation quantization hyperparamers; instance of
       QuantOps.ActHParams. None would mean no activation quantization.
-    get_bounds_params: Optional get bounds params for auto activation
-      quantization; instance of GetBounds.Params.
+    bounds_params: Optional bounds params for auto activation
+      quantization; instance of GetBounds.Params or DynamicBounds.Params.
     prefer_int8_to_int32_dot:  Whether to feed lax.dot inputs with an int8 dtype
       and accumulate to int32 dtype if quantizing to 8bits or 4bits. If False,
       inputs are always foating-point.
@@ -880,7 +900,7 @@ def quantized_dot_general(*,
     if act_hparams is not None and act_hparams.prec is not None:
       # Calculate 's', the per-column scale factor on activations.
       act_op = QuantOps.create_input_ops(
-          act, hparams=act_hparams, get_bounds_params=get_bounds_params)
+          act, hparams=act_hparams, bounds_params=bounds_params)
       is_act_quantized = act_op.should_quantize()
       # Quantize activation matrix by computing RoundAndClip(w*s)
 
@@ -1045,7 +1065,7 @@ def quantized_dot_general(*,
     # quantization.
     if act_hparams:
       act = QuantOps.create_inputs_fake_quant(
-          act, hparams=act_hparams, get_bounds_params=get_bounds_params)
+          act, hparams=act_hparams, bounds_params=bounds_params)
 
     metadata_context = contextlib.suppress()
     # Use metadata context to annotate op metadata with quantization info
@@ -1073,16 +1093,18 @@ class QuantizedDot(nn.Module):
   dot_precision: Optional[PrecisionType] = None
 
   # TODO(malmaud): Remove the 'padding_mask' field from 'GetBounds.Params'
-  # so that 'get_bounds_params' can be a hyperparameter of this class and
+  # so that 'bounds_params' can be a hyperparameter of this class and
   # only the padding mask will be passed as an argumen to '__call__'.
   @nn.compact
   def __call__(
       self, w: jnp.ndarray, act: jnp.ndarray,
-      get_bounds_params: Optional[get_bounds.GetBounds.Params]) -> jnp.ndarray:
+      bounds_params: Union[None, get_bounds.GetBounds.Params,
+                           get_bounds.DynamicBounds.Params]
+  ) -> jnp.ndarray:
     return quantized_dot(
         w=w,
         act=act,
-        get_bounds_params=get_bounds_params,
+        bounds_params=bounds_params,
         quant_type=self.quant_type,
         weight_params=self.weight_params,
         act_hparams=self.act_hparams,
@@ -1096,9 +1118,11 @@ def quantized_dynamic_dot_general(
     rhs_act: jnp.ndarray,
     quant_type: QuantType,
     lhs_act_hparams: Optional[QuantOps.ActHParams],
-    lhs_get_bounds_params: Optional[get_bounds.GetBounds.Params],
+    lhs_bounds_params: Union[None, get_bounds.GetBounds.Params,
+                             get_bounds.DynamicBounds.Params],
     rhs_act_hparams: Optional[QuantOps.ActHParams],
-    rhs_get_bounds_params: Optional[get_bounds.GetBounds.Params],
+    rhs_bounds_params: Union[None, get_bounds.GetBounds.Params,
+                             get_bounds.DynamicBounds.Params],
     dot_dimension_numbers: lax.DotDimensionNumbers,
     dot_precision: Optional[PrecisionType] = None) -> jnp.ndarray:
   """LAX dot general with optionally quantized dynamic inputs.
@@ -1113,11 +1137,11 @@ def quantized_dynamic_dot_general(
     quant_type: quantization strategy
     lhs_act_hparams: Optional activation quantization hyperparamers for lhs act;
       instance of QuantOps.ActHParams. None means no quantization.
-    lhs_get_bounds_params: Optional get bounds params for lhs act auto
+    lhs_bounds_params: Optional get bounds params for lhs act auto
       quantization; instance of GetBounds.Params.
     rhs_act_hparams: Optional activation quantization hyperparamers for rhs act;
       instance of QuantOps.ActHParams. None means no quantization.
-    rhs_get_bounds_params: Optional get bounds params for rhs act auto
+    rhs_bounds_params: Optional get bounds params for rhs act auto
       quantization; instance of GetBounds.Params.
     dot_dimension_numbers: a tuple of tuples of the form
       `((lhs_contracting_dims, rhs_contracting_dims), (lhs_batch_dims,
@@ -1152,7 +1176,8 @@ def quantized_dynamic_dot_general(
 
     def get_tensor_and_scale_for_act(
         act: jnp.ndarray, hparams: Optional[QuantOps.ActHParams],
-        get_bounds_params: Optional[get_bounds.GetBounds.Params]
+        bounds_params: Union[None, get_bounds.GetBounds.Params,
+                             get_bounds.DynamicBounds.Params]
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
       # We check whether activations should be quantized based on 'hparams'. If
       # so, we quantize it. If not, we return it unchanged. In either case, we
@@ -1160,7 +1185,7 @@ def quantized_dynamic_dot_general(
       # lax.dot_general.
       if hparams is not None and hparams.prec is not None:
         quant_op = QuantOps.create_input_ops(
-            act, hparams=hparams, get_bounds_params=get_bounds_params)
+            act, hparams=hparams, bounds_params=bounds_params)
 
         scale = quant_op.get_scale_for_aqt(allow_per_channel_scales=False)
         # Since only per-layer scale factors are supported, we assert that the
@@ -1185,9 +1210,9 @@ def quantized_dynamic_dot_general(
         return act, jnp.array(1.0, dtype=SCALE_DTYPE)
 
     lhs_quantized, lhs_scale = get_tensor_and_scale_for_act(
-        lhs_act, lhs_act_hparams, lhs_get_bounds_params)
+        lhs_act, lhs_act_hparams, lhs_bounds_params)
     rhs_quantized, rhs_scale = get_tensor_and_scale_for_act(
-        rhs_act, rhs_act_hparams, rhs_get_bounds_params)
+        rhs_act, rhs_act_hparams, rhs_bounds_params)
 
     metadata_context = contextlib.suppress()
     # Use metadata context to annotate op metadata with quantization info
@@ -1217,15 +1242,11 @@ def quantized_dynamic_dot_general(
     # quantization.
     if lhs_act_hparams:
       lhs_act = QuantOps.create_inputs_fake_quant(
-          lhs_act,
-          hparams=lhs_act_hparams,
-          get_bounds_params=lhs_get_bounds_params)
+          lhs_act, hparams=lhs_act_hparams, bounds_params=lhs_bounds_params)
 
     if rhs_act_hparams:
       rhs_act = QuantOps.create_inputs_fake_quant(
-          rhs_act,
-          hparams=rhs_act_hparams,
-          get_bounds_params=rhs_get_bounds_params)
+          rhs_act, hparams=rhs_act_hparams, bounds_params=rhs_bounds_params)
 
     metadata_context = contextlib.suppress()
     # Use metadata context to annotate op metadata with quantization info

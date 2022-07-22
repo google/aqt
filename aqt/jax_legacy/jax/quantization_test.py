@@ -203,7 +203,7 @@ class QuantOpsTest(parameterized.TestCase):
         return QuantOps.create_input_ops(
             inputs,
             hparams=hparams,
-            get_bounds_params=GetBounds.Params(
+            bounds_params=GetBounds.Params(
                 update_stats=False, update_bounds=False))
 
     test_module = TestModule(hparams=hparams)
@@ -383,7 +383,7 @@ class ActQuantizationTest(parameterized.TestCase):
             bounds=bounds,
             prec=8.0,
             half_shift=False),
-        get_bounds_params=GetBounds.Params(
+        bounds_params=GetBounds.Params(
             update_stats=False,
             update_bounds=False,
             expected_bounds_shape=expected_inputs_scale_shape))
@@ -441,7 +441,7 @@ class ActQuantizationTest(parameterized.TestCase):
 
     activations = QuantOps.create_inputs_fake_quant(
         inputs=activations,
-        get_bounds_params=GetBounds.Params(
+        bounds_params=GetBounds.Params(
             update_stats=False, update_bounds=False),
         hparams=QuantOps.ActHParams(
             input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
@@ -451,7 +451,7 @@ class ActQuantizationTest(parameterized.TestCase):
 
     scaled_activations = QuantOps.create_inputs_fake_quant(
         inputs=scaled_activations,
-        get_bounds_params=GetBounds.Params(
+        bounds_params=GetBounds.Params(
             update_stats=False, update_bounds=False),
         hparams=QuantOps.ActHParams(
             input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
@@ -497,7 +497,7 @@ class ActQuantizationTest(parameterized.TestCase):
 
     rescaled_activations = QuantOps.create_inputs_fake_quant(
         inputs=activations,
-        get_bounds_params=GetBounds.Params(
+        bounds_params=GetBounds.Params(
             update_stats=False, update_bounds=False),
         hparams=QuantOps.ActHParams(
             input_distribution=QuantOps.ActHParams.InputDistribution.POSITIVE,
@@ -517,7 +517,7 @@ class ActQuantizationTest(parameterized.TestCase):
     activations = random.randint(random.PRNGKey(0), (10, 1), -bounds, bounds)
     rescaled_activations = QuantOps.create_inputs_fake_quant(
         inputs=activations,
-        get_bounds_params=GetBounds.Params(
+        bounds_params=GetBounds.Params(
             update_stats=False, update_bounds=False),
         hparams=QuantOps.ActHParams(
             input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
@@ -586,7 +586,7 @@ class ActQuantizationTest(parameterized.TestCase):
         return quantization.QuantOps.create_inputs_fake_quant(
             inputs,
             hparams=hparams,
-            get_bounds_params=GetBounds.Params(
+            bounds_params=GetBounds.Params(
                 update_stats=True, update_bounds=False))
 
     test_module = TestModule(hparams=hparams)
@@ -671,7 +671,7 @@ class AQTTest(parameterized.TestCase):
           act=self.lhs,
           weight_params=weight_params,
           act_hparams=act_params,
-          get_bounds_params=None,
+          bounds_params=None,
           quant_type=quant_type,
           prefer_int8_to_int32_dot=True)
 
@@ -751,7 +751,7 @@ class AQTTest(parameterized.TestCase):
           act=lhs_ndims_3,
           weight_params=weight_params,
           act_hparams=act_params,
-          get_bounds_params=None,
+          bounds_params=None,
           quant_type=quant_type,
           dimension_numbers=(((lhs_ndims_3.ndim - 1,), (0,)), ((), ())),
           prefer_int8_to_int32_dot=True)
@@ -816,7 +816,7 @@ class AQTTest(parameterized.TestCase):
           act=act,
           weight_params=weight_params,
           act_hparams=act_params,
-          get_bounds_params=None,
+          bounds_params=None,
           quant_type=QuantType.AQT,
           prefer_int8_to_int32_dot=prefer_int8_to_int32_dot)
     act_inputs, weight_inputs = mock_dot_general.call_args[0]
@@ -851,7 +851,7 @@ class AQTTest(parameterized.TestCase):
         act=act,
         weight_params=weight_params,
         act_hparams=act_params,
-        get_bounds_params=None,
+        bounds_params=None,
         quant_type=quant_type,
         prefer_int8_to_int32_dot=True)
     self.assertEqual(output.dtype, input_dtype)
@@ -874,7 +874,7 @@ class AQTTest(parameterized.TestCase):
           act=act,
           weight_params=weight_params,
           act_hparams=act_params,
-          get_bounds_params=None,
+          bounds_params=None,
           quant_type=quant_type,
           prefer_int8_to_int32_dot=True)
 
@@ -901,8 +901,8 @@ class AQTTest(parameterized.TestCase):
         rhs_act=rhs_act,
         lhs_act_hparams=lhs_params,
         rhs_act_hparams=rhs_params,
-        lhs_get_bounds_params=None,
-        rhs_get_bounds_params=None,
+        lhs_bounds_params=None,
+        rhs_bounds_params=None,
         dot_dimension_numbers=(((1,), (0,)), ((), ())),
         quant_type=quant_type)
     self.assertEqual(output.dtype, input_dtype)
@@ -920,8 +920,8 @@ class AQTTest(parameterized.TestCase):
           rhs_act=rhs_act,
           lhs_act_hparams=lhs_params,
           rhs_act_hparams=rhs_params,
-          lhs_get_bounds_params=None,
-          rhs_get_bounds_params=None,
+          lhs_bounds_params=None,
+          rhs_bounds_params=None,
           dot_dimension_numbers=(((1,), (0,)), ((), ())),
           quant_type=QuantType.AQT)
 
@@ -948,8 +948,8 @@ class AQTTest(parameterized.TestCase):
           rhs_act=self.rhs,
           lhs_act_hparams=lhs_params,
           rhs_act_hparams=rhs_params,
-          lhs_get_bounds_params=None,
-          rhs_get_bounds_params=None,
+          lhs_bounds_params=None,
+          rhs_bounds_params=None,
           dot_dimension_numbers=(((1,), (0,)), ((), ())),
           quant_type=quant_type)
 
@@ -989,9 +989,9 @@ class AQTTest(parameterized.TestCase):
             bounds=rhs_get_bounds,
             prec=8,
             half_shift=False)
-        lhs_get_bounds_params = get_bounds.GetBounds.Params(
+        lhs_bounds_params = get_bounds.GetBounds.Params(
             update_stats=True, update_bounds=False, module_name='lhs')
-        rhs_get_bounds_params = get_bounds.GetBounds.Params(
+        rhs_bounds_params = get_bounds.GetBounds.Params(
             update_stats=True, update_bounds=False, module_name='rhs')
         out = quantization.quantized_dynamic_dot_general(
             lhs_act=lhs,
@@ -1000,8 +1000,8 @@ class AQTTest(parameterized.TestCase):
             rhs_act_hparams=rhs_params,
             dot_dimension_numbers=(((1,), (0,)), ((), ())),
             quant_type=QuantType.AQT,
-            lhs_get_bounds_params=lhs_get_bounds_params,
-            rhs_get_bounds_params=rhs_get_bounds_params)
+            lhs_bounds_params=lhs_bounds_params,
+            rhs_bounds_params=rhs_bounds_params)
         return out
 
     lhs = jnp.array([[2.0]])
@@ -1044,8 +1044,8 @@ class AQTTest(parameterized.TestCase):
         rhs_act=rhs_act,
         lhs_act_hparams=lhs_params,
         rhs_act_hparams=rhs_params,
-        lhs_get_bounds_params=None,
-        rhs_get_bounds_params=None,
+        lhs_bounds_params=None,
+        rhs_bounds_params=None,
         dot_dimension_numbers=(((1,), (0,)), ((), ())),
         quant_type=QuantType.AQT)
     lhs_inputs, rhs_inputs = mock_dot_general.call_args[0]
@@ -1066,7 +1066,7 @@ class AQTTest(parameterized.TestCase):
         quant_type=quantization.QuantType.AQT,
         weight_params=weight_params,
         act_hparams=act_hparams,
-        get_bounds_params=None,
+        bounds_params=None,
         prefer_int8_to_int32_dot=True)
     onp.testing.assert_allclose(res, act * w)
 
@@ -1081,8 +1081,8 @@ class AQTTest(parameterized.TestCase):
         quant_type=quantization.QuantType.AQT,
         lhs_act_hparams=act_hparams,
         rhs_act_hparams=act_hparams,
-        lhs_get_bounds_params=None,
-        rhs_get_bounds_params=None,
+        lhs_bounds_params=None,
+        rhs_bounds_params=None,
         dot_dimension_numbers=(((1,), (0,)), ((), ())))
     onp.testing.assert_allclose(res, lhs_act * rhs_act)
 
@@ -1124,7 +1124,7 @@ class QuantizedDotFakeQuantTest(parameterized.TestCase):
         prec=act_prec,
         input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
         half_shift=False) if act_prec else None
-    get_bounds_params = GetBounds.Params(
+    bounds_params = GetBounds.Params(
         update_stats=False, update_bounds=False)
 
     quantization.quantized_dot(
@@ -1133,7 +1133,7 @@ class QuantizedDotFakeQuantTest(parameterized.TestCase):
         quant_type=strategy,
         weight_params=weight_params,
         act_hparams=act_hparams,
-        get_bounds_params=get_bounds_params,
+        bounds_params=bounds_params,
         prefer_int8_to_int32_dot=True)
 
     quantized_type = strategy.to_jax_type()
@@ -1145,7 +1145,7 @@ class QuantizedDotFakeQuantTest(parameterized.TestCase):
         fake_dependency=mock.ANY)
     if act_hparams:
       mock_act_fq.assert_called_with(
-          mock.ANY, hparams=act_hparams, get_bounds_params=get_bounds_params)
+          mock.ANY, hparams=act_hparams, bounds_params=bounds_params)
     else:
       mock_act_fq.assert_not_called()
 
@@ -1178,7 +1178,7 @@ class QuantizedDynamicDotGeneralTest(parameterized.TestCase):
       lhs_act_prec,
       rhs_act_prec,
       strategy=QuantType.FAKE_QUANT):
-    mock_act_fq.side_effect = lambda inputs, hparams, get_bounds_params: inputs
+    mock_act_fq.side_effect = lambda inputs, hparams, bounds_params: inputs
 
     # pylint: disable=g-long-ternary
     lhs_act_hparams = QuantOps.ActHParams(
@@ -1193,7 +1193,7 @@ class QuantizedDynamicDotGeneralTest(parameterized.TestCase):
         half_shift=False) if rhs_act_prec else None
     # pylint: enable=g-long-ternary
 
-    get_bounds_params = GetBounds.Params(
+    bounds_params = GetBounds.Params(
         update_stats=False, update_bounds=False)
 
     quantization.quantized_dynamic_dot_general(
@@ -1202,9 +1202,9 @@ class QuantizedDynamicDotGeneralTest(parameterized.TestCase):
         quant_type=strategy,
         dot_dimension_numbers=self.dimension_numbers,
         lhs_act_hparams=lhs_act_hparams,
-        lhs_get_bounds_params=get_bounds_params,
+        lhs_bounds_params=bounds_params,
         rhs_act_hparams=rhs_act_hparams,
-        rhs_get_bounds_params=get_bounds_params,
+        rhs_bounds_params=bounds_params,
     )
     calls = []
     for prec in [lhs_act_prec, rhs_act_prec]:
@@ -1215,7 +1215,7 @@ class QuantizedDynamicDotGeneralTest(parameterized.TestCase):
             mock.call(
                 mock.ANY,
                 hparams=act_hparams,
-                get_bounds_params=get_bounds_params))
+                bounds_params=bounds_params))
     self.assertLen(calls, mock_act_fq.call_count)
     mock_act_fq.assert_has_calls(calls, any_order=True)
 

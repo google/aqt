@@ -649,7 +649,7 @@ class AttnActsMatmulQuantTest(parameterized.TestCase):
       attn_act_v, update_bounds, paxis_name, train):
 
     mock_inputs_fake_quant.side_effect = (
-        lambda inputs, hparams, get_bounds_params: inputs)
+        lambda inputs, hparams, bounds_params: inputs)
 
     rng = random.PRNGKey(0)
     x = jnp.ones((4, 3, 7))
@@ -679,7 +679,7 @@ class AttnActsMatmulQuantTest(parameterized.TestCase):
             unittest.mock.call(
                 unittest.mock.ANY,
                 hparams=hparam,
-                get_bounds_params=get_bounds.GetBounds.Params(
+                bounds_params=get_bounds.GetBounds.Params(
                     update_stats=train,
                     update_bounds=update_bounds,
                     paxis_name=paxis_name,

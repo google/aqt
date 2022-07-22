@@ -16,7 +16,9 @@
 
 import dataclasses
 import typing
-from typing import Optional, Tuple, Union
+from typing import Iterable, Optional, Tuple, Union
+
+from aqt.jax_legacy.jax import primitives
 from aqt.jax_legacy.jax import quant_config
 from aqt.jax_legacy.jax import shape_utils
 from aqt.jax_legacy.jax.flax import struct as flax_struct
@@ -26,6 +28,56 @@ from jax import lax
 import jax.numpy as jnp
 
 dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+
+
+class DynamicBounds(nn.Module):
+  """Get Bounds of activation using statistics.
+
+  Attributes:
+    hyper: hyperparamater to compute bound from statistics.
+  """
+
+  @dataclass
+  class Hyper:
+    """Hyperparameters for GetBounds."""
+    # Clipping coefficient applied during dynamic quantization.
+    # E.g. if it is 0.9 then dynamic scale will be reduced by 10%.
+    clipping_coeff: float = 1.0
+
+  @dataclass
+  class Params:
+    """Parameters for act quantiztaion using get_bounds."""
+    # Axis along which to quantize activations.
+    quant_axis: Optional[Iterable[int]] = None
+    # Optional shape to verify if bounds shape is expected. Defaults to None.
+    expected_bounds_shape: Union[None, int, Tuple[int, ...]] = None
+    # Optional name of the get_bounds module.
+    module_name: Optional[str] = None
+
+  hyper: Hyper
+
+  @nn.compact
+  def __call__(
+      self,
+      x: jnp.ndarray,
+      *,
+      bounds_params: Params,
+  ) -> jnp.ndarray:
+    """Compute the input batch statistics.
+
+    Args:
+      x: the input to get bounds from using statistics.
+      bounds_params: parameters to compute input's statistics and bounds.
+
+    Returns:
+      Bound value (same shape as inputs).
+    """
+
+    x = jnp.asarray(x, jnp.float32)
+
+    abs_max_x = primitives.max_abs_weights(x, axis=bounds_params.quant_axis)
+
+    return abs_max_x * self.hyper.clipping_coeff
 
 
 class GetBounds(nn.Module):
@@ -74,14 +126,6 @@ class GetBounds(nn.Module):
     fixed_bound: Optional[float] = None
     # whether to use old or new code to compute the bound
     use_old_code: bool = True
-
-    # Whether to use dynamic quantization.
-    # It will dynamically quantize the tensor in training and inference modes.
-    dynamic: bool = False
-
-    # Clipping coefficient applied during dynamic quantization.
-    # E.g. if it is 0.9 then dynamic scale will be reduced by 10%.
-    clipping_coeff: float = 1.0
 
   @dataclass
   class Params:
@@ -144,13 +188,6 @@ class GetBounds(nn.Module):
       stats_shape = (1,) * (x.ndim - 1) + (x.shape[-1],)
     else:
       raise ValueError(f'Unknown granularity {hyper.granularity}')
-
-    if hyper.dynamic:
-      abs_max_x = jnp.max(jnp.abs(x), axis=quant_axis)
-
-      # If dynamic quantization is applied then
-      # there is no need to do stats computation.
-      return abs_max_x * hyper.clipping_coeff
 
     stats_state = self.variable('get_bounds', 'stats', Stats.stats_initializer,
                                 stats_shape)
