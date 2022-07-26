@@ -368,9 +368,6 @@ class DenseGeneralAqt(nn.Module):
     axis = _normalize_axes(axis, inputs.ndim)
 
     hparams = self.hparams
-    if hparams.quant_act is not None:
-      raise ValueError(
-          'activation quantization is not yet supported for DenseGeneralAqt')
 
     if (hparams.weight_prec is not None and
         isinstance(hparams.weight_prec, int) and hparams.weight_prec > 8):
@@ -462,6 +459,21 @@ class DenseGeneralAqt(nn.Module):
 
     weight_quant_granularity = hparams.weight_quant_granularity
 
+    act_quant_axis = None
+    if hparams.quant_act:
+      if isinstance(hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
+        act_quant_granularity = hparams.quant_act.bounds.granularity
+        if act_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
+          act_quant_axis = tuple(axis)
+        elif act_quant_granularity == quant_config.QuantGranularity.PER_TENSOR:
+          act_quant_axis = None
+        else:
+          raise ValueError(
+              f'Invalid quantization granularity {weight_quant_granularity}.')
+      elif isinstance(hparams.quant_act.bounds, get_bounds.GetBounds.Hyper):
+        raise NotImplementedError(
+            'We do not support get_bounds for dot general.')
+
     if weight_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
       # Compute scale factors by reducing over the rows of the weight matrix,
       # resulting in one scale factor per column. This results in one scale
@@ -476,6 +488,8 @@ class DenseGeneralAqt(nn.Module):
       raise ValueError(
           f'Invalid quantization granularity {weight_quant_granularity}.')
 
+    bounds_params = get_bounds.DynamicBounds.Params(quant_axis=act_quant_axis)
+
     weight_params = QuantOps.WeightParams(
         prec=hparams.weight_prec,
         half_shift=hparams.weight_half_shift,
@@ -487,6 +501,8 @@ class DenseGeneralAqt(nn.Module):
         w=kernel,
         dimension_numbers=((axis, contract_ind), ((), ())),
         weight_params=weight_params,
+        act_hparams=hparams.quant_act,
+        bounds_params=bounds_params,
         dot_precision=self.precision,
         quant_w=quant_w)
 
