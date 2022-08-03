@@ -36,6 +36,7 @@ from aqt.jax_legacy.jax import compute_cost_utils
 from aqt.jax_legacy.jax import hlo_utils
 from aqt.jax_legacy.jax import quant_config
 from aqt.jax_legacy.jax import train_utils
+from aqt.jax_legacy.jax.google.sparsity import get_sparsity_mask
 from aqt.jax_legacy.jax.wmt_mlperf import bleu
 from aqt.jax_legacy.jax.wmt_mlperf import input_pipeline
 from aqt.jax_legacy.jax.wmt_mlperf import models
@@ -1158,10 +1159,47 @@ def run_training(
     optimizer = optimizer.replicate()
     logging.info('Replicated optimizer.')
 
+  init_training_state = training_state
   t_loop_start = time.time()
   t_train = timer.MultiIntervalTimer()
   t_train.Start()
+  # The following unfreeze function only creates copy of the original dict,
+  # and so is not solving the issue.
+  # training_state.optimizer.target = flax.core.unfreeze(
+  #     training_state.optimizer.target)
   for step, batch in zip(range(start_step, num_train_steps), train_iter):
+    if FLAGS.find_lth and step == FLAGS.lth_steps:
+      # array_to_sparsify = [
+      #     'encoder.encoderblock_0.mlp_block.dense_1.kernel',
+      # ]
+      # Currently I'm only reinitialzing
+      # 'encoder.encoderblock_0.mlp_block.dense_1.kernel'
+      # as an example. Later I'll add the others.
+      # get mask at the LTH finding step.
+      mask = get_sparsity_mask(
+          training_state.optimizer.target['encoder']['encoderblock_0']
+          ['mlp_block']['dense_1']['kernel'],
+          hparams.model_hparams.encoder
+          .encoder_1d_blocks[0].mlp_block.dense_1.weight_sparsity)
+      # reinitilize training step
+      training_state = init_training_state
+      # masking the initailization
+      kernel = training_state.optimizer.target['encoder']['encoderblock_0'][
+          'mlp_block']['dense_1']['kernel']
+      # setting the masked initialization,
+      # this is where the frozen dict error happens.
+      training_state.optimizer.target['encoder']['encoderblock_0']['mlp_block'][
+          'dense_1']['kernel'] = jnp.where(
+              mask, kernel, jnp.zeros(kernel.shape, kernel.dtype))
+      # print(training_state.optimizer.target['encoder']['encoderblock_0']
+      #       ['mlp_block']['dense_1']['kernel'])
+      # assert 1 < 0
+      # set initial training state directly without modifying target
+      # if FLAGS.full_precision_to_end:
+      #   hparams.mlp_block.dense_1.weight_prec = 16
+      #   hparams.mlp_block.dense_2.weight_prec = 16
+      #   hparams.attention.dense_kqv.weight_prec = 16
+      #   hparams.attention.dense_out.weight_prec = 16
     # Shard data to devices and do a training step.
     training_state, metrics = run_train_step(
         training_state=training_state, batch=batch, step=step, hparams=hparams)

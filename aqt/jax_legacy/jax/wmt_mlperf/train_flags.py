@@ -170,3 +170,18 @@ flags.DEFINE_integer(
         'Tensorboard. Relevant to --visualize_acts_bound and --collect_acts_stats.'
     ))
 
+
+flags.DEFINE_bool(
+    'find_lth',
+    default=True,
+    help='Wether to find the LTH.')
+
+flags.DEFINE_integer(
+    'lth_steps',
+    default=1000,
+    help='At which step to prune.')
+
+flags.DEFINE_bool(
+    'full_precision_to_end',
+    default=False,
+    help='Wether to switch to full-precision to the end.')
