@@ -209,11 +209,11 @@ def _extract_quant_info(
     raise NotImplementedError('Unexpected op detected')
   # If annotated, metadata.op_type would have the following format:
   # '[original op name]_quant_w[weight prec]_a[act prec]'
-  if 'quant' not in instr.metadata.op_type:
+  if 'quant' not in instr.metadata.op_name:
     raise NotImplementedError('Unable to parse {}'.format(
         instr.metadata.op_type))
   [(lhs_prec_str, rhs_prec_str, rhs_is_weight_str)
-  ] = re.findall('_lhs(.*)_rhs(.*)_lw(.*)', instr.metadata.op_type)
+  ] = re.findall(r'_lhs(.*)_rhs(.*)_lw(\d+)', instr.metadata.op_name)
 
   def _extract_prec(prec_str):
     if prec_str.startswith('bf'):
@@ -222,7 +222,7 @@ def _extract_quant_info(
       prec = int(prec_str)
     else:
       raise NotImplementedError('Unable to parse {}'.format(
-          instr.metadata.op_type))
+          instr.metadata.op_name))
     return prec
 
   lhs_prec = _extract_prec(lhs_prec_str)
