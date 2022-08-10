@@ -25,6 +25,8 @@ from flax import struct
 import jax
 import jax.numpy as jnp
 
+# pylint: disable=g-long-lambda
+
 
 def pass_through(x: jnp.ndarray, fn) -> jnp.ndarray:
   # Create an exactly-zero expression with Sterbenz lemma that has an
@@ -276,13 +278,16 @@ class TensorQuantizer(nn.Module):
       event_count: jnp.ndarray):
     """Updates statistics, scale, and quantized variable."""
 
-    active_configs = [c for c in self.config.tensor_configs
-                      if is_config_active(c, event_count)]
+    preds = jnp.array(
+        [is_config_active(c, event_count) for c in self.config.tensor_configs])
+    index = jnp.argwhere(preds, size=1)[0][0]
 
-    if len(active_configs) == 1:
-      self._update_config(active_configs[0], sample, weight, event_count)
-    else:
-      raise ValueError('There must be exactly one active config.')
+    def make_branches(config):
+      return lambda mdl: TensorQuantizer._update_config(mdl, config, sample,
+                                                        weight, event_count)
+
+    branches = [make_branches(c) for c in self.config.tensor_configs]
+    nn.switch(index, branches, self)
 
   def _update_config(
       self,  #,
@@ -299,7 +304,7 @@ class TensorQuantizer(nn.Module):
 
     new_scale, inv_scale = jax.lax.cond(should_update_scale,
                                         lambda: self._fresh_scale(config),
-                                        lambda: (self._scale.value,  # pylint: disable=g-long-lambda
+                                        lambda: (self._scale.value,
                                                  self._inv_scale.value))
     self._scale.value = new_scale
     self._inv_scale.value = inv_scale
@@ -323,15 +328,8 @@ class TensorQuantizer(nn.Module):
 
     # The first time a config is active, even if we freeze scale, we should
     # update the scale.
-    was_previously_inactive = not is_config_active(config,
-                                                   self._last_update.value)
-
-    # We rely on jnp.int32.min being an illegal event count value, so that
-    # even if is_config_active(config, jnp.int32.min), we still update scale.
-    # This could happen if the very first update happens for a config which
-    # has freeze_scale_at_begin and begin=None.
-    assert event_count > jnp.iinfo(jnp.int32).min, ('event_count cannot be '
-                                                    'int32.min')
+    was_previously_inactive = jnp.where(
+        is_config_active(config, self._last_update.value), False, True)
 
     first_event = jnp.array(self._last_update.value == jnp.iinfo(jnp.int32).min)
 
@@ -378,7 +376,7 @@ class TensorQuantizer(nn.Module):
     elif self.config.tensor_configs:
       should_quantize, clip_bound, shift_before, shift_after = zip(
           *map(qparams, self.config.tensor_configs))
-      should_quantize = any(should_quantize)
+      should_quantize = jnp.any(jnp.array(should_quantize))
       clip_bound = sum(clip_bound)
       shift_before = sum(shift_before)
       shift_after = sum(shift_after)

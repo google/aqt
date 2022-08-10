@@ -24,6 +24,7 @@ import jax
 from jax import lax
 import jax.numpy as jnp
 
+# pylint: disable=g-long-lambda
 # pylint: disable=protected-access
 
 
@@ -147,21 +148,25 @@ def _validate_dilation_argument(lhs_quantizer,  #
   rhs_configs = rhs_quantizer.config.tensor_configs
   event_count = lhs_quantizer._last_update.value
 
+  def check_preserve_zero(lhs_dilation, rhs_dilation, lhs_config, rhs_config):
+    if lhs_dilation is not None and not lhs_config.quant_config.preserve_zero:
+      raise aqt_config.ConfigError(
+          f'lhs_config.quant_config.preserve_zero ({lhs_config.quant_config.preserve_zero}) must be True if the input is dilated.'
+      )
+    if rhs_dilation is not None and not rhs_config.quant_config.preserve_zero:
+      raise aqt_config.ConfigError(
+          f'rhs_config.quant_config.preserve_zero ({rhs_config.quant_config.preserve_zero}) must be True if the filter is dilated.'
+      )
+
   for lhs_config, rhs_config in zip(lhs_configs, rhs_configs):
     if (isinstance(lhs_config.quant_config, aqt_config.IntQuantConfig) and
         isinstance(rhs_config.quant_config, aqt_config.IntQuantConfig) and
         lhs_config.quant_config.bits <= 8 and
         rhs_config.quant_config.bits <= 8):
       is_config_active = aqt_tensor.is_config_active(lhs_config, event_count)
-      if is_config_active:
-        if lhs_dilation is not None and not lhs_config.quant_config.preserve_zero:
-          raise aqt_config.ConfigError(
-              f'lhs_config.quant_config.preserve_zero ({lhs_config.quant_config.preserve_zero}) must be True if the input is dilated.'
-          )
-        if rhs_dilation is not None and not rhs_config.quant_config.preserve_zero:
-          raise aqt_config.ConfigError(
-              f'rhs_config.quant_config.preserve_zero ({rhs_config.quant_config.preserve_zero}) must be True if the filter is dilated.'
-          )
+      lax.cond(
+          is_config_active, lambda: check_preserve_zero(
+              lhs_dilation, rhs_dilation, lhs_config, rhs_config), lambda: None)  # pylint: disable=cell-var-from-loop
 
 
 def _validate_inputs(
@@ -281,9 +286,10 @@ def conv_general_dilated(
   should_int8_quantize = aqt_utils.should_int8_quantize(lhs_quantizer,
                                                         rhs_quantizer)
 
-  if should_int8_quantize:
-    _validate_dilation_argument(lhs_quantizer, rhs_quantizer, lhs_dilation,
-                                rhs_dilation)
+  lax.cond(
+      should_int8_quantize, lambda: _validate_dilation_argument(
+          lhs_quantizer, rhs_quantizer, lhs_dilation, rhs_dilation),
+      lambda: None)
 
   conv = _conv_general_aqt(lhs, rhs, lhs_quantizer, rhs_quantizer,
                            should_int8_quantize, train, window_strides, padding,
