@@ -15,6 +15,8 @@
 """Dataclass implementation of AQT configuration."""
 
 import dataclasses
+import enum
+
 from typing import Any, Dict, List, Optional, Type, TypeVar, Union
 
 import dacite
@@ -42,6 +44,9 @@ class _BaseConfig:
         dataclass_dict[field.name] = [
             a.to_dict() if isinstance(a, _BaseConfig) else a for a in attr
         ]
+      # For enums pass the name to use for making the proto.
+      elif isinstance(attr, enum.Enum):
+        dataclass_dict[field.name] = attr.name
       else:
         dataclass_dict[field.name] = attr
 
@@ -163,14 +168,35 @@ class IntQuantConfig(_BaseConfig):
     return self.bits <= 8
 
 
+@enum.unique
+class RoundingMode(enum.Enum):
+  """Supported rounding mode for EmulatedFormat."""
+  ROUND_AWAY_FROM_ZERO = 'round_away_from_zero'
+  ROUND_TO_NEAREST_EVEN = 'round_to_nearest_even'
+  ROUND_STOCHASTIC = 'round_stochastic'
+
+
+@dataclasses.dataclass
+class EmulatedFormat(_BaseConfig):
+  """Enum for emulated lower-precision formats."""
+  exponent_bits: int
+  mantissa_bits: int
+  min_exp: int
+  max_exp: int
+  support_inf: bool
+  rounding_mode: RoundingMode
+
+
 @dataclasses.dataclass
 class FloatConfig(_BaseConfig):
   """Config for non quantization in aqt_ops.
 
   Attributes:
     use_bf16: Whether or not to use bfloat16.
+    emulated_format: If specified, emulate a lower-precision format.
   """
   use_bf16: bool = True
+  emulated_format: Optional[EmulatedFormat] = None
 
 
 @dataclasses.dataclass
