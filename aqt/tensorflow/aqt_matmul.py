@@ -250,7 +250,8 @@ def matmul(
     lhs: tf.Tensor,
     rhs_quantizer: aqt_tensor.TensorQuantizer,
     rhs: tf.Tensor,
-    train: bool = True
+    train: bool = True,
+    force_float: bool = False
 ) -> tf.Tensor:
   """Quantized tf.matmul.
 
@@ -274,6 +275,7 @@ def matmul(
       `TensorQuantizer.update()` in quantized operations rather than the float
       tensor input `lhs` or `rhs` provided to those operations at inference
       time.
+    force_float: force to use float multiplication
 
   Returns:
     Approximate Matmul result.
@@ -296,7 +298,10 @@ def matmul(
           rhs = rhs_quantizer._to_quant(rhs, train)
 
       with tf.name_scope('matmul'):
-        mm = _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train)
+        if force_float:
+          mm = default_matmul(lhs_quantizer, rhs_quantizer, lhs, rhs, train)
+        else:
+          mm = _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train)
 
       with tf.name_scope('from_quant'):
         with tf.name_scope('lhs'):

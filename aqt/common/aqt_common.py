@@ -17,6 +17,8 @@
 from typing import Optional, Sequence
 
 from aqt.common import aqt_config
+import tensorflow.compat.v1 as tf
+from google3.third_party.brain_automl.lib.layers import selections
 
 
 def check_shapes_conformal(actual: Sequence[Optional[int]],
@@ -49,9 +51,14 @@ def check_shapes_conformal(actual: Sequence[Optional[int]],
 
 
 def get_clip_bound(config: aqt_config.IntQuantConfig) -> float:
-  config.validate()
-  assert config.bits <= 23, 'Too many bits, float32 has less precision.'
-  bucket_count = 2.0**config.bits
+  """Return the clip bound for `config`."""
+  if isinstance(config.bits, selections.IntSelection):
+    bits = tf.cast(config.bits.value, dtype=tf.float32)
+  else:
+    config.validate()
+    assert config.bits <= 23, 'Too many bits, float32 has less precision.'
+    bits = config.bits
+  bucket_count = 2.0**bits
   if config.preserve_zero:
     bucket_count -= 1.0
   return bucket_count / 2.0
@@ -82,6 +89,10 @@ def safe_clip_bound(config: aqt_config.IntQuantConfig) -> float:
   # cb_unsafe * (1 - eps) for some float32-representable eps >= 2**-23
   # accomplishes this. On the other hand, any eps above bucket resolution
   # 2**(-config.bits) would overcorrect, underutilizing integer range.
-  cb = cb_unsafe - 2.0**(-20 + config.bits)
-  assert cb < cb_unsafe, 'Internal error, epsilon too small.'
+
+  if isinstance(config.bits, selections.IntSelection):
+    bits = tf.cast(config.bits.value, dtype=tf.float32)
+  else:
+    bits = config.bits
+  cb = cb_unsafe - 2.0**(-20 + bits)
   return cb
