@@ -37,7 +37,7 @@ jax_legacy_install_requires = [
 
 setup(
     name="aqtp",
-    version="0.0.9",
+    version="0.0.10",
     description="AQT: Accurate Quantized Training",
     long_description="\n\n".join([README]),
     long_description_content_type="text/markdown",
