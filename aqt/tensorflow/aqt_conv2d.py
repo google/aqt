@@ -166,11 +166,22 @@ def conv2d(
 
   with tf.control_dependencies([assert_op]):
     with tf.name_scope('AqtConv2d'):
+      with tf.name_scope('get_quant_scale'):
+        with tf.name_scope('input'):
+          input_scale, input_inv_scale = input_quantizer._get_quant_scale(
+              train)  # [N, 1, 1, 1]
+        with tf.name_scope('filter'):
+          filter_scale, filter_inv_scale = filter_quantizer._get_quant_scale(
+              train)  # [1, 1, 1, O]
+
+      input = input_scale * input  # [N, 1, 1, 1] * [N, H, W, C]
+      filter = filter_scale * filter  # [1, 1, 1, O] * [H, W, I, O]
+
       with tf.name_scope('to_quant'):
         with tf.name_scope('input'):
-          input = input_quantizer._to_quant(input, train)
+          input = input_quantizer._to_quant(input, train)  # [N, H, W, C]
         with tf.name_scope('filter'):
-          filter = filter_quantizer._to_quant(filter, train)
+          filter = filter_quantizer._to_quant(filter, train)  # [H, W, I, O]
 
       # TODO(vladf): until tf.conv2d supports int8 arguments, we need to cast
       # the quantized variables to a floating point format.
@@ -185,13 +196,8 @@ def conv2d(
         # TODO(vladf): implement calls to narrowed functions, e.g., int8_conv2d,
         # cased by the bitwidth settings for our tensor quantization
         # configurations, in preparation for quantization support in conv2d.
-        conv = tf.nn.conv2d(input, filter, **tf_conv2d_kwargs)
-
-      with tf.name_scope('from_quant'):
-        with tf.name_scope('input'):
-          input_inv_scale = input_quantizer._from_quant_scale(train)
-        with tf.name_scope('filter'):
-          filter_inv_scale = filter_quantizer._from_quant_scale(train)
+        conv = tf.nn.conv2d(input, filter, **tf_conv2d_kwargs)  # [N, H, W, O]
 
       with tf.name_scope('inv_scale'):
+        # [N, H, W, O] * ([N, 1, 1, 1] * [1, 1, 1, O])
         return conv * (input_inv_scale * filter_inv_scale)

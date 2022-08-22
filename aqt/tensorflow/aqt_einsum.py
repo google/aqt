@@ -150,6 +150,15 @@ def einsum(
       rhs_quantizer.config.tensor_configs)
 
   with tf.name_scope('AqtEinsum'):
+    with tf.name_scope('get_quant_scale'):
+      with tf.name_scope('lhs'):
+        lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
+      with tf.name_scope('rhs'):
+        rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
+
+    lhs = lhs_scale * lhs
+    rhs = rhs_scale * rhs
+
     with tf.name_scope('to_quant'):
       with tf.name_scope('lhs'):
         lhs = lhs_quantizer._to_quant(lhs, train)
@@ -165,12 +174,6 @@ def einsum(
 
     with tf.name_scope('einsum'):
       out = tf.einsum(eq, lhs, rhs, **tf_einsum_kwargs)
-
-    with tf.name_scope('from_quant'):
-      with tf.name_scope('lhs'):
-        lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
-      with tf.name_scope('rhs'):
-        rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
 
     with tf.name_scope('inv_scale'):
       assert len(lhs_inv_scale.shape) == len(lhs.shape)

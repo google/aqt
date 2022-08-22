@@ -89,9 +89,10 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
     with self.cached_session() as sess, sess.as_default():
       return quant._to_quant(x, train).eval()
 
-  def from_quant_scale(self, quant, train=True):
+  def get_quant_scale(self, quant, train=True):
     with self.cached_session() as sess, sess.as_default():
-      return quant._from_quant_scale(train).eval()
+      scale, inv_scale = quant._get_quant_scale(train)
+      return scale.eval(), inv_scale.eval()
 
   def init(self):
     with self.cached_session() as sess, sess.as_default():
@@ -140,8 +141,10 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
 
       repeats = []
       for _ in range(10):
+        scale, inv_scale = quant._get_quant_scale(train=True)
+        x = scale * x
         ix = quant._to_quant(x, train=True)
-        qx = quant._from_quant_scale(train=True) * ix
+        qx = inv_scale * ix
         repeats.append(qx)
 
       with self.cached_session():
@@ -197,12 +200,16 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
           alt_update = alt_quant.update(f32(y), None, event_count)
 
         with tf.control_dependencies([var_update]):
-          ix = var_quant._to_quant(y, train=True)
-          var_qx = var_quant._from_quant_scale(train=True) * ix
+          scale, inv_scale = var_quant._get_quant_scale(train=True)
+          y_scaled = scale * y
+          ix = var_quant._to_quant(y_scaled, train=True)
+          var_qx = inv_scale * ix
 
         with tf.control_dependencies([alt_update]):
-          ix = alt_quant._to_quant(y, train=True)
-          alt_qx = alt_quant._from_quant_scale(train=True) * ix
+          scale, inv_scale = alt_quant._get_quant_scale(train=True)
+          y_scaled = scale * y
+          ix = alt_quant._to_quant(y_scaled, train=True)
+          alt_qx = inv_scale * ix
 
         with self.cached_session():
           tf.global_variables_initializer().run()

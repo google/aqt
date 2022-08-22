@@ -217,6 +217,12 @@ def dot_general(
   """
   _validate_inputs(lhs_quantizer, rhs_quantizer, dimension_numbers)
 
+  lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
+  rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
+
+  lhs = lhs_scale * lhs
+  rhs = rhs_scale * rhs
+
   lhs = lhs_quantizer._to_quant(lhs, train)
   rhs = rhs_quantizer._to_quant(rhs, train)
 
@@ -231,9 +237,6 @@ def dot_general(
       dimension_numbers=dimension_numbers,
       should_int8_quantize=should_int8_quantize,
       train=train)
-
-  lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
-  rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
 
   inv_scale = lax.dot_general(lhs_inv_scale,
                               rhs_inv_scale,

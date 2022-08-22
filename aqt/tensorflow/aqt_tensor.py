@@ -457,27 +457,22 @@ class TensorQuantizer:
 
   def _to_quant(self, x: tf.Tensor, train: bool) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity."""
-    with tf.variable_scope('to_quant'):
-      should_quantize, clip_bound, shift_before, shift_after = (
-          self._quantization_params(train))
+    should_quantize, clip_bound, shift_before, shift_after = (
+        self._quantization_params(train))
 
-      scale = tf.where_v2(  #
-          should_quantize, self._scale.read_value(),
-          tf.ones_like(self._scale.read_value()))
-      maybe_floor = (
-          lambda y: tf.where_v2(should_quantize, tf.math.floor(y), y))
+    maybe_floor = (
+        lambda y: tf.where_v2(should_quantize, tf.math.floor(y), y))
 
-      # Note that backprop does not depend directly on the value of _last_update
-      # or any_config_active; only scales and constants need to be maintained
-      # and there's no branching on ops including the input tensor x. This
-      # results in significant memory reduction, see cl/415355150.
-      x = scale * x
-      x = tf.clip_by_value(x, -clip_bound, clip_bound)
-      x += shift_before
-      x = tf.grad_pass_through(maybe_floor)(x)
-      x += shift_after
+    # Note that backprop does not depend directly on the value of _last_update
+    # or any_config_active; only scales and constants need to be maintained
+    # and there's no branching on ops including the input tensor x. This
+    # results in significant memory reduction, see cl/415355150.
+    x = tf.clip_by_value(x, -clip_bound, clip_bound)
+    x += shift_before
+    x = tf.grad_pass_through(maybe_floor)(x)
+    x += shift_after
 
-      return x
+    return x
 
   def _clip_mask(self, x: tf.Tensor, train: bool) -> tf.Tensor:
     """Returns which entries of x are clipped in _to_quant(x)."""
@@ -485,30 +480,31 @@ class TensorQuantizer:
     # computation in _to_quant to derive this clip mask instead of a separate
     # method.
     with tf.variable_scope('clip_mask'):
-      should_quantize, clip_bound, _, _ = (self._quantization_params(train))
+      _, clip_bound, _, _ = (self._quantization_params(train))
+      return tf.abs(x) > clip_bound
+
+  def _get_quant_scale(self, train: bool) -> tf.Tensor:
+    """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
+    if not train and self.config.inference_config_index is not None:
+      inference_config = self.config.tensor_configs[
+          self.config.inference_config_index]
+      should_quantize = tf.constant(
+          isinstance(inference_config.quant_config,
+                     aqt_config.IntQuantConfig))
+    else:
+      should_quantize = tf.constant(False)
+      for config in self.config.tensor_configs:
+        if isinstance(config.quant_config, aqt_config.FloatConfig):
+          continue
+
+        config_active = is_config_active(config, self._last_update)
+        should_quantize |= config_active
+
+    # TODO(lew): We can simplify the scopes to just 'compute scales'
+    with tf.variable_scope('to_quant'):
       scale = tf.where_v2(  #
-          should_quantize, self._scale.read_value(),
-          tf.ones_like(self._scale.read_value()))
-      return tf.abs(scale * x) > clip_bound
-
-  def _from_quant_scale(self, train: bool) -> tf.Tensor:
-    """Scale to dequantize the active quant config, if any, else ones."""
+          should_quantize, self._scale, tf.ones_like(self._scale))
     with tf.variable_scope('from_quant'):
-      if not train and self.config.inference_config_index is not None:
-        inference_config = self.config.tensor_configs[
-            self.config.inference_config_index]
-        should_dequantize = tf.constant(
-            isinstance(inference_config.quant_config,
-                       aqt_config.IntQuantConfig))
-      else:
-        should_dequantize = tf.constant(False)
-        for config in self.config.tensor_configs:
-          if isinstance(config.quant_config, aqt_config.FloatConfig):
-            continue
-
-          config_active = is_config_active(config, self._last_update)
-          should_dequantize |= config_active
-
       inv_scale = tf.where_v2(  #
-          should_dequantize, self._inv_scale, tf.ones_like(self._inv_scale))
-      return inv_scale
+          should_quantize, self._inv_scale, tf.ones_like(self._inv_scale))
+    return scale, inv_scale

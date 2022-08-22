@@ -57,7 +57,7 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
   def to_quant(self, quant, x, train=True):
     raise NotImplementedError
 
-  def from_quant_scale(self, quant, train=True):
+  def get_quant_scale(self, quant, train=True):
     raise NotImplementedError
 
   def init(self):
@@ -74,6 +74,12 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
 
   def get_quantized_variable(self, quant):
     raise NotImplementedError
+
+  def quantize(self, x, quant, train):
+    scale, inv_scale = self.get_quant_scale(quant, train)
+    x = scale * x
+    ix = self.to_quant(quant, x)
+    return inv_scale * ix
 
   def test_validates_shape_config(self):
     """Checks that initializer validates the shape against config."""
@@ -185,8 +191,7 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     event_count = np.array(0, dtype=np.int64)
     self.update_quantizer(quant, x, np.full((1, 1), 1, dtype=np.float32),
                           event_count)
-    ix = self.to_quant(quant, x)
-    qx = self.from_quant_scale(quant) * ix
+    qx = self.quantize(x, quant, True)
     self.assertAllEqual(self.get_scale(quant), np.full((1, 1), 0.5,
                                                        dtype=np.float32))
     self.assertAllEqual(qx, expected_output)
@@ -234,7 +239,10 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
 
       self.assertAllEqual(self.get_last_update(quant), new_event_count)
 
-      ix = self.to_quant(quant, x)
+      scale, inv_scale = self.get_quant_scale(quant)
+      x_scaled = scale * x
+
+      ix = self.to_quant(quant, x_scaled)
       has_quantized |= should_quantize
 
       self.assertAllEqual(
@@ -273,7 +281,7 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
         self.assertEqual(scale_not_changed, not_quantized or frozen)
         last_scale = curr_scale
 
-      qx = self.from_quant_scale(quant) * ix
+      qx = inv_scale * ix
       quant_noise = np.abs(qx - np.clip(x, -x_bound, x_bound))
       if should_quantize:
         if const_calibration:
@@ -457,8 +465,7 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     def update_and_quantize(event_count):
       event_count = np.array(event_count, dtype=np.int64)
       self.update_quantizer(quantizer, x, None, event_count)
-      ix = self.to_quant(quantizer, x)
-      qx = self.from_quant_scale(quantizer) * ix
+      qx = self.quantize(x, quantizer, True)
       return qx
 
     # At event_count=0, the input should not be quantized since the active
@@ -534,13 +541,17 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     def check_quant(q_index, train):
       """Checks q_index has the same behavior as q_index_none."""
       x = rng.normal(size=(3, 4)).astype(np.float32)
-      unindexed = self.to_quant(q_index_none, x, train=train)
-      indexed = self.to_quant(q_index, x, train=train)
-      self.assertAllEqual(unindexed, indexed)
+      scale_unindexed, inv_scale_unindexed = self.get_quant_scale(
+          q_index_none, train=train)
+      x_unindexed = scale_unindexed * x
+      unindexed = self.to_quant(q_index_none, x_unindexed, train=train)
+      scale_indexed, inv_scale_indexed = self.get_quant_scale(
+          q_index, train=train)
+      x_indexed = scale_indexed * x
+      indexed = self.to_quant(q_index, x_indexed, train=train)
 
-      unindexed = self.from_quant_scale(q_index_none, train=train)
-      indexed = self.from_quant_scale(q_index, train=train)
       self.assertAllEqual(unindexed, indexed)
+      self.assertAllEqual(inv_scale_unindexed, inv_scale_indexed)
 
     update(0, q_index_none)
     check_quant(q_index_0, train=True)
@@ -558,3 +569,38 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     update(1, q_index_1)
     check_quant(q_index_1, train=True)
     check_quant(q_index_1, train=False)
+
+  @parameterized.parameters([{
+      "shared_stats_axes": [0],
+  }, {
+      "shared_stats_axes": [0, 1],
+  }, {
+      "shared_stats_axes": [0, 1, 2],
+  }])
+  def test_scale_and_inv_scale(self, shared_stats_axes):
+    """Validates scale * inv_scale close to an identity tensor."""
+    iqc = aqt_config.IntQuantConfig(bits=8, preserve_zero=True)
+    cc = aqt_config.CalibrationConfig(l1_dev_coeff=2)
+    sc = aqt_config.StatsConfig(
+        ema_update_count=1,
+        share_stats_axes=shared_stats_axes,
+        tpu_cross_replica_sum=False)
+    tc = aqt_config.AqtTensorConfig(
+        quant_config=iqc,
+        calibration_config=cc,
+        freeze_scale_at_begin=False)
+    config = aqt_config.AqtScheduleConfig(sc, [tc], use_quantized_variable=True)
+
+    rng = np.random.default_rng(1234)
+    x = rng.normal(size=(2, 3, 4)).astype(np.float32)
+    quantizer = self.make_tensor_quantizer(x.shape, config)
+
+    self.init()
+    self.update_quantizer(quantizer, x, None, 0)
+
+    scale, inv_scale = self.get_quant_scale(quantizer, train=True)
+
+    actual = scale * inv_scale
+    expected = np.ones_like(actual)
+
+    self.assertAllClose(actual, expected)

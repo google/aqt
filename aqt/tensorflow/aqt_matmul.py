@@ -264,10 +264,10 @@ def matmul(
   used instead, if the quantization config indicates as much.
 
   Args:
-    lhs_quantizer: the tensor quantizer for lhs
-    lhs: left-hand side of the matmul
-    rhs_quantizer: the tensor quantizer for rhs
-    rhs: right-hand side of the matmul
+    lhs_quantizer: the tensor quantizer for lhs.
+    lhs: left-hand side of the matmul, with shape [B, C].
+    rhs_quantizer: the tensor quantizer for rhs.
+    rhs: right-hand side of the matmul, with shape [C, F].
     train: If false and `use_quantized_variable` in lhs_quantizer or
       rhs_quantizer, then this indicates `aqt_matmul` should use the quantized
       variable with the latest quantized, memorized from the most recent
@@ -289,25 +289,31 @@ def matmul(
 
   def fwd(lhs, rhs):
     with tf.name_scope('AqtMatMul'):
+      with tf.name_scope('get_quant_scale'):
+        with tf.name_scope('lhs'):
+          lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(
+              train)  # [B, 1]
+        with tf.name_scope('rhs'):
+          rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(
+              train)  # [1, F]
+
+      lhs = lhs_scale * lhs  # [B, 1] * [B, C]
+      rhs = rhs_scale * rhs  # [1, F] * [C, F]
+
       with tf.name_scope('to_quant'):
         with tf.name_scope('lhs'):
-          lhs = lhs_quantizer._to_quant(lhs, train)
+          lhs = lhs_quantizer._to_quant(lhs, train)  # [B, C]
         with tf.name_scope('rhs'):
-          rhs = rhs_quantizer._to_quant(rhs, train)
+          rhs = rhs_quantizer._to_quant(rhs, train)  # [C, F]
 
       with tf.name_scope('matmul'):
-        mm = _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train)
-
-      with tf.name_scope('from_quant'):
-        with tf.name_scope('lhs'):
-          lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
-        with tf.name_scope('rhs'):
-          rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
+        mm = _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs,
+                          train)  # [B, F]
 
       with tf.name_scope('inv_scale'):
         # TODO(b/236024344): consider alternative multiply associations here.
-        inv_scale = (lhs_inv_scale * rhs_inv_scale)
-        out = mm * inv_scale
+        inv_scale = (lhs_inv_scale * rhs_inv_scale)  # [B, 1] * [1, F]
+        out = mm * inv_scale  # [B, F] * [B, F]
 
     return out
 
@@ -335,23 +341,26 @@ def matmul(
 
         with tf.name_scope('BwdAqtMatMul'):
 
-          with tf.name_scope('from_quant'):
+          with tf.name_scope('get_quant'):
             with tf.name_scope('lhs'):
-              lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
+              lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
             with tf.name_scope('rhs'):
-              rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
+              rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
+
+          lhs_scaled = lhs_scale * lhs
+          rhs_scaled = rhs_scale * rhs
 
           with tf.name_scope('lhs'):
-            qrhs = rhs_quantizer._to_quant(rhs, train)
+            qrhs = rhs_quantizer._to_quant(rhs_scaled, train)
             lhs_bwd = tf.matmul(grad * rhs_inv_scale, tf.transpose(qrhs))
             lhs_bwd = tf.where_v2(
-                lhs_quantizer._clip_mask(lhs, train), 0.0, lhs_bwd)
+                lhs_quantizer._clip_mask(lhs_scaled, train), 0.0, lhs_bwd)
 
           with tf.name_scope('rhs'):
-            qlhs = lhs_quantizer._to_quant(lhs, train)
+            qlhs = lhs_quantizer._to_quant(lhs_scaled, train)
             rhs_bwd = tf.matmul(tf.transpose(qlhs), grad * lhs_inv_scale)
             rhs_bwd = tf.where_v2(
-                rhs_quantizer._clip_mask(rhs, train), 0.0, rhs_bwd)
+                rhs_quantizer._clip_mask(rhs_scaled, train), 0.0, rhs_bwd)
 
         return [lhs_bwd, rhs_bwd]
 

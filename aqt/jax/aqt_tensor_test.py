@@ -87,11 +87,11 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
     return quant.apply(
         self._quant_state[quant.name], x, train, method=quant._to_quant)
 
-  def from_quant_scale(self, quant, train=True):
+  def get_quant_scale(self, quant, train=True):
     return quant.apply(
         self._quant_state[quant.name],  #
         train,
-        method=quant._from_quant_scale)
+        method=quant._get_quant_scale)
 
   def init(self):
     pass

@@ -386,15 +386,12 @@ class TensorQuantizer(nn.Module):
       clip_bound = shift_before = shift_after = 0.0
       should_quantize = False
 
-    scale = jnp.where(should_quantize, self._scale.value,
-                      jnp.ones_like(self._scale.value))
     maybe_floor = (lambda y: jnp.where(should_quantize, jnp.floor(y), y))
 
     # Note that backprop does not depend directly on the value of _last_update
     # or any_config_active; only scales and constants need to be maintained
     # and there's no branching on ops including the input tensor x. This
     # results in significant memory reduction, see cl/415355150.
-    x = scale * x
     x = jnp.clip(x, -clip_bound, clip_bound)
     x += shift_before
     x = pass_through(x, maybe_floor)
@@ -404,21 +401,23 @@ class TensorQuantizer(nn.Module):
 
     return x
 
-  def _from_quant_scale(self, train: bool) -> jnp.ndarray:
-    """Scale to dequantize the active quant config, if any, else ones."""
+  def _get_quant_scale(self, train: bool) -> jnp.ndarray:
+    """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
     if not train and self.config.inference_config_index is not None:
       inference_config = self.config.tensor_configs[
           self.config.inference_config_index]
-      should_dequantize = isinstance(inference_config.quant_config,
-                                     aqt_config.IntQuantConfig)
+      should_quantize = isinstance(inference_config.quant_config,
+                                   aqt_config.IntQuantConfig)
     else:
-      should_dequantize = False
+      should_quantize = False
       for config in self.config.tensor_configs:
         if isinstance(config.quant_config, aqt_config.FloatConfig):
           continue
         config_active = is_config_active(config, self._last_update.value)
-        should_dequantize |= config_active
+        should_quantize |= config_active
 
-    inv_scale = jnp.where(should_dequantize, self._inv_scale.value,
+    scale = jnp.where(should_quantize, self._scale.value,
+                      jnp.ones_like(self._scale.value))
+    inv_scale = jnp.where(should_quantize, self._inv_scale.value,
                           jnp.ones_like(self._inv_scale.value))
-    return inv_scale
+    return scale, inv_scale

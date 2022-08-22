@@ -275,6 +275,12 @@ def conv_general_dilated(
 
   _validate_inputs(lhs_quantizer, rhs_quantizer, dimension_numbers)
 
+  lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
+  rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
+
+  lhs = lhs_scale * lhs
+  rhs = rhs_scale * rhs
+
   lhs = lhs_quantizer._to_quant(lhs, train)
   rhs = rhs_quantizer._to_quant(rhs, train)
 
@@ -289,9 +295,6 @@ def conv_general_dilated(
                            should_int8_quantize, train, window_strides, padding,
                            lhs_dilation, rhs_dilation, dimension_numbers,
                            feature_group_count, batch_group_count)
-
-  lhs_inv_scale = lhs_quantizer._from_quant_scale(train)
-  rhs_inv_scale = rhs_quantizer._from_quant_scale(train)
 
   # Transpose both lhs_inv_scale and rhs_inv_scale such that they have `NHWC`
   # and `HWIO` shapes, respectively, which allows them to be broadcastable no
