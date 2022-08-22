@@ -220,6 +220,12 @@ class DenseAqt(nn.Module):
         kernel = None
 
 
+    bounds_params = get_bounds.GetBounds.Params(
+        update_bounds=self.dynamic_context.update_bounds,
+        update_stats=self.train,
+        paxis_name=self.paxis_name,
+        mask=padding_mask)
+
     weight_quant_granularity = hparams.weight_quant_granularity
     # kernel.shape = (channels_in, channels_out)
     if weight_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
@@ -244,50 +250,21 @@ class DenseAqt(nn.Module):
 
     # TODO(wanglisa): add option to control when scale is being recomputed
 
-    bounds_params = None
-    if hparams.quant_act is not None:
-      if isinstance(hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
-        bounds_params = get_bounds.DynamicBounds.Params(quant_axis=None)
-      elif isinstance(hparams.quant_act.bounds, get_bounds.GetBounds.Hyper):
-        bounds_params = get_bounds.GetBounds.Params(
-            update_bounds=self.dynamic_context.update_bounds,
-            update_stats=self.train,
-            paxis_name=self.paxis_name,
-            mask=padding_mask)
-
+    # matmul
     contracting_dims = ((inputs.ndim - 1,), (0,))
     # `((lhs_contracting_dims, rhs_contracting_dims),
     batch_dims = ((), ())  # (lhs_batch_dims, rhs_batch_dims))`
-
-    if hparams.quant_act is not None and isinstance(
-        hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
-      dot_function = quantization.flaxformer_dot_general
-      dot_function_args = dict(
-          act=inputs,
-          w=kernel,
-          dimension_numbers=(contracting_dims, batch_dims),
-          weight_params=weight_params,
-          act_hparams=hparams.quant_act,
-          bounds_params=bounds_params,
-          dot_precision=self.precision,
-          quant_w=quant_w)
-
-    else:
-      dot_function = quantization.quantized_dot_general
-      dot_function_args = dict(
-          act=inputs,
-          w=kernel,
-          quant_type=hparams.quant_type,
-          weight_params=weight_params,
-          act_hparams=hparams.quant_act,
-          bounds_params=bounds_params,
-          dimension_numbers=(contracting_dims, batch_dims),
-          dot_precision=self.precision,
-          prefer_int8_to_int32_dot=self.dynamic_context
-          .prefer_int8_to_int32_dot,
-          quant_w=quant_w)
-
-    y = dot_function(**dot_function_args)
+    y = quantization.quantized_dot_general(
+        act=inputs,
+        w=kernel,
+        quant_type=hparams.quant_type,
+        weight_params=weight_params,
+        act_hparams=hparams.quant_act,
+        bounds_params=bounds_params,
+        dimension_numbers=(contracting_dims, batch_dims),
+        dot_precision=self.precision,
+        prefer_int8_to_int32_dot=self.dynamic_context.prefer_int8_to_int32_dot,
+        quant_w=quant_w)
 
     # bias
     if self.use_bias:
@@ -391,6 +368,9 @@ class DenseGeneralAqt(nn.Module):
     axis = _normalize_axes(axis, inputs.ndim)
 
     hparams = self.hparams
+    if hparams.quant_act is not None:
+      raise ValueError(
+          'activation quantization is not yet supported for DenseGeneralAqt')
 
     if (hparams.weight_prec is not None and
         isinstance(hparams.weight_prec, int) and hparams.weight_prec > 8):
@@ -482,21 +462,6 @@ class DenseGeneralAqt(nn.Module):
 
     weight_quant_granularity = hparams.weight_quant_granularity
 
-    act_quant_axis = None
-    if hparams.quant_act:
-      if isinstance(hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
-        act_quant_granularity = hparams.quant_act.bounds.granularity
-        if act_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
-          act_quant_axis = tuple(axis)
-        elif act_quant_granularity == quant_config.QuantGranularity.PER_TENSOR:
-          act_quant_axis = None
-        else:
-          raise ValueError(
-              f'Invalid quantization granularity {weight_quant_granularity}.')
-      elif isinstance(hparams.quant_act.bounds, get_bounds.GetBounds.Hyper):
-        raise NotImplementedError(
-            'We do not support get_bounds for dot general.')
-
     if weight_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
       # Compute scale factors by reducing over the rows of the weight matrix,
       # resulting in one scale factor per column. This results in one scale
@@ -511,8 +476,6 @@ class DenseGeneralAqt(nn.Module):
       raise ValueError(
           f'Invalid quantization granularity {weight_quant_granularity}.')
 
-    bounds_params = get_bounds.DynamicBounds.Params(quant_axis=act_quant_axis)
-
     weight_params = QuantOps.WeightParams(
         prec=hparams.weight_prec,
         half_shift=hparams.weight_half_shift,
@@ -524,8 +487,6 @@ class DenseGeneralAqt(nn.Module):
         w=kernel,
         dimension_numbers=((axis, contract_ind), ((), ())),
         weight_params=weight_params,
-        act_hparams=hparams.quant_act,
-        bounds_params=bounds_params,
         dot_precision=self.precision,
         quant_w=quant_w)
 
