@@ -20,14 +20,33 @@ from jax import core
 from jax import lax
 from jax._src.numpy.util import _check_arraylike
 from jax._src.numpy.util import _promote_dtypes
+import jax.numpy as jnp
 import numpy as np
+
 
 shape = np.shape
 ndim = np.ndim
 _max = builtins.max
 
 
-def matmul(a, b, *, precision=None):  # pylint: disable=missing-docstring
+def matmul(a: jnp.ndarray,  #
+           b: jnp.ndarray,
+           *,
+           precision=None,
+           dot_general=lax.dot_general) -> jnp.ndarray:
+  """Quantized jax.numpy.matmul.
+
+  Args:
+    a: Left-hand side of the matmul.
+    b: Right-hand side of the matmul.
+    precision: Indicates precision of a and b.
+    dot_general: lax.dot_general by default. To use quantized matmul, the
+      wrapper of aqt_dot_general in which TQs and `train` flag are provided
+      should be passed into this function.
+
+  Returns:
+    An array containing the result with the same dtype as 'a' and 'b'.
+  """
   _check_arraylike("matmul", a, b)
   for i, x in enumerate((a, b)):
     if ndim(x) < 1:
@@ -53,7 +72,7 @@ def matmul(a, b, *, precision=None):  # pylint: disable=missing-docstring
   b_batch = []
 
   # Desired index in final output of each kind of dimension, in the order that
-  # lax.dot_general will emit them.
+  # aqt_dot_general will emit them.
   idx_batch = []
   idx_a_other = []  # other = non-batch, non-contracting.
   idx_b_other = []
@@ -82,7 +101,7 @@ def matmul(a, b, *, precision=None):  # pylint: disable=missing-docstring
 
   a = lax.squeeze(a, tuple(a_squeeze))
   b = lax.squeeze(b, tuple(b_squeeze))
-  out = lax.dot_general(
+  out = dot_general(
       a,
       b, (((ndim(a) - 1,), (ndim(b) - 1 - b_is_mat,)), (a_batch, b_batch)),
       precision=precision)

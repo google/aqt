@@ -243,3 +243,14 @@ def dot_general(
                               dimension_numbers=dimension_numbers)
 
   return out * inv_scale
+
+
+def injectable_dot_general(lhs_quantizer, rhs_quantizer, train):
+  """Wrapper of aqt_dot_general, supposed to be used in injection API."""
+  return lambda a, b, dimension_numbers, precision: dot_general(  # pylint: disable=g-long-lambda
+      lhs=a,
+      rhs=b,
+      lhs_quantizer=lhs_quantizer,
+      rhs_quantizer=rhs_quantizer,
+      dimension_numbers=dimension_numbers,
+      train=train)

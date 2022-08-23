@@ -22,8 +22,10 @@ the quantization algorithm in AQTp.
 
 from aqt.jax import aqt_conv_general
 from aqt.jax import aqt_dot_general
+from aqt.jax import aqt_matmul
 
 
 aqt_conv_general_dilated = aqt_conv_general.conv_general_dilated
 aqt_dot = aqt_dot_general.dot
 aqt_dot_general = aqt_dot_general.dot_general
+aqt_matmul = aqt_matmul.matmul
