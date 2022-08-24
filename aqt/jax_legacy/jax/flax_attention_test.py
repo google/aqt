@@ -151,7 +151,7 @@ class SoftmaxTest(parameterized.TestCase, tf.test.TestCase):
   )
   def test_custom_softmax_vs_mock(self, input_tensor, norm_dims,
                                   softmax_hparams, expected_output):
-    dtype = jax._src.numpy.lax_numpy.float32
+    dtype = jnp.float32
     output = flax_attention.softmax(
         input_tensor, norm_dims, dtype, softmax_hparams,
         quant_config.DynamicContext(update_bounds=False, quantize_acts=False))
@@ -201,7 +201,7 @@ class SoftmaxTest(parameterized.TestCase, tf.test.TestCase):
                       exp_min=-2**7, exp_max=2**7, sig_bits=23))),
       ))
   def test_softmax_vs_original(self, input_tensor, softmax_hparams):
-    dtype = jax._src.numpy.lax_numpy.float32
+    dtype = jnp.float32
     norm_dims = (0,)
     input_tensor = jnp.array(input_tensor)
     output = flax_attention.softmax(
