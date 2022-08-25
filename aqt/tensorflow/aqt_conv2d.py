@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Quantized two-dimensional convolution.
 
 Quantized convolution abstracts over the analogous :py:func:`tf.conv2d` and
@@ -29,9 +28,9 @@ unlike the general :py:func:`aqt_ops.matmul`.
 """
 
 from aqt.common import aqt_config
+from aqt.common import aqt_config_utils
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
-
 
 # We repeatedly use protected methods from classes defined in other modules to
 # avoid exporting them as part of the public API.
@@ -114,13 +113,14 @@ def _validate_inputs(
     aqt_config.ConfigError: The input or filter quantizer configurations
       do not share statistics along contraction axes as described by
       `_validate_contraction`, or their quantization schedules are not aligned
-      per `aqt_config._validate_alignment`.
+      per `aqt_config_utils._validate_alignment`.
   """
 
-  aqt_config._validate_alignment('input_quantizer.config.tensor_configs',
-                                 input_quantizer.config.tensor_configs,
-                                 'filter_quantizer.config.tensor_configs',
-                                 filter_quantizer.config.tensor_configs)
+  aqt_config_utils._validate_alignment(
+      'input_quantizer.config.tensor_configs',
+      input_quantizer.config.tensor_configs,
+      'filter_quantizer.config.tensor_configs',
+      filter_quantizer.config.tensor_configs)
 
   _validate_contraction(input_quantizer.config.stats_config,
                         'input_quantizer.config.stats_config', data_format)

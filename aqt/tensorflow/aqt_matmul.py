@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Quantized matrix multiplication.
 
 The matmul operation is a form of tensor product applied to two arguments
@@ -25,9 +24,9 @@ For details on quantized operations and common configuration arguments, see
 from typing import Callable, Dict, Iterable, Optional
 
 from aqt.common import aqt_config
+from aqt.common import aqt_config_utils
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
-
 
 # TODO(b/220181240): Remove the pylint disable below and avoid using protected
 # methods.
@@ -35,12 +34,11 @@ import tensorflow.compat.v1 as tf
 # avoid exporting them as part of the public API.
 # pylint: disable=protected-access
 
-
 MatmulFn = Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def _possibly_use_quantized_variable(
-    quantizer: aqt_tensor.TensorQuantizer,
+    quantizer: aqt_tensor.TensorQuantizer,  #
     x: tf.Tensor,
     train: bool) -> tf.Tensor:
   """Returns quantized variable if not training and TQ.use_quantized_variable, casted to x.dtype.
@@ -165,8 +163,8 @@ def _matmul_case(lhs_quantizer, rhs_quantizer, lhs, rhs, train):
     lhs: float input for lhs.
     rhs: float input for rhs.
     train: If false and `TQ.use_quantized_variable` is True, then use the
-    quantized variable, instead of input tensors, for the respective input
-    tensor.
+      quantized variable, instead of input tensors, for the respective input
+      tensor.
 
   Returns:
     The `tf.Tensor` from the resulting quantized matmul.
@@ -229,7 +227,7 @@ def _validate_inputs(
   lhs_config = lhs_quantizer.config
   rhs_config = rhs_quantizer.config
 
-  aqt_config._validate_alignment(
+  aqt_config_utils._validate_alignment(
       'lhs_config',  #
       lhs_config.tensor_configs,
       'rhs_config',
@@ -250,8 +248,7 @@ def matmul(
     lhs: tf.Tensor,
     rhs_quantizer: aqt_tensor.TensorQuantizer,
     rhs: tf.Tensor,
-    train: bool = True
-) -> tf.Tensor:
+    train: bool = True) -> tf.Tensor:
   """Quantized tf.matmul.
 
   Gradients are propagated using the straight-through estimator [1] to

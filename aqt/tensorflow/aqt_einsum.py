@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Quantized einsum.
 
 Quantized einsum for the analogous :py:func:`tf.einsum`.
@@ -38,6 +37,7 @@ import string
 from typing import Tuple
 
 from aqt.common import aqt_config
+from aqt.common import aqt_config_utils
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 
@@ -143,7 +143,7 @@ def einsum(
       lhs_labels,
       rhs_labels,
       out_labels)
-  aqt_config._validate_alignment(
+  aqt_config_utils._validate_alignment(
       'lhs_quantizer.config.tensor_configs',  #
       lhs_quantizer.config.tensor_configs,
       'rhs_quantizer.config.tensor_configs',

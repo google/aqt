@@ -11,13 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Quantized conv_general."""
 
 import functools
 from typing import Optional, Sequence, Tuple, Union
 
 from aqt.common import aqt_config
+from aqt.common import aqt_config_utils
 from aqt.jax import aqt_tensor
 from aqt.jax import aqt_utils
 import jax
@@ -44,6 +44,7 @@ def _conv_general_aqt(
     feature_group_count: int,
     batch_group_count: int) -> jnp.ndarray:
   """Wrapper around lax.conv_general_dilated, but with option to use integer conv."""
+
   def conv_general_float(ops):
     lhs_, rhs_ = ops
     lhs_ = aqt_utils.possibly_use_quantized_variable(lhs_quantizer, lhs_, train)
@@ -132,16 +133,18 @@ def _conv_general_aqt_jvp(
         feature_group_count=feature_group_count,
         batch_group_count=batch_group_count)
 
-  _, y_tangent = jax.jvp(differentiable_conv_general,  #
-                         (lhs, rhs),
-                         (lhs_dot, rhs_dot))
+  _, y_tangent = jax.jvp(
+      differentiable_conv_general,  #
+      (lhs, rhs),
+      (lhs_dot, rhs_dot))
   return y, y_tangent
 
 
-def _validate_dilation_argument(lhs_quantizer,  #
-                                rhs_quantizer,
-                                lhs_dilation,
-                                rhs_dilation):
+def _validate_dilation_argument(
+    lhs_quantizer,  #
+    rhs_quantizer,
+    lhs_dilation,
+    rhs_dilation):
   """Validates preserve_zero=True of AqtIntQuantConfig when the dilation is used."""
   lhs_configs = lhs_quantizer.config.tensor_configs
   rhs_configs = rhs_quantizer.config.tensor_configs
@@ -182,10 +185,11 @@ def _validate_inputs(
       per `aqt_config._validate_alignment`.
   """
 
-  aqt_config._validate_alignment('input_quantizer.config.tensor_configs',
-                                 input_quantizer.config.tensor_configs,
-                                 'filter_quantizer.config.tensor_configs',
-                                 filter_quantizer.config.tensor_configs)
+  aqt_config_utils._validate_alignment(
+      'input_quantizer.config.tensor_configs',
+      input_quantizer.config.tensor_configs,
+      'filter_quantizer.config.tensor_configs',
+      filter_quantizer.config.tensor_configs)
 
   input_spec, filter_spec, _ = dimension_numbers  # pytype: disable=attribute-error
   _, *input_contracted_dims = input_spec
@@ -219,19 +223,19 @@ def _transpose_inv_scale(x, dimension_numbers_before, dimension_numbers_after):
   return jnp.transpose(x, axes)
 
 
-def conv_general_dilated(
-    lhs: jnp.ndarray,
-    rhs: jnp.ndarray,
-    lhs_quantizer: aqt_tensor.TensorQuantizer,
-    rhs_quantizer: aqt_tensor.TensorQuantizer,
-    window_strides: Sequence[int],
-    padding: Union[str, Sequence[Tuple[int, int]]],
-    lhs_dilation: Optional[Sequence[int]] = None,
-    rhs_dilation: Optional[Sequence[int]] = None,
-    dimension_numbers: Optional[lax.ConvGeneralDilatedDimensionNumbers] = None,
-    feature_group_count: int = 1,
-    batch_group_count: int = 1,
-    train: bool = True) -> jnp.ndarray:
+def conv_general_dilated(lhs: jnp.ndarray,
+                         rhs: jnp.ndarray,
+                         lhs_quantizer: aqt_tensor.TensorQuantizer,
+                         rhs_quantizer: aqt_tensor.TensorQuantizer,
+                         window_strides: Sequence[int],
+                         padding: Union[str, Sequence[Tuple[int, int]]],
+                         lhs_dilation: Optional[Sequence[int]] = None,
+                         rhs_dilation: Optional[Sequence[int]] = None,
+                         dimension_numbers: Optional[
+                             lax.ConvGeneralDilatedDimensionNumbers] = None,
+                         feature_group_count: int = 1,
+                         batch_group_count: int = 1,
+                         train: bool = True) -> jnp.ndarray:
   """Quantized jax.lax.conv_general_dilated.
 
   Args:
@@ -244,15 +248,15 @@ def conv_general_dilated(
     padding: either the string `'SAME'`, the string `'VALID'`, or a sequence of
       `n` `(low, high)` integer pairs that give the padding to apply before and
       after each spatial dimension.
-    lhs_dilation: `None`, or a sequence of `n` integers, giving the
-      dilation factor to apply in each spatial dimension of `lhs`. LHS dilation
-      is also known as transposed convolution.
-    rhs_dilation: `None`, or a sequence of `n` integers, giving the
-      dilation factor to apply in each spatial dimension of `rhs`. RHS dilation
-      is also known as atrous convolution.
-    dimension_numbers: either `None`, a ``ConvDimensionNumbers`` object, or
-      a 3-tuple ``(lhs_spec, rhs_spec, out_spec)``, where each element is a
-      string of length `n+2`.
+    lhs_dilation: `None`, or a sequence of `n` integers, giving the dilation
+      factor to apply in each spatial dimension of `lhs`. LHS dilation is also
+      known as transposed convolution.
+    rhs_dilation: `None`, or a sequence of `n` integers, giving the dilation
+      factor to apply in each spatial dimension of `rhs`. RHS dilation is also
+      known as atrous convolution.
+    dimension_numbers: either `None`, a ``ConvDimensionNumbers`` object, or a
+      3-tuple ``(lhs_spec, rhs_spec, out_spec)``, where each element is a string
+      of length `n+2`.
     feature_group_count: integer, default 1. See XLA HLO docs.
     batch_group_count: integer, default 1. See XLA HLO docs.
     train: If false and `use_quantized_variable` in lhs_quantizer or

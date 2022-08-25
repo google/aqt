@@ -11,19 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Quantized dot_general."""
-
 
 import functools
 
 from aqt.common import aqt_config
+from aqt.common import aqt_config_utils
 from aqt.jax import aqt_tensor
 from aqt.jax import aqt_utils
 import jax
 from jax import lax
 import jax.numpy as jnp
-
 
 # TODO(b/220181240): Remove accesses to protected methods. e.g., TQ._to_quant()
 # -> TQ.to_quant().
@@ -55,12 +53,11 @@ def _dot_general_aqt(
     rhs: Right-hand side of the dot_general.
     lhs_quantizer: The tensor quantizer for lhs.
     rhs_quantizer: The tensor quantizer for rhs.
-    dimension_numbers: a tuple of tuples of the form
-      `((lhs_contracting_dims, rhs_contracting_dims),
-      (lhs_batch_dims, rhs_batch_dims))`
-    should_int8_quantize: If true, inputs to lax.dot_general will be
-      cast to int8 and results accumulated to int32, then converted back to
-      the original input type.
+    dimension_numbers: a tuple of tuples of the form `((lhs_contracting_dims,
+      rhs_contracting_dims), (lhs_batch_dims, rhs_batch_dims))`
+    should_int8_quantize: If true, inputs to lax.dot_general will be cast to
+      int8 and results accumulated to int32, then converted back to the original
+      input type.
     train: If false and `TensorQuantizer.use_quantized_variable` is True, then
       use the quantized variable, instead of input tensors, for the respective
       input tensor.
@@ -68,14 +65,12 @@ def _dot_general_aqt(
   Returns:
     Same as lax.dot_general, but its quantized version.
   """
+
   def dot_general_float(ops):
     lhs_, rhs_ = ops
     lhs_ = aqt_utils.possibly_use_quantized_variable(lhs_quantizer, lhs_, train)
     rhs_ = aqt_utils.possibly_use_quantized_variable(rhs_quantizer, rhs_, train)
-    return lax.dot_general(
-        lhs_,
-        rhs_,
-        dimension_numbers=dimension_numbers)
+    return lax.dot_general(lhs_, rhs_, dimension_numbers=dimension_numbers)
 
   def dot_general_int(ops):
     lhs_, rhs_ = ops
@@ -119,28 +114,25 @@ def _dot_general_aqt_jvp(
       train=train)
 
   def differentiable_dot_general(lhs_, rhs_):
-    return lax.dot_general(
-        lhs_,
-        rhs_,
-        dimension_numbers=dimension_numbers)
+    return lax.dot_general(lhs_, rhs_, dimension_numbers=dimension_numbers)
 
-  _, y_tangent = jax.jvp(differentiable_dot_general,  #
-                         (lhs, rhs),
-                         (lhs_dot, rhs_dot))
+  _, y_tangent = jax.jvp(
+      differentiable_dot_general,  #
+      (lhs, rhs),
+      (lhs_dot, rhs_dot))
   return y, y_tangent
 
 
 def _validate_inputs(
     lhs_quantizer: aqt_tensor.TensorQuantizer,  #
     rhs_quantizer: aqt_tensor.TensorQuantizer,
-    dimension_numbers: lax.DotDimensionNumbers
-):
+    dimension_numbers: lax.DotDimensionNumbers):
   """Validates configs and inputs for dot_general."""
 
   lhs_config = lhs_quantizer.config
   rhs_config = rhs_quantizer.config
 
-  aqt_config._validate_alignment(
+  aqt_config_utils._validate_alignment(
       'lhs_config',  #
       lhs_config.tensor_configs,
       'rhs_config',
@@ -160,11 +152,9 @@ def _validate_inputs(
         f'share_stats_axes={rhs_config.stats_config.share_stats_axes}')
 
 
-def dot(
-    lhs: jnp.ndarray,
-    rhs: jnp.ndarray,
-    lhs_quantizer: aqt_tensor.TensorQuantizer,
-    rhs_quantizer: aqt_tensor.TensorQuantizer) -> jnp.ndarray:
+def dot(lhs: jnp.ndarray, rhs: jnp.ndarray,
+        lhs_quantizer: aqt_tensor.TensorQuantizer,
+        rhs_quantizer: aqt_tensor.TensorQuantizer) -> jnp.ndarray:
   """Quantized lax.dot.
 
   This dot operator is based on lax.dot,
@@ -181,20 +171,23 @@ def dot(
     An array containing the result with the same dtype as 'lhs' and 'rhs'.
   """
   if 1 <= lhs.ndim <= 2 and 1 <= rhs.ndim <= 2 and lhs.shape[-1] == rhs.shape[0]:
-    return dot_general(lhs, rhs, lhs_quantizer, rhs_quantizer,
-                       dimension_numbers=(((lhs.ndim - 1,), (0,)), ((), ())))
+    return dot_general(
+        lhs,
+        rhs,
+        lhs_quantizer,
+        rhs_quantizer,
+        dimension_numbers=(((lhs.ndim - 1,), (0,)), ((), ())))
   else:
     raise TypeError('Incompatible shapes for dot: got {} and {}.'.format(
         lhs.shape, rhs.shape))
 
 
-def dot_general(
-    lhs: jnp.ndarray,
-    rhs: jnp.ndarray,
-    lhs_quantizer: aqt_tensor.TensorQuantizer,
-    rhs_quantizer: aqt_tensor.TensorQuantizer,
-    dimension_numbers: lax.DotDimensionNumbers,
-    train: bool = True) -> jnp.ndarray:
+def dot_general(lhs: jnp.ndarray,
+                rhs: jnp.ndarray,
+                lhs_quantizer: aqt_tensor.TensorQuantizer,
+                rhs_quantizer: aqt_tensor.TensorQuantizer,
+                dimension_numbers: lax.DotDimensionNumbers,
+                train: bool = True) -> jnp.ndarray:
   """Quantized jax.lax.dot_general.
 
   Args:
@@ -202,9 +195,8 @@ def dot_general(
     rhs: Left-hand side of the dot_general.
     lhs_quantizer: The tensor quantizer for lhs.
     rhs_quantizer: The tensor quantizer for rhs.
-    dimension_numbers: a tuple of tuples of the form
-      `((lhs_contracting_dims, rhs_contracting_dims),
-      (lhs_batch_dims, rhs_batch_dims))`
+    dimension_numbers: a tuple of tuples of the form `((lhs_contracting_dims,
+      rhs_contracting_dims), (lhs_batch_dims, rhs_batch_dims))`
     train: If false and `use_quantized_variable` in lhs_quantizer or
       rhs_quantizer, then this indicates `aqt_dot_general` should use the
       quantized variable with the latest quantized, memorized from the most
@@ -238,9 +230,8 @@ def dot_general(
       should_int8_quantize=should_int8_quantize,
       train=train)
 
-  inv_scale = lax.dot_general(lhs_inv_scale,
-                              rhs_inv_scale,
-                              dimension_numbers=dimension_numbers)
+  inv_scale = lax.dot_general(
+      lhs_inv_scale, rhs_inv_scale, dimension_numbers=dimension_numbers)
 
   return out * inv_scale
 
