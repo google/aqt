@@ -22,12 +22,15 @@ from typing import Any, Dict, Optional, Type, TypeVar
 
 from aqt.jax_legacy.jax import quant_config
 from aqt.jax_legacy.jax import quantization
+from aqt.jax_legacy.jax import sparsity
 from aqt.jax_legacy.jax.flax import struct as flax_struct
-
-
 import dacite
 import jax
 import ml_collections
+
+from google3.pyglib import gfile
+from google3.pyglib import resources
+from google3.pyglib.contrib.gpathlib import gpath
 
 
 T = TypeVar('T')
@@ -108,6 +111,7 @@ def load_dataclass_from_dict(dataclass_name: Type[T],
       quantization.QuantOps.ActHParams.InputDistribution,
       quantization.QuantType,
       quant_config.QuantGranularity,
+      sparsity.SparseType,
   ]
   data_dict = _convert_lists_to_tuples(data_dict)
   return dacite.from_dict(

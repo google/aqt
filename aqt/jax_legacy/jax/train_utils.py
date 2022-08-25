@@ -49,6 +49,31 @@ def should_update_bounds(activation_bound_update_freq: int,
     return steps_since_start % activation_bound_update_freq == 0
 
 
+def update_sparsity_mask(sparsity_start_step: int, sparsity_update_freq: int,
+                         step: int) -> bool:
+  """Returns whether sparsity mask should be updated.
+
+  Args:
+    sparsity_start_step: The first training step to start applying sparsity.
+      Setting start step -1 indicates to not apply sparsity at any step.
+    sparsity_update_freq: How frequently to update sparsity. Setting frequency 0
+      indicates not to update again after the given step.
+    step: The current training step.
+
+  Returns:
+    Boolean indicating whether to update the sparsity mask on the current step.
+  """
+  if sparsity_start_step < -1:
+    raise ValueError("Start step must be >= -1.")
+  if sparsity_update_freq < 0:
+    raise ValueError("Update frequency must be a positive integer or 0.")
+  steps_since_start = step - sparsity_start_step
+  if sparsity_start_step == -1 or steps_since_start < 0:
+    return False
+  if sparsity_update_freq == 0:
+    return steps_since_start == 0
+  else:
+    return steps_since_start % sparsity_update_freq == 0
 
 
 # pylint: disable=g-doc-args
@@ -59,6 +84,8 @@ def get_dynamic_context_for_step(
     step: int,
     collect_acts_stats: bool,
     prefer_int8_to_int32_dot: bool,
+    sparsity_start_step: int,
+    sparsity_update_freq: int,
 ) -> quant_config.DynamicContext:
   """Returns correct quantization context for a given step.
 
@@ -80,10 +107,20 @@ def get_dynamic_context_for_step(
       activation_bound_start_step=activation_bound_start_step,
       activation_bound_update_freq=activation_bound_update_freq,
       step=step)
+  apply_sparsity = False
+  if sparsity_start_step >= 0:
+    apply_sparsity = step >= sparsity_start_step
+  update_weight_sparsity = update_sparsity_mask(sparsity_start_step,
+                                                sparsity_update_freq, step)
+  update_act_sparsity = update_sparsity_mask(sparsity_start_step,
+                                             sparsity_update_freq, step)
   quantize_acts = step >= activation_bound_start_step
   return quant_config.DynamicContext(
       update_bounds=update_bounds,
       quantize_acts=quantize_acts,
+      apply_sparsity=apply_sparsity,
+      update_weight_sparsity=update_weight_sparsity,
+      update_act_sparsity=update_act_sparsity,
       collect_acts_stats=collect_acts_stats,
       prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,
   )

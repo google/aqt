@@ -1,0 +1,295 @@
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for sparsity."""
+
+from aqt.jax_legacy.jax import sparsity
+from aqt.jax_legacy.jax.sparsity import SparseHParams
+from aqt.jax_legacy.jax.sparsity import Sparsity
+import jax
+from jax import numpy as jnp
+from jax import random
+import numpy as np
+
+from google3.testing.pybase import googletest
+from google3.testing.pybase import parameterized
+
+
+class SparsityTest(parameterized.TestCase):
+
+  def init_model(self, update_mask, apply_mask, unstruct_sparsity):
+    rng = random.PRNGKey(0)
+    self.inputs = jnp.array([[3, 4, 6], [1, 2, 1]])
+    if unstruct_sparsity:
+      sparsity_hparams = SparseHParams(type='UNSTRUCTURED', prune_rate=0.2)
+    else:
+      sparsity_hparams = SparseHParams(type='STRUCTURED_NM', prune_rate=(2, 4))
+    sparsity_module = Sparsity(sparsity_hparams=sparsity_hparams)
+    init_mask = sparsity_module.init(
+        rng, self.inputs, update_mask=update_mask, apply_mask=apply_mask)
+    return sparsity_module, init_mask
+
+  @parameterized.named_parameters(('unstruct', True), ('struct', False))
+  def test_init(self, unstruct_sparsity):
+    _, init_state = self.init_model(False, False, unstruct_sparsity)
+    init_state_mask = init_state['sparsity']['mask']
+    np.testing.assert_array_equal(init_state_mask,
+                                  [[True, True, True], [True, True, True]])
+
+  # TODO(ayazdan): Add a more general test for other forms of sparsity.
+  def test_sorting_network_sparse_2_4(self):
+    key = random.PRNGKey(0)
+    inputs = random.normal(key, (2, 5, 16))
+    print(inputs)
+    # n = 4
+    # k = 2
+    m = 4
+    n = 2
+    alpha = 1.0
+    # JAX Top-K Implementation.
+    xs = jnp.stack(
+        jnp.split(inputs, int(jnp.shape(inputs)[-1] / m), axis=-1), axis=0)
+    topk = jax.lax.top_k(xs, k=n)
+    mask = jax.numpy.sum(
+        jax.nn.one_hot(topk[1],
+                       jnp.shape(xs)[-1]), axis=len(jnp.shape(inputs)))
+    topk_filter = jnp.where(
+        jnp.equal(mask, 0.), jnp.full(list(jnp.shape(mask)), alpha - 1), mask)
+    filtered = jnp.multiply(xs, topk_filter)
+    ys = jnp.concatenate(
+        jnp.moveaxis(filtered, 0, 0), axis=len(jnp.shape(inputs)) - 1)
+    print(ys)
+    ys_hat = sparsity.prune_2_4(inputs)
+    print(ys_hat)
+    np.testing.assert_array_equal(ys, ys_hat)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='row_wise_pruning',
+          order='R',
+          exp_output=[[0, 0, 3, 4, 0, 0, 7, 8],
+                      [0, 0, 11, 12, 0, 0, 15, 16],
+                      [0, 0, 19, 20, 0, 0, 23, 24],
+                      [0, 0, 27, 28, 0, 0, 31, 32]]),
+      dict(
+          testcase_name='column_wise_pruning',
+          order='C',
+          exp_output=[[0, 0, 0, 0, 0, 0, 0, 0],
+                      [0, 0, 0, 0, 0, 0, 0, 0],
+                      [17, 18, 19, 20, 21, 22, 23, 24],
+                      [25, 26, 27, 28, 29, 30, 31, 32]]))
+  def test_column_row_pruning(self, order, exp_output):
+    inputs = jnp.reshape(jnp.arange(1, 33), (4, 8))
+    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, order=order)
+    np.testing.assert_array_equal(output, exp_output)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='column_wise_pruning',
+          order='C',
+          exp_output=[[[0, 0, 0, 0],
+                       [0, 0, 0, 0],
+                       [9, 10, 11, 12],
+                       [13, 14, 15, 16]],
+                      [[0, 0, 0, 0],
+                       [0, 0, 0, 0],
+                       [25, 26, 27, 28],
+                       [29, 30, 31, 32]],
+                      [[0, 0, 0, 0],
+                       [0, 0, 0, 0],
+                       [41, 42, 43, 44],
+                       [45, 46, 47, 48]],
+                      [[0, 0, 0, 0],
+                       [0, 0, 0, 0],
+                       [57, 58, 59, 60],
+                       [61, 62, 63, 64]]]))
+  def test_3d_column_pruning(self, order, exp_output):
+    inputs = jnp.reshape(jnp.arange(1, 65), (4, 4, 4))
+    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, order=order)
+    np.testing.assert_array_equal(output, exp_output)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='offset_zero',
+          offset=0,
+          exp_output=[[0, 0, 3, 14, 0, 16, 0, 18, 0, 20],
+                      [0, 12, 13, 0, 15, 0, 17, 0, 19, 0]]),
+      dict(
+          testcase_name='offset_positive',
+          offset=5,
+          exp_output=[[0, 0, 0, 14, 0, 16, 0, 18, 0, 20],
+                      [11, 12, 13, 0, 15, 0, 17, 0, 19, 0]]))
+  def test_n_m_row_wise_sparsity_with_offset(self, offset, exp_output):
+    inputs = jnp.array([[1, 2, 3, 14, 5, 16, 7, 18, 9, 20],
+                        [11, 12, 13, 4, 15, 6, 17, 8, 19, 10]])
+
+    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, offset=offset)
+    np.testing.assert_array_equal(output, exp_output)
+
+  # TODO(shivaniagrawal): Add tests for struct sparsity as well.
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='update_mask_apply_mask',
+          update_mask=True,
+          apply_mask=True),
+      dict(
+          testcase_name='no_update_mask_apply_mask',
+          update_mask=False,
+          apply_mask=True),
+      dict(
+          testcase_name='update_mask_no_apply_mask',
+          update_mask=True,
+          apply_mask=False),
+      dict(
+          testcase_name='no_update_mask_no_apply_mask',
+          update_mask=False,
+          apply_mask=False),
+  )
+  def test_mask(self, update_mask, apply_mask):
+    model, init_state = self.init_model(
+        update_mask, False, unstruct_sparsity=True)
+    out, state_0 = model.apply(
+        init_state,
+        self.inputs,
+        update_mask=update_mask,
+        apply_mask=apply_mask,
+        mutable='sparsity')
+
+    state_0_mask = state_0['sparsity']['mask']
+    if not apply_mask or not update_mask:
+      np.testing.assert_array_equal(out, self.inputs)
+    else:
+      np.testing.assert_array_equal(out, [[3, 4, 6], [0, 2, 1]])
+    if update_mask:
+      np.testing.assert_array_equal(state_0_mask,
+                                    [[True, True, True], [False, True, True]])
+    else:
+      np.testing.assert_array_equal(state_0_mask,
+                                    [[True, True, True], [True, True, True]])
+
+    inputs2 = jnp.array([[2, 3, 1], [5, 4, 2]])
+    out, state = model.apply(
+        state_0,
+        inputs2,
+        update_mask=update_mask,
+        apply_mask=apply_mask,
+        mutable='sparsity')
+    state_mask = state['sparsity']['mask']
+    if not apply_mask or not update_mask:
+      np.testing.assert_array_equal(out, inputs2)
+    else:
+      np.testing.assert_array_equal(out, [[2, 3, 0], [5, 4, 2]])
+    if update_mask:
+      np.testing.assert_array_equal(state_mask,
+                                    [[True, True, False], [True, True, True]])
+    else:
+      np.testing.assert_array_equal(state_mask,
+                                    [[True, True, True], [True, True, True]])
+
+
+class PruningParamsTest(parameterized.TestCase):
+
+  @parameterized.parameters(
+      dict(sparse_type='STRUCTURED_NM', prune_rate=0.1),
+      dict(sparse_type='UNSTRUCTURED', prune_rate=(4, 1)))
+  def test_invalid_params(self, sparse_type, prune_rate):
+    with self.assertRaisesRegex(
+        AssertionError, 'prune rate should be either None for no pruning'):
+      sparsity.SparseHParams(type=sparse_type, prune_rate=prune_rate)
+
+  @parameterized.parameters(
+      dict(
+          sparse_type='STRUCTURED_NM',
+          prune_rate=(4, 1),
+          error_msg='must be lower than prune_rate'
+      ),
+      dict(
+          sparse_type='UNSTRUCTURED',
+          prune_rate=2.5,
+          error_msg='sparsity ratio can not be > 1, provided prune_rate'))
+  def test_invalid_prune_rate(self, sparse_type, prune_rate, error_msg):
+    sparsity_hparams = sparsity.SparseHParams(
+        type=sparse_type, prune_rate=prune_rate)
+
+    inputs = jnp.arange(12)
+    with self.assertRaisesRegex(AssertionError, error_msg):
+      sparsity.get_sparsity_mask(inputs, sparsity_hparams)
+
+
+class PruningFunctionalityTest(googletest.TestCase):
+
+  def test_pruning_mask(self):
+    # Total number of parameters = 20
+    inputs = jnp.array(np.random.rand(10, 2))
+    mask = sparsity.get_pruning_unstruct_mask(inputs, prune_rate=0.1)
+    self.assertEqual(jnp.sum(mask), 18)
+
+  def test_smallest_largest_magnitude_mask(self):
+    # Total number of parameters = 20
+    inputs = jnp.array(np.arange(20))
+    mask = sparsity.get_pruning_unstruct_mask(
+        inputs, smallest=True, prune_rate=0.1)
+    self.assertFalse(mask[0])
+    self.assertFalse(mask[1])
+
+    mask = sparsity.get_pruning_unstruct_mask(
+        inputs, smallest=False, prune_rate=0.1)
+    self.assertFalse(mask[-1])
+    self.assertFalse(mask[-2], 0)
+
+  def test_prune_inputs_unstruct(self):
+    # Total number of parameters = 20
+    inputs = jnp.array(np.random.rand(10, 2))
+    prune_input = sparsity.prune_inputs_unstruct(inputs)
+    self.assertEqual(jnp.sum(prune_input == 0), 2)
+
+  def test_smallest_largest_magnitude_prune_unstruct(self):
+    # Total number of parameters = 20
+    inputs = jnp.array(np.arange(20))
+    prune_input = sparsity.prune_inputs_unstruct(inputs, prune_rate=0.1)
+    self.assertEqual(prune_input[0], 0)
+    self.assertEqual(prune_input[1], 0)
+
+    prune_input = sparsity.prune_inputs_unstruct(
+        inputs, prune_rate=0.1, smallest=False)
+    self.assertEqual(prune_input[-1], 0)
+    self.assertEqual(prune_input[-2], 0)
+
+  def test_prune_inputs_n_m(self):
+    inputs = jnp.array(np.random.rand(10, 2, 4))
+    out = sparsity.prune_inputs_n_m(inputs, n=1, m=4)
+    self.assertEqual(out.shape[0], inputs.shape[0])
+    self.assertEqual(out.shape[1], inputs.shape[1])
+    self.assertEqual(out.shape[2], inputs.shape[2])
+    # Only 20 non-zero elements must exist after pruning.
+    self.assertEqual(out[out != 0].shape[0], 20)
+    self.assertEqual(
+        list(np.argmax(inputs, axis=2).flatten()),
+        list(np.argmax(out != 0, axis=2).flatten()))
+
+  def test_order_not_valid(self):
+    inputs = jnp.array(np.random.rand(10, 2, 4))
+    with self.assertRaises(ValueError):
+      _ = sparsity.prune_inputs_n_m(inputs, n=1, m=4, order='X')
+
+  def test_n_m_pruning_mask(self):
+    inputs = jnp.array(np.random.rand(10, 2, 4))
+    mask = sparsity.get_pruning_n_m_mask(inputs, n=1, m=4)
+    self.assertEqual(
+        list(np.argmax(inputs, axis=2).flatten()),
+        list(np.argmax(mask == 1, axis=2).flatten()))
+
+
+if __name__ == '__main__':
+  googletest.main()

@@ -110,6 +110,93 @@ class UpdateUtilsTest(parameterized.TestCase):
             activation_bound_start_step=start_step,
             step=current_step), should_update)
 
+  @parameterized.parameters(
+      # No updates before the start step of 5
+      {
+          'frequency': 10,
+          'start_step': 5,
+          'current_step': 0,
+          'should_update': False
+      },
+      {
+          'frequency': 10,
+          'start_step': 5,
+          'current_step': 3,
+          'should_update': False
+      },
+
+      # Updates expected every 10 steps after step 5 and no time else
+      {
+          'frequency': 8,
+          'start_step': 5,
+          'current_step': 5,
+          'should_update': True
+      },
+      {
+          'frequency': 10,
+          'start_step': 5,
+          'current_step': 15,
+          'should_update': True
+      },
+      {
+          'frequency': 10,
+          'start_step': 5,
+          'current_step': 25,
+          'should_update': True
+      },
+      {
+          'frequency': 10,
+          'start_step': 5,
+          'current_step': 13,
+          'should_update': False
+      },
+      {
+          'frequency': 10,
+          'start_step': 5,
+          'current_step': 18,
+          'should_update': False
+      },
+
+      # Test frequency of 0, which indicates no update except at start step
+      {
+          'frequency': 0,
+          'start_step': 5,
+          'current_step': 5,
+          'should_update': True
+      },
+      {
+          'frequency': 0,
+          'start_step': 5,
+          'current_step': 10,
+          'should_update': False
+      },
+      {
+          'frequency': 0,
+          'start_step': 5,
+          'current_step': 4,
+          'should_update': False
+      },
+
+      # Test a start step of -1, which indicates no mask update at any step.
+      {
+          'frequency': 0,
+          'start_step': -1,
+          'current_step': 3,
+          'should_update': False
+      },
+      {
+          'frequency': 5,
+          'start_step': -1,
+          'current_step': 5,
+          'should_update': False
+      })
+  def test_should_update_sparsity_mask(self, frequency, start_step,
+                                       current_step, should_update):
+    self.assertEqual(
+        train_utils.update_sparsity_mask(
+            sparsity_start_step=start_step,
+            sparsity_update_freq=frequency,
+            step=current_step), should_update)
 
 
 if __name__ == '__main__':

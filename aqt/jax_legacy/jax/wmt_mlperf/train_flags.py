@@ -147,6 +147,19 @@ flags.DEFINE_string(
     'FLAGS.model_dir. Both HLO text (filename.txt) and protobuf (filename.pb)'
     ' are emitted.')
 
+flags.DEFINE_integer(
+    'sparsity_start_step',
+    default=-1,
+    help=(
+        'First step to compute sparsity mask at, defaults to -1 in which case '
+        'we do not compute sparsity mask.'))
+
+flags.DEFINE_integer(
+    'sparsity_update_freq',
+    default=0,
+    help=(
+        'How often (number of steps )to update sparsity mask, defaults to 0 in '
+        'which case we do noy update again.'))
 
 flags.DEFINE_bool(
     'visualize_acts_bound',

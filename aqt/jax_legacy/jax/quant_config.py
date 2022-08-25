@@ -62,6 +62,19 @@ class DynamicContext:
   # Whether to tag activations to record statistics.
   collect_acts_stats: bool = flax.struct.field(default=False, pytree_node=False)
 
+  # Whether to apply sparsity for training, this is set to True somewhere in a
+  # later stage of training.
+  # Currently we separate the update of sparsity masks for weight and
+  # activation, since during evaluation the weight sparsity mask is
+  # reused from training, while activation mask will need update
+  # (due to change of seq length).
+  # The apply_sparsity flag is shared between weight/activation sparsity,
+  # we can modify it to use two flags in the future if necessary.
+  apply_sparsity: bool = flax.struct.field(default=False, pytree_node=False)
+  update_weight_sparsity: bool = flax.struct.field(
+      default=False, pytree_node=False)
+  update_act_sparsity: bool = flax.struct.field(
+      default=False, pytree_node=False)
 
   # Whether to quantize activations.
   #

@@ -31,11 +31,10 @@ from aqt.jax_legacy.jax import shape_utils
 from aqt.jax_legacy.jax import stats_tag
 from aqt.jax_legacy.jax import utils
 from aqt.jax_legacy.jax.flax import struct as flax_struct
-
-
-
 from aqt.jax_legacy.jax.quantization import QuantOps
 from aqt.jax_legacy.jax.quantization import QuantType
+from aqt.jax_legacy.jax.sparsity import SparseHParams
+from aqt.jax_legacy.jax.sparsity import Sparsity
 import flax
 from flax import linen as nn
 from flax.core import frozen_dict
@@ -105,6 +104,9 @@ class DenseAqt(nn.Module):
     quant_type: QuantType
     weight_quant_granularity: quant_config.QuantGranularity
 
+
+    act_sparsity: Optional[SparseHParams] = None
+    weight_sparsity: Optional[SparseHParams] = None
 
   hparams: HParams
   paxis_name: Optional[str]
@@ -191,6 +193,12 @@ class DenseAqt(nn.Module):
           axes=tuple(kernel_axis_names))
       kernel = jnp.asarray(kernel, self.dtype)
 
+      kernel = Sparsity(
+          sparsity_hparams=hparams.weight_sparsity, name='weight_sparsity')(
+              kernel,
+              update_mask=self.dynamic_context.update_weight_sparsity,
+              apply_mask=self.dynamic_context.apply_sparsity,
+          )
 
     if self.possibly_use_quantized_vars:
       qkernel_dtype = self.dtype
@@ -219,6 +227,14 @@ class DenseAqt(nn.Module):
         quant_w = quantization.QuantW(qkernel, qscale)
         kernel = None
 
+    # TODO(shivaniagrawal): use the mask for statistics computation for sparsity
+    # and quantization interaction.
+    inputs = Sparsity(
+        sparsity_hparams=hparams.act_sparsity, name='act_sparsity')(
+            inputs,
+            update_mask=self.dynamic_context.update_act_sparsity,
+            apply_mask=self.dynamic_context.apply_sparsity,
+        )
 
     bounds_params = get_bounds.GetBounds.Params(
         update_bounds=self.dynamic_context.update_bounds,

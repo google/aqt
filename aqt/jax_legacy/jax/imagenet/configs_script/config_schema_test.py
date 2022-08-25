@@ -138,6 +138,8 @@ class BaseConfigTest(parameterized.TestCase):
         'quant_type': None,
         'quant_act': quant_act_schema,
         'weight_half_shift': None,
+        'weight_sparsity': sparsity_schema,
+        'act_sparsity': sparsity_schema,
     }
 
     conv_schema = {
@@ -186,6 +188,9 @@ class BaseConfigTest(parameterized.TestCase):
         'teacher_model': None,
         'is_teacher': None,
         'seed': None,
+        'sparsity': sparsity_schema,
+        'weight_sparsity': sparsity_schema,
+        'act_sparsity': sparsity_schema,
         'lr_scheduler': {
             'warmup_epochs': None,
             'cooldown_epochs': None,

@@ -106,6 +106,13 @@ def get_base_config(imagenet_type: ImagenetType, quant_target: QuantTarget):
       "activation_bound_start_step": -1,
       "prec": None,
 
+      "sparsity": {
+          "type": "STRUCTURED_NM",
+          "prune_rate": None,
+          "order": "C",
+          "absolute": True,
+          "smallest": True,
+      },
       "quant_type": "fake_quant",
       "weight_quant_granularity": "per_channel",
       "act_function": "relu",

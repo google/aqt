@@ -53,15 +53,14 @@ def step(inputs, params, cache, state, eos_token, max_decode_len,
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       use_bfloat16=False)
-  mutable = False
-  new_logits = model.apply(
-      {
-          'params': params,
-          **state
-      },
-      inputs,
-      method=model.encode,
-      mutable=mutable)
+  mutable = ['sparsity']
+  new_logits, _ = model.apply({
+      'params': params,
+      **state
+  },
+                              inputs,
+                              method=model.encode,
+                              mutable=mutable)
   encoded_inputs = decode.flat_batch_beam_expand(
       new_logits, beam_size)
 

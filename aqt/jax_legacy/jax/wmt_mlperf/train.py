@@ -370,6 +370,9 @@ def train_step(optimizer,
   else:
     metrics = {}
   metrics['learning_rate'] = lr
+  metrics['apply_sparsity'] = dynamic_context.apply_sparsity
+  metrics['update_weight_sparsity'] = dynamic_context.update_weight_sparsity
+  metrics['update_act_sparsity'] = dynamic_context.update_act_sparsity
   # Compute or_loss for logging
   # TODO(wanglisa): Is there a way to avoid computing it twice?
   or_loss = custom_losses.weight_outlier_regularization_loss(
@@ -565,15 +568,15 @@ def eval_step(params: Mapping[str, Any], batch, state: Mapping[str, Any],
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       should_decode=False)
-  mutable = False
-  logits = model.apply(
-      {
-          'params': params,
-          **state
-      },
-      inputs,
-      targets,
-      mutable=mutable)
+  mutable = ['sparsity']
+  # .apply() will return a tuple if mutable is not False
+  logits, _ = model.apply({
+      'params': params,
+      **state
+  },
+                          inputs,
+                          targets,
+                          mutable=mutable)
   return compute_metrics(logits, targets, weights)
 
 
@@ -856,11 +859,19 @@ def get_dynamic_context(hparams: training_hparams.TrainingHParams, step: int,
   dynamic_context = train_utils.get_dynamic_context_for_step(
       activation_bound_update_freq=hparams.activation_bound_update_freq,
       activation_bound_start_step=hparams.activation_bound_start_step,
+      # TODO(shivaniagrawal): make a decision on passing this via hparams.
+      sparsity_start_step=FLAGS.sparsity_start_step,
+      sparsity_update_freq=FLAGS.sparsity_update_freq,
       step=step,
       collect_acts_stats=collect_acts_stats,
       prefer_int8_to_int32_dot=hparams.prefer_int8_to_int32_dot)
   if not train:
     dynamic_context = dataclasses.replace(dynamic_context, update_bounds=False)
+    dynamic_context = dataclasses.replace(dynamic_context, apply_sparsity=True)
+    dynamic_context = dataclasses.replace(
+        dynamic_context, update_act_sparsity=True)
+    dynamic_context = dataclasses.replace(
+        dynamic_context, update_weight_sparsity=False)
   return jax_utils.replicate(dynamic_context)
 
 
@@ -1196,6 +1207,14 @@ def run_training(
         or_loss = metrics_sums.pop('or_loss').mean()
         summary = jax.tree_map(lambda x: x / denominator, metrics_sums)  # pylint: disable=cell-var-from-loop
         summary['learning_rate'] = lr
+        if FLAGS.log_sparsity_scalars:
+          apply_sparsity = metrics_all.pop('apply_sparsity').mean()
+          update_weight_sparsity = metrics_all.pop(
+              'update_weight_sparsity').mean()
+          update_act_sparsity = metrics_all.pop('update_act_sparsity').mean()
+          summary['apply_sparsity'] = apply_sparsity
+          summary['update_weight_sparsity'] = update_weight_sparsity
+          summary['update_act_sparsity'] = update_act_sparsity
         summary['or_loss'] = or_loss
         summary['perplexity'] = jnp.clip(jnp.exp(summary['loss']), a_max=1.0e4)
         logging.info('train in step: %d, loss: %.4f', step, summary['loss'])

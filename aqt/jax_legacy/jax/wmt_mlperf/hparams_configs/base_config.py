@@ -100,7 +100,15 @@ def get_base_config(n_layers: int, use_auto_acts: bool, fp_quant: bool):
       "weight_outlier_regularization_regex": "^.*kernel$",
       "weight_quant_granularity": "per_channel",
 
+      "sparsity": {
+          "type": "STRUCTURED_NM",
+          "prune_rate": None,
+          "order": "R",  # row wise sparsity
+          "absolute": True,
+          "smallest": True,
+      },
   })
+  config.act_sparsity.order = "C"
   if not fp_quant:
     config.prec = None
     config.quant_type = "aqt"
