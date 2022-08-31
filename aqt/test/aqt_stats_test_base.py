@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Stats test base to be shared between TF and JAX AQTp ops.
 
 Since both TF and JAX AQTp are supposed to have the exactly same logics and
@@ -61,43 +60,52 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
     raise NotImplementedError
 
   def get_sum_of_ones(self):
-    """Returns sum_of_ones statistics."""
     raise NotImplementedError
 
   def get_sum_of_vals(self):
-    """Returns sum_of_vals statistics."""
     raise NotImplementedError
 
   def get_max_of_abs_vals(self):
-    """Returns max_of_abs_vals statistics."""
     raise NotImplementedError
 
   def get_sum_of_l1_vals(self):
-    """Returns sum_of_l1_vals statistics."""
     raise NotImplementedError
 
   def get_sum_of_lp_vals(self):
-    """Returns sum_of_lp_vals statistics."""
     raise NotImplementedError
 
   def set_ema_update_count(self, ema_update_count):
-    """Assign new value to stats.ema_update_count."""
+    raise NotImplementedError
+
+  def mean(self):
+    raise NotImplementedError
+
+  def max_dev(self):
+    raise NotImplementedError
+
+  def l1_dev(self):
+    raise NotImplementedError
+
+  def lp_dev(self):
+    raise NotImplementedError
+
+  def bound(self, calibration_config):
     raise NotImplementedError
 
   def check_mean(self, mean):
-    self.assertAllEqual(self._stats.mean(), f32(mean))
+    self.assertAllEqual(self.mean(), f32(mean))
 
   def check_max_dev(self, expected_max):
     self.assertAllEqual(self.get_max_of_abs_vals(), f32(expected_max))
 
   def check_l1_dev(self, l1_dev):
-    self.assertAllEqual(self._stats.l1_dev(), f32(l1_dev))
+    self.assertAllEqual(self.l1_dev(), f32(l1_dev))
 
   def check_lp_dev(self, lp_dev, approx=False):
     if approx:
-      self.assertAllClose(self._stats.lp_dev(), f32(lp_dev))
+      self.assertAllClose(self.lp_dev(), f32(lp_dev))
     else:
-      self.assertAllEqual(self._stats.lp_dev(), f32(lp_dev))
+      self.assertAllEqual(self.lp_dev(), f32(lp_dev))
 
   def test_basics_carefully(self):
     """Checks stats against hand-computed results."""
@@ -105,17 +113,22 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
     config.share_stats_axes[:] = [1]  # share only on rows
 
     with self.cached_session():
-      self.set_stats([2, 4], config)
+      rl = 4  # row length
+      self.set_stats([2, rl], config)
 
       # update 1
       # ema_update_count = 1 completely overwrites the priors.
-      self.update([[4, 0, -3, 0], [-40, 30, 0, 0]], [[2], [0.5]])
+      wgt1 = f32([[2], [0.5]])
+      self.update([[4, 0, -3, 0], [-40, 30, 0, 0]], wgt1)
       # We will take a peak inside first.
       # pylint: disable=protected-access
-      self.assertAllEqual(self.get_sum_of_ones(), f32([[2 * 1], [0.5]]) * 4)
-      self.assertAllEqual(self.get_sum_of_vals(), f32([[2 * 1], [-5]]))
-      self.assertAllEqual(self.get_sum_of_l1_vals(), f32([[2 * 7], [35]]))
-      self.assertAllEqual(self.get_sum_of_lp_vals(), f32([[2 * 25], [1250]]))
+      self.assertAllEqual(self.get_sum_of_ones(), wgt1 * rl)
+      self.assertAllEqual(self.get_sum_of_vals(),
+                          f32([[4 - 3], [-40 + 30]]) * wgt1)
+      self.assertAllEqual(self.get_sum_of_l1_vals(),
+                          f32([[4 + 3], [40 + 30]]) * wgt1)
+      squre_sum = f32([[4 * 4 + 3 * 3], [40 * 40 + 30 * 30]])
+      self.assertAllEqual(self.get_sum_of_lp_vals(), squre_sum * wgt1)
       self.check_mean([[0.25], [-2.5]])
       self.check_l1_dev([[1.75], [17.5]])
       self.check_lp_dev([[2.5], [25]])
@@ -125,7 +138,7 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
       # ema_update_count = 1 completely overwrites the update 1.
       # notice the change in weight and _sum_of_ones, but no change in stats.
       self.update([[4, 0, -3, 0], [-40, 30, 0, 0]], [[1], [0.5]])
-      self.assertAllEqual(self.get_sum_of_ones(), f32([[1], [0.5]]) * 4)
+      self.assertAllEqual(self.get_sum_of_ones(), f32([[1], [0.5]]) * rl)
       self.check_mean([[0.25], [-2.5]])
       self.check_l1_dev([[1.75], [17.5]])
       self.check_lp_dev([[2.5], [25]])
@@ -138,7 +151,7 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
       self.update(f32([[10, 10, 0, 0], [50, 0, 0, 0]]), f32([[3], [0.5]]))
       # Functions could make them one-liners and improve readability.
       self.assertAllEqual(self.get_sum_of_ones(),
-                          f32([[1 + 3], [0.5 + 0.5]]) / 2 * 4)
+                          f32([[1 + 3], [0.5 + 0.5]]) / 2 * rl)
       self.assertAllEqual(self.get_sum_of_vals(),
                           f32([[1 * 1 + 20 * 3], [-10 * 0.5 + 50 * 0.5]]) / 2)
       self.assertAllEqual(self.get_sum_of_l1_vals(),
@@ -167,8 +180,7 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
       self.check_max_dev([[1]])
       # bound
       self.assertAllEqual(
-          self._stats.bound(calibration_config),
-          f32([[10 + 3 * 1 + 4 * 1 + 100 * 1]]))
+          self.bound(calibration_config), f32([[10 + 3 * 1 + 4 * 1 + 100 * 1]]))
 
   def test_p_norm(self):
     config = aqt_test_shared_base.test_stats_config()

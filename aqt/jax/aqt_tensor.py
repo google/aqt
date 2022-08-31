@@ -11,12 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Accurate Quantized Training ops."""
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from aqt.common import aqt_common
 from aqt.common import aqt_config
@@ -32,63 +31,62 @@ def pass_through(x: jnp.ndarray, fn) -> jnp.ndarray:
   return x - jax.lax.stop_gradient(x) + jax.lax.stop_gradient(fn(x))
 
 
-@struct.dataclass
-class Stats:
+class Stats(nn.Module):
   """Manages efficient gatherting of running statistics."""
 
-  data_shape: List[int]
-  ema_update_count: int
-  sum_of_ones: jnp.ndarray
-  sum_of_vals: jnp.ndarray
-  max_of_abs_vals: jnp.ndarray
-  sum_of_l1_vals: jnp.ndarray
-  sum_of_lp_vals: jnp.ndarray
-  stats_shape: List[int] = struct.field(pytree_node=False)
+  # This type annotation is what the constructor expects.
+  # However nn.Module silently converts it into immutable Tuple, so
+  # the methods will observe Tuple[Optional[int], ...]
+  data_shape: List[Optional[int]] = struct.field(pytree_node=False)
   config: aqt_config.StatsConfig = struct.field(pytree_node=False)
 
-  @classmethod
-  def init_stats(
-      cls,  #
-      data_shape: Iterable[Optional[int]],
-      config: aqt_config.StatsConfig):
+  def setup(self):
     """Constructor to init a Stats instance.
-
-    Args:
-      data_shape: shape of the statistics.
-      config: configuration fot Stats.
 
     Returns:
       A new instance of Stats, with initialized statistics.
     """
-    data_shape = list(data_shape)
-    config.validate(data_shape)
+    self.config.validate(self.data_shape)
     # TODO(jihwanlee): Move the check below in the config validator.
-    if config.lp_order > 30:
+    if self.config.lp_order > 30:
       raise NotImplementedError('For higher norms we should add stabilization.')
-
-    stats_shape = list(data_shape)
-    for axis in config.share_stats_axes:
+    stats_shape = list(self.data_shape)  # nn.Module converts lists to tuples.
+    for axis in self.config.share_stats_axes:
       stats_shape[axis] = 1
+    self.stats_shape = stats_shape
 
-    def init_val(init_val: float) -> jnp.ndarray:
-      init = jnp.resize(
-          jnp.array(init_val, dtype=jnp.float32), tuple(stats_shape))
-      return init
+    def init_var(init_val: float) -> jnp.ndarray:
+      return jnp.full(self.stats_shape, init_val, dtype=jnp.float32)
 
-    return cls(
-        data_shape=data_shape,
-        stats_shape=stats_shape,
-        config=config,
-        ema_update_count=config.ema_update_count,
-        sum_of_ones=init_val(config.update_count_prior),
-        sum_of_vals=init_val(config.mean_prior * config.update_count_prior),
-        max_of_abs_vals=init_val(config.max_dev_prior),
-        sum_of_l1_vals=init_val(config.l1_dev_prior *
-                                config.update_count_prior),
-        sum_of_lp_vals=init_val(config.lp_dev_prior**config.lp_order *
-                                config.update_count_prior))  # pytype: disable=wrong-keyword-args  # trace-all-classes
+    def mk_var(name: str, init_val: float) -> nn.Variable:
+      return self.variable('aqt', name, init_var, init_val)
 
-  def with_update(self, x: jnp.ndarray, weight: Optional[jnp.ndarray]) -> Stats:
+    self.ema_update_count = self.config.ema_update_count
+    self.sum_of_ones = mk_var('sum_of_ones', self.config.update_count_prior)
+    self.sum_of_vals = mk_var(
+        'sum_of_vals', self.config.mean_prior * self.config.update_count_prior)
+    self.max_of_abs_vals = mk_var('max_of_abs_vals', self.config.max_dev_prior)
+    self.sum_of_l1_vals = mk_var(
+        'sum_of_l1_vals',
+        self.config.l1_dev_prior * self.config.update_count_prior)
+    self.sum_of_lp_vals = mk_var(
+        'sum_of_lp_vals', self.config.lp_dev_prior**self.config.lp_order *
+        self.config.update_count_prior)
+
+  def __call__(self):
+    # Keep __call__() just not to require users to explicitly specify which
+    # method should be called when invoking init().
+    pass
+
+  # TODO(lew): Remvoe override_ema_update_count.
+  #   override_ema_update_count is used only in tests and is a hack.
+  #   However replacing it with  self.ema_update_count does not work,
+  #   because nn.Model will not allow to access it from outside.
+  #   I'm not sure how this should be solved cleanly.
+  def update(self,
+             x: jnp.ndarray,
+             weight: Optional[jnp.ndarray],
+             override_ema_update_count=None):
     """Returns a new Stats object with updated statistics.
 
     Since flax.struct.dataclass objects are frozen, thie update method uses
@@ -98,6 +96,7 @@ class Stats:
     Args:
       x: input array to update the current statistics with.
       weight: weight for the input array x.
+      override_ema_update_count: use this value instead of the one in config.
 
     Returns:
       Anew object of Stats with updated statistics.
@@ -121,9 +120,9 @@ class Stats:
       if self.config.tpu_cross_replica_sum:
         raise NotImplementedError(
             'support for tpu_cross_replica_sum=True is not implemented')
-      rate = 1.0 / self.ema_update_count
-      var = (1.0 - rate) * var + rate * s
-      return var
+      override = override_ema_update_count
+      rate = 1.0 / (override if override is not None else self.ema_update_count)
+      var.value = (1.0 - rate) * var.value + rate * s
 
     # Layers such as ReLU emit zeros often. In such cases, we can model
     # the non-sparse distribution of weights separately, resulting in
@@ -136,39 +135,30 @@ class Stats:
 
     px = x if self.config.lp_order % 2 == 0 else jnp.abs(x)
 
-    new_sum_of_ones = update_var(self.sum_of_ones, ones)
-    new_sum_of_vals = update_var(self.sum_of_vals, x)
-    new_max_of_abs_vals = update_var(
-        self.max_of_abs_vals, jnp.abs(x), reduce_max=True)
-    new_sum_of_l1_vals = update_var(self.sum_of_l1_vals, jnp.abs(x))
-    new_sum_of_lp_vals = update_var(self.sum_of_lp_vals,
-                                    px**self.config.lp_order)
-
-    return self.replace(  # pytype: disable=attribute-error  # trace-all-classes
-        sum_of_ones=new_sum_of_ones,
-        sum_of_vals=new_sum_of_vals,
-        max_of_abs_vals=new_max_of_abs_vals,
-        sum_of_l1_vals=new_sum_of_l1_vals,
-        sum_of_lp_vals=new_sum_of_lp_vals)
+    update_var(self.sum_of_ones, ones)
+    update_var(self.sum_of_vals, x)
+    update_var(self.max_of_abs_vals, jnp.abs(x), reduce_max=True)
+    update_var(self.sum_of_l1_vals, jnp.abs(x))
+    update_var(self.sum_of_lp_vals, px**self.config.lp_order)
 
   def mean(self) -> jnp.ndarray:
-    return self.sum_of_vals / self.sum_of_ones
+    return self.sum_of_vals.value / self.sum_of_ones.value
 
   def max_dev(self) -> jnp.ndarray:
-    return self.max_of_abs_vals
+    return self.max_of_abs_vals.value
 
   def l1_dev(self) -> jnp.ndarray:
-    return self.sum_of_l1_vals / self.sum_of_ones
+    return self.sum_of_l1_vals.value / self.sum_of_ones.value
 
   def lp_dev(self) -> jnp.ndarray:
     if self.config.lp_order == 2:
       # sqrt() is numerically more accurate
-      return jnp.sqrt(self.sum_of_lp_vals / self.sum_of_ones)
+      return jnp.sqrt(self.sum_of_lp_vals.value / self.sum_of_ones.value)
     else:
       # TODO(b/205769820): Make sure if the output of pow op below is
       # numerically valid.
-      return (self.sum_of_lp_vals / self.sum_of_ones)**(1.0 /
-                                                        self.config.lp_order)
+      return (self.sum_of_lp_vals.value /
+              self.sum_of_ones.value)**(1.0 / self.config.lp_order)
 
   def bound(  #
       self, calibration_config: aqt_config.CalibrationConfig) -> jnp.ndarray:
@@ -220,12 +210,11 @@ class TensorQuantizer(nn.Module):
   def setup(self):
     self.config.fill_gaps_with_float_config()
     self.config.validate(self.data_shape)
-    self._stats = self.variable('TensorQuantizer', 'stats', Stats.init_stats,
-                                self.data_shape, self.config.stats_config)
+    self._stats = Stats(self.data_shape, self.config.stats_config)
     self._scale = self.variable('TensorQuantizer', 'scale', jnp.zeros,
-                                self._stats.value.stats_shape, jnp.float32)
+                                self._stats.stats_shape, jnp.float32)
     self._inv_scale = self.variable('TensorQuantizer', 'inv_scale', jnp.zeros,
-                                    self._stats.value.stats_shape, jnp.float32)
+                                    self._stats.stats_shape, jnp.float32)
     if self.config.use_quantized_variable:
       self.quantized_variable = self.variable('TensorQuantizer',
                                               'quantized_variable', jnp.zeros,
@@ -242,18 +231,17 @@ class TensorQuantizer(nn.Module):
     # method should be called when invoking init().
     pass
 
-  def _fresh_scale(self, config: aqt_config.AqtTensorConfig
-                   ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+  def _fresh_scale(
+      self,
+      config: aqt_config.AqtTensorConfig) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Returns an updated scale provided by a config or the current one if None."""
     if isinstance(config.quant_config, aqt_config.FloatConfig):
       # We shouldn't update the scale if the given config contains FloatConfig;
       # fill with a poison value if we get into this situation.
-      nan = jnp.resize(
-          jnp.array(float('nan'), dtype=jnp.float32),
-          tuple(self._stats.value.stats_shape))
+      nan = jnp.full(self._stats.stats_shape, jnp.nan, dtype=jnp.float32)
       return nan, nan
 
-    x_bound = self._stats.value.bound(config.calibration_config)
+    x_bound = self._stats.bound(config.calibration_config)
     clip_bound = aqt_common.get_clip_bound(config.quant_config)
 
     new_scale = clip_bound / x_bound
@@ -267,7 +255,7 @@ class TensorQuantizer(nn.Module):
           isinstance(config.quant_config, aqt_config.IntQuantConfig)):
         clip_bound = aqt_common.get_clip_bound(config.quant_config)
         return self._inv_scale.value * clip_bound
-    return jnp.zeros(self._stats.value.stats_shape)
+    return jnp.zeros(self._stats.stats_shape)
 
   def update(
       self,  #
@@ -276,8 +264,10 @@ class TensorQuantizer(nn.Module):
       event_count: jnp.ndarray):
     """Updates statistics, scale, and quantized variable."""
 
-    active_configs = [c for c in self.config.tensor_configs
-                      if is_config_active(c, event_count)]
+    active_configs = [
+        c for c in self.config.tensor_configs
+        if is_config_active(c, event_count)
+    ]
 
     if len(active_configs) == 1:
       self._update_config(active_configs[0], sample, weight, event_count)
@@ -295,12 +285,12 @@ class TensorQuantizer(nn.Module):
     should_update_scale = self._should_update_scale(config, event_count)
     self._last_update.value = event_count
 
-    self._stats.value = self._stats.value.with_update(sample, weight)
+    self._stats.update(sample, weight)
 
-    new_scale, inv_scale = jax.lax.cond(should_update_scale,
-                                        lambda: self._fresh_scale(config),
-                                        lambda: (self._scale.value,  # pylint: disable=g-long-lambda
-                                                 self._inv_scale.value))
+    new_scale, inv_scale = jax.lax.cond(
+        should_update_scale,  #
+        lambda: self._fresh_scale(config),
+        lambda: (self._scale.value, self._inv_scale.value))
     self._scale.value = new_scale
     self._inv_scale.value = inv_scale
 
@@ -311,9 +301,10 @@ class TensorQuantizer(nn.Module):
           sample, train=True).astype(self.quantized_variable.value.dtype)
       self.quantized_variable.value = new_var
 
-  def _should_update_scale(self,  #
-                           config: aqt_config.AqtTensorConfig,
-                           event_count: jnp.ndarray) -> bool:
+  def _should_update_scale(
+      self,  #
+      config: aqt_config.AqtTensorConfig,
+      event_count: jnp.ndarray) -> bool:
     """Returns if scale should be updated for the config and event count."""
     if isinstance(config.quant_config, aqt_config.FloatConfig):
       return False

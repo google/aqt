@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Tests for aqt_tensor."""
 
 from typing import Set
@@ -69,6 +68,21 @@ class StatsTest(aqt_stats_test_base.StatsTest):
 
   def set_ema_update_count(self, ema_update_count):
     self._stats._ema_update_count = ema_update_count
+
+  def mean(self):
+    return self._stats.mean()
+
+  def max_dev(self):
+    return self._stats.max_dev()
+
+  def l1_dev(self):
+    return self._stats.l1_dev()
+
+  def lp_dev(self):
+    return self._stats.lp_dev()
+
+  def bound(self, calibration_config):
+    return self._stats.bound(calibration_config)
 
 
 class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Tests for aqt_tensor."""
 
 from absl.testing import absltest
@@ -35,29 +34,52 @@ class StatsTest(aqt_stats_test_base.StatsTest):
   """
 
   def set_stats(self, data_shape, config):
-    self._stats = aqt_tensor.Stats.init_stats(
-        data_shape=data_shape, config=config)
+    self._stats = aqt_tensor.Stats(data_shape=data_shape, config=config)
+    self._stats_state = self._stats.init(jax.random.PRNGKey(0))
+    self.override_ema_update_count = None
 
   def update(self, sample, weight):
-    self._stats = self._stats.with_update(f32(sample), f32(weight))
+    _, self._stats_state = self._stats.apply(
+        self._stats_state,
+        f32(sample),
+        f32(weight),
+        override_ema_update_count=self.override_ema_update_count,
+        method=self._stats.update,
+        mutable=["aqt"])
 
   def get_sum_of_ones(self):
-    return self._stats.sum_of_ones
+    return self._stats_state["aqt"]["sum_of_ones"]
 
   def get_sum_of_vals(self):
-    return self._stats.sum_of_vals
+    return self._stats_state["aqt"]["sum_of_vals"]
 
   def get_max_of_abs_vals(self):
-    return self._stats.max_dev()
+    return self._stats_state["aqt"]["max_of_abs_vals"]
 
   def get_sum_of_l1_vals(self):
-    return self._stats.sum_of_l1_vals
+    return self._stats_state["aqt"]["sum_of_l1_vals"]
 
   def get_sum_of_lp_vals(self):
-    return self._stats.sum_of_lp_vals
+    return self._stats_state["aqt"]["sum_of_lp_vals"]
 
   def set_ema_update_count(self, ema_update_count):
-    self._stats = self._stats.replace(ema_update_count=ema_update_count)
+    self.override_ema_update_count = ema_update_count
+
+  def mean(self):
+    return self._stats.apply(self._stats_state, method=self._stats.mean)
+
+  def max_dev(self):
+    return self._stats.apply(self._stats_state, method=self._stats.max_dev)
+
+  def l1_dev(self):
+    return self._stats.apply(self._stats_state, method=self._stats.l1_dev)
+
+  def lp_dev(self):
+    return self._stats.apply(self._stats_state, method=self._stats.lp_dev)
+
+  def bound(self, calibration_config):
+    return self._stats.apply(
+        self._stats_state, calibration_config, method=self._stats.bound)
 
 
 class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
@@ -69,8 +91,8 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
   _quant_state = {}
 
   def make_tensor_quantizer(self, data_shape, config, name="tq"):
-    quant = aqt_tensor.TensorQuantizer(data_shape=data_shape, config=config,
-                                       name=name)
+    quant = aqt_tensor.TensorQuantizer(
+        data_shape=data_shape, config=config, name=name)
     self._quant_state[name] = quant.init(jax.random.PRNGKey(0))
     return quant
 
@@ -81,7 +103,7 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
         weight,
         int(event_count),
         method=quant.update,
-        mutable="TensorQuantizer")
+        mutable=["TensorQuantizer", "aqt"])
 
   def to_quant(self, quant, x, train=True):
     return quant.apply(
@@ -124,8 +146,10 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
 
     # The gradient of fn() should be 1.0 since STE makes it pretend to be an
     # identity function during the backward pass.
-    np.testing.assert_equal(jnp.array(1.0),
-                            jax.grad(aqt_tensor.pass_through)(inp, fn))
+    np.testing.assert_equal(
+        jnp.array(1.0),
+        jax.grad(aqt_tensor.pass_through)(inp, fn))
+
 
 if __name__ == "__main__":
   absltest.main()
