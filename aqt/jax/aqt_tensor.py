@@ -297,6 +297,8 @@ class TensorQuantizer(nn.Module):
     if (self.config.use_quantized_variable and
         isinstance(config.quant_config, aqt_config.IntQuantConfig) and
         config.quant_config.compatible_with_int8()):
+      scale, _ = self._get_quant_scale(train=True)
+      sample = scale * sample
       new_var = self._to_quant(
           sample, train=True).astype(self.quantized_variable.value.dtype)
       self.quantized_variable.value = new_var

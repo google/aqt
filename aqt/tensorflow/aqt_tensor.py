@@ -390,6 +390,8 @@ class TensorQuantizer:
         isinstance(config.quant_config, aqt_config.IntQuantConfig) and
         config.quant_config.compatible_with_int8()):
       with tf.control_dependencies(updates):
+        scale, _ = self._get_quant_scale(train=True)
+        sample = scale * sample
         updated_quantized_variable = tf.cast(
             self._to_quant(sample, train=True), self.quantized_variable.dtype)
         updates.append(

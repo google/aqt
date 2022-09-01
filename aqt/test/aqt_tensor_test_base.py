@@ -302,7 +302,10 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     """Makes sure that update saves to quantized_variable."""
     iqc = aqt_config.IntQuantConfig(bits=8, preserve_zero=True)
     clip_bound = aqt_common.get_clip_bound(iqc)
-    cc = aqt_config.CalibrationConfig(const_bound_coeff=clip_bound)
+    # Use a half of clip_bound for const_bound_coeff, which results in
+    # scale=2.0. It will help to easily compute expected quantized values and
+    # check if they are equal to actual quantized variable in this test.
+    cc = aqt_config.CalibrationConfig(const_bound_coeff=clip_bound * 0.5)
     sc = aqt_config.StatsConfig(
         ema_update_count=1, share_stats_axes=[], tpu_cross_replica_sum=False)
     yes_q_config = aqt_config.AqtTensorConfig(
@@ -335,6 +338,10 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     rng = np.random.default_rng(1234)
     x = rng.integers(-10, 10, size=data_shape, dtype=np.int64)
     x = np.array(x, dtype=np.float32)
+    # Since all values in x are integers between -10 and 10, their quantized
+    # values are just the result of scaling (scale=2.0), without clipping
+    # (clip_bound [-127.5, 127.5]) and rounding.
+    x_quantized = 2.0 * x
 
     self.init()
 
@@ -343,16 +350,16 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
 
     # First config with 8 bits quantization active, variable should be updated.
     update(x, 0)
-    self.assertAllEqual(self.get_quantized_variable(quantizer), x)
+    self.assertAllEqual(self.get_quantized_variable(quantizer), x_quantized)
 
     # Second config with 9 bits quantization active, variable should not be
     # updated, since it is not compatible with int8.
     update(x * 2, 1)
-    self.assertAllEqual(self.get_quantized_variable(quantizer), x)
+    self.assertAllEqual(self.get_quantized_variable(quantizer), x_quantized)
 
     # No config, variable should not be updated.
     update(x * 2, 2)
-    self.assertAllEqual(self.get_quantized_variable(quantizer), x)
+    self.assertAllEqual(self.get_quantized_variable(quantizer), x_quantized)
 
   def test_none_weights(self):
     """Ensures semantics of None weights equal those of weights=1."""
