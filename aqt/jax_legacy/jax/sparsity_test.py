@@ -28,16 +28,24 @@ from google3.testing.pybase import parameterized
 
 class SparsityTest(parameterized.TestCase):
 
-  def init_model(self, update_mask, apply_mask, unstruct_sparsity):
+  def init_model(self, update_mask, apply_mask, unstruct_sparsity,
+                 structure_decay=False,
+                 num_update_sparsity=0,
+                 prune_rate=(2, 4)):
     rng = random.PRNGKey(0)
     self.inputs = jnp.array([[3, 4, 6], [1, 2, 1]])
     if unstruct_sparsity:
-      sparsity_hparams = SparseHParams(type='UNSTRUCTURED', prune_rate=0.2)
+      sparsity_hparams = SparseHParams(
+          type='UNSTRUCTURED', prune_rate=0.2, structure_decay=structure_decay)
     else:
-      sparsity_hparams = SparseHParams(type='STRUCTURED_NM', prune_rate=(2, 4))
+      sparsity_hparams = SparseHParams(
+          type='STRUCTURED_NM',
+          prune_rate=prune_rate,
+          structure_decay=structure_decay)
     sparsity_module = Sparsity(sparsity_hparams=sparsity_hparams)
     init_mask = sparsity_module.init(
-        rng, self.inputs, update_mask=update_mask, apply_mask=apply_mask)
+        rng, self.inputs, update_mask=update_mask, apply_mask=apply_mask,
+        num_update_sparsity=num_update_sparsity)
     return sparsity_module, init_mask
 
   @parameterized.named_parameters(('unstruct', True), ('struct', False))
@@ -46,6 +54,47 @@ class SparsityTest(parameterized.TestCase):
     init_state_mask = init_state['sparsity']['mask']
     np.testing.assert_array_equal(init_state_mask,
                                   [[True, True, True], [True, True, True]])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='initial_structure_decay',
+          num_update_sparsity=0,
+          out=[[3, 4, 6, 8], [1, 2, 1, 4]],
+          mask=[[True, True, True, True], [True, True, True, True]]),
+      dict(
+          testcase_name='first_iteration_structure_decay',
+          num_update_sparsity=1,
+          out=[[0, 4, 6, 8], [0, 2, 1, 4]],
+          mask=[[False, True, True, True], [False, True, True, True]]),
+      dict(
+          testcase_name='second_iteration_structure_decay',
+          num_update_sparsity=2,
+          out=[[0, 0, 0, 8], [0, 0, 0, 4]],
+          mask=[[False, False, False, True], [False, False, False, True]]),
+      dict(
+          testcase_name='third_iteration_structure_decay',
+          num_update_sparsity=3,
+          out=[[0, 0, 0, 8], [0, 0, 0, 4]],
+          mask=[[False, False, False, True], [False, False, False, True]]),
+  )
+  def test_structure_decay(self, num_update_sparsity, out, mask):
+    model, init_state = self.init_model(
+        update_mask=False,
+        apply_mask=False,
+        unstruct_sparsity=False,
+        structure_decay=True,
+        prune_rate=(4, 4))
+    # We need inputs that are divisible by four.
+    inputs = jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    model_out, state_0 = model.apply(
+        init_state,
+        inputs,
+        update_mask=True,
+        apply_mask=True,
+        num_update_sparsity=num_update_sparsity,
+        mutable='sparsity')
+    np.testing.assert_array_equal(model_out, out)
+    np.testing.assert_array_equal(state_0['sparsity']['mask'], mask)
 
   # TODO(ayazdan): Add a more general test for other forms of sparsity.
   def test_sorting_network_sparse_2_4(self):

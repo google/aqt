@@ -106,6 +106,7 @@ def get_base_config(n_layers: int, use_auto_acts: bool, fp_quant: bool):
           "order": "R",  # row wise sparsity
           "absolute": True,
           "smallest": True,
+          "structure_decay": False,
       },
   })
   config.act_sparsity.order = "C"

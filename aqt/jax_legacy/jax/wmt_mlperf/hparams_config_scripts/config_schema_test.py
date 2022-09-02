@@ -176,7 +176,8 @@ class BaseConfigTest(parameterized.TestCase):
         'prune_rate': [None, None],  # set to default structured
         'smallest': None,
         'order': None,
-        'absolute': None
+        'absolute': None,
+        'structure_decay': None
     }
 
     quant_act_schema = {

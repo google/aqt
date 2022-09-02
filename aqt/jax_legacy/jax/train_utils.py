@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Util functions for training, which can be shared across models."""
-
+from absl import logging
 from aqt.jax_legacy.jax import quant_config
 
 
@@ -114,6 +114,15 @@ def get_dynamic_context_for_step(
                                                 sparsity_update_freq, step)
   update_act_sparsity = update_sparsity_mask(sparsity_start_step,
                                              sparsity_update_freq, step)
+  num_update_sparsity = 0.0
+  if sparsity_update_freq == 0:
+    logging.warning("Sparsity mask updates only once.")
+  else:
+    if step >= sparsity_start_step:
+      num_update_sparsity = int(
+          (step - sparsity_start_step) / sparsity_update_freq)
+  # TODO(ayazdan): Relax this parameter to enable more iterations of decaying.
+  num_update_sparsity = min(16, num_update_sparsity)
   quantize_acts = step >= activation_bound_start_step
   return quant_config.DynamicContext(
       update_bounds=update_bounds,
@@ -121,6 +130,7 @@ def get_dynamic_context_for_step(
       apply_sparsity=apply_sparsity,
       update_weight_sparsity=update_weight_sparsity,
       update_act_sparsity=update_act_sparsity,
+      num_update_sparsity=num_update_sparsity,
       collect_acts_stats=collect_acts_stats,
       prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,
   )

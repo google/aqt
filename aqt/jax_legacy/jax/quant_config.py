@@ -75,6 +75,7 @@ class DynamicContext:
       default=False, pytree_node=False)
   update_act_sparsity: bool = flax.struct.field(
       default=False, pytree_node=False)
+  num_update_sparsity: int = flax.struct.field(default=0, pytree_node=False)
 
   # Whether to quantize activations.
   #

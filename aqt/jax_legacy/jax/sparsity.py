@@ -16,6 +16,7 @@
 
 import dataclasses
 import enum
+import math
 import typing
 from typing import Tuple, Union
 
@@ -47,6 +48,7 @@ class SparseHParams:
       `C` and `R` indicate column-wise and row-wise ordering, respectively.
     absolute: If True, the absolute value of the values are used for sorting.
     smallest: If True, the smallest values in inputs are masked.
+    structure_decay: If True, a decaying mechanism is applied on the structure.
   """
 
   type: SparseType
@@ -57,6 +59,7 @@ class SparseHParams:
   order: str = 'R'
   absolute: bool = True
   smallest: bool = True
+  structure_decay: bool = False
 
   def __post_init__(self):
     if self.prune_rate is not None:
@@ -82,19 +85,33 @@ class Sparsity(nn.Module):
 
   @nn.compact
   def __call__(self, inputs: jnp.ndarray, *, update_mask: bool,
-               apply_mask: bool) -> jnp.ndarray:
+               apply_mask: bool,
+               num_update_sparsity: int = 0) -> jnp.ndarray:
 
     # TODO(shivaniagrawal): make a decision on creating/not creating mask for
     # when sparsity hparams is None itself.
     if self.sparsity_hparams is None or self.sparsity_hparams.prune_rate is None:
       return inputs
 
-    mask = self.variable('sparsity', 'mask',
-                         jnp.ones,
-                         inputs.shape, jnp.bool_)
+    if self.sparsity_hparams.type == 'STRUCTURED_NM':
+      n_sparsity = self.sparsity_hparams.prune_rate[0]
+      m_sparsity = self.sparsity_hparams.prune_rate[1]
+      if self.sparsity_hparams.structure_decay:
+        if num_update_sparsity == 1:
+          n_sparsity = n_sparsity - 1
+        else:
+          n_sparsity = int(
+              math.ceil(n_sparsity / math.pow(2, num_update_sparsity)))
+    else:
+      logging.info('Unstructured sparsity does not support decaying.')
+      n_sparsity = 0
+      m_sparsity = 0
+
+    mask = self.variable('sparsity', 'mask', jnp.ones, inputs.shape, jnp.bool_)
 
     if update_mask and self.has_variable('sparsity', 'mask'):
-      mask.value = get_sparsity_mask(inputs, self.sparsity_hparams)
+      mask.value = get_sparsity_mask(inputs, self.sparsity_hparams, n_sparsity,
+                                     m_sparsity)
 
     if apply_mask and self.has_variable('sparsity', 'mask'):
       return jnp.where(mask.value, inputs, jnp.zeros(inputs.shape,
@@ -103,13 +120,15 @@ class Sparsity(nn.Module):
     return inputs
 
 
-def apply_sparsity(inputs: jnp.ndarray, sparsity_hparams: SparseHParams):
+def apply_sparsity(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,
+                   n_sparsity: int, m_sparsity: int):
   """Returns sparsified inputs based on sparsity hparams."""
-  mask = get_sparsity_mask(inputs, sparsity_hparams)
+  mask = get_sparsity_mask(inputs, sparsity_hparams, n_sparsity, m_sparsity)
   return jnp.where(mask.value, inputs, jnp.zeros(inputs.shape, inputs.dtype))
 
 
-def get_sparsity_mask(inputs: jnp.ndarray, sparsity_hparams: SparseHParams):
+def get_sparsity_mask(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,
+                      n_sparsity: int = 0, m_sparsity: int = 0):
   """Returns sparsified inputs based on sparsity hparams."""
   if sparsity_hparams is None or sparsity_hparams.prune_rate is None:
     return jnp.ones(inputs.shape, dtype=bool)
@@ -117,12 +136,12 @@ def get_sparsity_mask(inputs: jnp.ndarray, sparsity_hparams: SparseHParams):
   if sparsity_hparams.type == 'STRUCTURED_NM':
     assert isinstance(
         prune_rate, Tuple), 'prune rate must be tuple for structured sparsity.'
-    assert prune_rate[0] < prune_rate[
+    assert prune_rate[0] <= prune_rate[
         1], f'prune_rate[0] must be lower than prune_rate[1] for N:M ({prune_rate[0]}:{prune_rate[1]}) sparsity.'
     return get_pruning_n_m_mask(
         inputs,
-        n=prune_rate[0],
-        m=prune_rate[1],
+        n=n_sparsity,
+        m=m_sparsity,
         order=sparsity_hparams.order,
         absolute=sparsity_hparams.absolute,
         smallest=sparsity_hparams.smallest)

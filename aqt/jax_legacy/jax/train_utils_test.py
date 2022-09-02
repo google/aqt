@@ -16,7 +16,6 @@
 
 from absl.testing import absltest
 from absl.testing import parameterized
-
 from aqt.jax_legacy.jax import train_utils
 
 
@@ -197,6 +196,37 @@ class UpdateUtilsTest(parameterized.TestCase):
             sparsity_start_step=start_step,
             sparsity_update_freq=frequency,
             step=current_step), should_update)
+
+  @parameterized.parameters(
+      {
+          'step': 100,
+          'sparsity_start_step': 10,
+          'sparsity_update_freq': 10,
+          'num_update_sparsity': 9
+      },
+      {
+          'step': 10,
+          'sparsity_start_step': 10,
+          'sparsity_update_freq': 10,
+          'num_update_sparsity': 0
+      },
+      {
+          'step': 100,
+          'sparsity_start_step': 10,
+          'sparsity_update_freq': 0,
+          'num_update_sparsity': 0
+      },)
+  def test_num_update_sparsity(self, step, sparsity_start_step,
+                               sparsity_update_freq, num_update_sparsity):
+    dc = train_utils.get_dynamic_context_for_step(
+        activation_bound_update_freq=1,
+        activation_bound_start_step=1,
+        step=step,
+        collect_acts_stats=False,
+        prefer_int8_to_int32_dot=False,
+        sparsity_start_step=sparsity_start_step,
+        sparsity_update_freq=sparsity_update_freq)
+    self.assertEqual(dc.num_update_sparsity, num_update_sparsity)
 
 
 if __name__ == '__main__':

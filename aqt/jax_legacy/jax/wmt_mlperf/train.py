@@ -371,6 +371,7 @@ def train_step(optimizer,
     metrics = {}
   metrics['learning_rate'] = lr
   metrics['apply_sparsity'] = dynamic_context.apply_sparsity
+  metrics['num_update_sparsity'] = dynamic_context.num_update_sparsity
   metrics['update_weight_sparsity'] = dynamic_context.update_weight_sparsity
   metrics['update_act_sparsity'] = dynamic_context.update_act_sparsity
   # Compute or_loss for logging
@@ -381,7 +382,6 @@ def train_step(optimizer,
   metrics['or_loss'] = or_loss
 
   return new_state, new_optimizer, metrics, new_dropout_rng
-
 
 # TODO(shivaniagrawal): parametrize the axis_name and use the same axis name
 # throughout Transformer model.
@@ -1026,7 +1026,7 @@ def get_state_dict_keys_from_flags():
     # State names from googlex.positron.tensorflow.jax.aqt.stats_tag.StatsTag
     state_dict_keys.extend([
         'min_per_ch', 'max_per_ch', 'mean_per_ch', 'stddev_per_ch',
-        'absdev_per_ch', 'stddev_per_ch_uncentered', 'absdev_per_ch_uncentered'
+        'absdev_per_ch', 'stddev_per_ch_uncentered', 'absdev_per_ch_uncentered',
     ])
   return state_dict_keys
 
@@ -1212,9 +1212,11 @@ def run_training(
           update_weight_sparsity = metrics_all.pop(
               'update_weight_sparsity').mean()
           update_act_sparsity = metrics_all.pop('update_act_sparsity').mean()
+          num_update_sparsity = metrics_all.pop('num_update_sparsity').mean()
           summary['apply_sparsity'] = apply_sparsity
           summary['update_weight_sparsity'] = update_weight_sparsity
           summary['update_act_sparsity'] = update_act_sparsity
+          summary['num_update_sparsity'] = num_update_sparsity
         summary['or_loss'] = or_loss
         summary['perplexity'] = jnp.clip(jnp.exp(summary['loss']), a_max=1.0e4)
         logging.info('train in step: %d, loss: %.4f', step, summary['loss'])

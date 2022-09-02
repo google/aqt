@@ -179,7 +179,8 @@ class BaseConfigTest(parameterized.TestCase):
         'prune_rate': prune_rate,
         'smallest': True,
         'absolute': False,
-        'order': 'C'
+        'order': 'C',
+        'structure_decay': False
     }
 
     config.sparsity.update(expected_sparse_dict)
@@ -267,7 +268,8 @@ class BaseConfigTest(parameterized.TestCase):
         'prune_rate': prune_rate,
         'smallest': None,
         'order': None,
-        'absolute': None
+        'absolute': None,
+        'structure_decay': None
     }
     expected_top_level_schema = {
         'metadata': {

@@ -155,6 +155,7 @@ class DenseAqt(nn.Module):
           channel_axis=-1, name='inputs', update_stats=self.train)(
               inputs, mask=padding_mask)
     hparams = self.hparams
+
     if (hparams.weight_prec is not None and
         isinstance(hparams.weight_prec, int) and hparams.weight_prec > 8):
       raise NotImplementedError(
@@ -198,7 +199,7 @@ class DenseAqt(nn.Module):
               kernel,
               update_mask=self.dynamic_context.update_weight_sparsity,
               apply_mask=self.dynamic_context.apply_sparsity,
-          )
+              num_update_sparsity=self.dynamic_context.num_update_sparsity)
 
     if self.possibly_use_quantized_vars:
       qkernel_dtype = self.dtype
@@ -227,14 +228,12 @@ class DenseAqt(nn.Module):
         quant_w = quantization.QuantW(qkernel, qscale)
         kernel = None
 
-    # TODO(shivaniagrawal): use the mask for statistics computation for sparsity
-    # and quantization interaction.
     inputs = Sparsity(
         sparsity_hparams=hparams.act_sparsity, name='act_sparsity')(
             inputs,
             update_mask=self.dynamic_context.update_act_sparsity,
             apply_mask=self.dynamic_context.apply_sparsity,
-        )
+            num_update_sparsity=self.dynamic_context.num_update_sparsity)
 
     bounds_params = get_bounds.GetBounds.Params(
         update_bounds=self.dynamic_context.update_bounds,
