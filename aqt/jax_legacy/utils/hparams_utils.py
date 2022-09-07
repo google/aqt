@@ -28,10 +28,6 @@ import dacite
 import jax
 import ml_collections
 
-from google3.pyglib import gfile
-from google3.pyglib import resources
-from google3.pyglib.contrib.gpathlib import gpath
-
 
 T = TypeVar('T')
 
