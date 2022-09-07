@@ -14,6 +14,8 @@
 
 """Tests for sparsity."""
 
+from absl.testing import absltest
+from absl.testing import parameterized
 from aqt.jax_legacy.jax import sparsity
 from aqt.jax_legacy.jax.sparsity import SparseHParams
 from aqt.jax_legacy.jax.sparsity import Sparsity
@@ -21,9 +23,6 @@ import jax
 from jax import numpy as jnp
 from jax import random
 import numpy as np
-
-from google3.testing.pybase import googletest
-from google3.testing.pybase import parameterized
 
 
 class SparsityTest(parameterized.TestCase):
@@ -276,7 +275,7 @@ class PruningParamsTest(parameterized.TestCase):
       sparsity.get_sparsity_mask(inputs, sparsity_hparams)
 
 
-class PruningFunctionalityTest(googletest.TestCase):
+class PruningFunctionalityTest(parameterized.TestCase):
 
   def test_pruning_mask(self):
     # Total number of parameters = 20
@@ -341,4 +340,4 @@ class PruningFunctionalityTest(googletest.TestCase):
 
 
 if __name__ == '__main__':
-  googletest.main()
+  absltest.main()

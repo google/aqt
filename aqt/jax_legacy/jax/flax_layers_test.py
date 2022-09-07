@@ -45,8 +45,6 @@ from jax.nn import initializers
 import jax.numpy as jnp
 import numpy as onp
 
-from google3.nlp.nlx.infrastructure.flaxformer import sharding
-
 
 FLAGS = flags.FLAGS
 
@@ -1703,10 +1701,6 @@ class DenseGeneralTest(parameterized.TestCase):
     # We transform the last input dimension to two output dimensions (2, 2).
     onp.testing.assert_allclose(y, onp.full((1, 2, 2), 3.))
 
-    # The output sharding dimensions have been collapsed.
-    sharding.check_params_and_axis_names_match(variables)
-    self.assertEqual(variables['params_axes']['kernel_axes'],
-                     sharding.axis_names('a', 'b * c'))
 
   def test_dense_general_two_axes(self):
     rng = random.PRNGKey(0)
@@ -1725,10 +1719,6 @@ class DenseGeneralTest(parameterized.TestCase):
     # We transform the last two input dimensions (2, 2) to one output dimension.
     onp.testing.assert_allclose(y, onp.full((1, 3), 4.))
 
-    # The input sharding dimensions have been collapsed.
-    sharding.check_params_and_axis_names_match(variables)
-    self.assertEqual(variables['params_axes']['kernel_axes'],
-                     sharding.axis_names('a * b', 'c'))
 
 
 if __name__ == '__main__':
