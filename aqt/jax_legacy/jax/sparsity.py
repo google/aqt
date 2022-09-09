@@ -49,6 +49,12 @@ class SparseHParams:
     absolute: If True, the absolute value of the values are used for sorting.
     smallest: If True, the smallest values in inputs are masked.
     structure_decay: If True, a decaying mechanism is applied on the structure.
+    mask_decay_weight: If 0.0, no mask decay is applied. The mask value
+      start with 1.0 and each time `num_update_sparsity` * `mask_decay_weight`
+      is subtracted from 1.0. Due to overhead of jit, we limited the number of
+      updates to `num_update_sparsity` to 16. After 16 iterations, we forcefully
+      set `mask_decay_value` to zero. Mask decaying works for both structured
+      and unstructured sparsity.
   """
 
   type: SparseType
@@ -60,6 +66,7 @@ class SparseHParams:
   absolute: bool = True
   smallest: bool = True
   structure_decay: bool = False
+  mask_decay_weight: float = 0.0
 
   def __post_init__(self):
     if self.prune_rate is not None:
@@ -76,6 +83,11 @@ class SparseHParams:
                                    'UNSTRUCTURED sparsity')
       else:
         assert False, 'prune rate unknown!'
+
+      assert self.mask_decay_weight >= 0.0, (
+          'Invalid value for '
+          f'{self.mask_decay_weight}. '
+          '`mask_decay_weight` must be positive.')
 
 
 class Sparsity(nn.Module):
@@ -103,10 +115,23 @@ class Sparsity(nn.Module):
           n_sparsity = int(
               math.ceil(n_sparsity / math.pow(2, num_update_sparsity)))
     else:
-      logging.info('Unstructured sparsity does not support decaying.')
+      logging.info('Unstructured sparsity does not support structure decaying.')
       n_sparsity = 0
       m_sparsity = 0
 
+    # Due to overhead of jit, we limited the number of updates to
+    # `num_update_sparsity` to 16. Once we reach to 16, we forcefully set
+    # `mask_decay_value` to zero.
+    # TODO(ayazdan): Support more than 16 decay.
+    mask_decay_value = 1.0
+    if self.sparsity_hparams.mask_decay_weight != 0.0:
+      if num_update_sparsity < 16:
+        mask_decay_value = max(
+            mask_decay_value -
+            (num_update_sparsity * self.sparsity_hparams.mask_decay_weight),
+            0.0)
+      else:
+        mask_decay_value = 0.0
     mask = self.variable('sparsity', 'mask', jnp.ones, inputs.shape, jnp.bool_)
 
     if update_mask and self.has_variable('sparsity', 'mask'):
@@ -114,9 +139,11 @@ class Sparsity(nn.Module):
                                      m_sparsity)
 
     if apply_mask and self.has_variable('sparsity', 'mask'):
-      return jnp.where(mask.value, inputs, jnp.zeros(inputs.shape,
-                                                     inputs.dtype))
-
+      if self.sparsity_hparams.mask_decay_weight != 0.0:
+        return jnp.multiply(~mask.value * mask_decay_value + mask.value, inputs)
+      else:
+        return jnp.where(mask.value, inputs,
+                         jnp.zeros(inputs.shape, inputs.dtype))
     return inputs
 
 
