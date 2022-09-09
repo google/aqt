@@ -78,6 +78,12 @@ COMPUTE_MEMORY_COST_FILENAME = 'compute_memory_cost.json'
 FLAGS = flags.FLAGS
 
 
+flags.DEFINE_bool(
+    'log_sparsity_scalars',
+    default=False,
+    help='Log `apply_sparsity`, `update_weight_sparsity` and '
+    '`update_act_sparsity`  scalars to Tensorboard')
+
 config_flags.DEFINE_config_file('hparams_config_dict', None,
                                 'Path to file defining a config dict.')
 
@@ -374,12 +380,7 @@ def train_step(optimizer,
   metrics['num_update_sparsity'] = dynamic_context.num_update_sparsity
   metrics['update_weight_sparsity'] = dynamic_context.update_weight_sparsity
   metrics['update_act_sparsity'] = dynamic_context.update_act_sparsity
-  # Compute or_loss for logging
-  # TODO(wanglisa): Is there a way to avoid computing it twice?
-  or_loss = custom_losses.weight_outlier_regularization_loss(
-      optimizer.target,
-      weights_regex_pattern=hparams.weight_outlier_regularization_regex)
-  metrics['or_loss'] = or_loss
+
 
   return new_state, new_optimizer, metrics, new_dropout_rng
 
@@ -1172,8 +1173,6 @@ def run_training(
     logging.info('Replicated optimizer.')
 
   t_loop_start = time.time()
-  t_train = timer.MultiIntervalTimer()
-  t_train.Start()
   for step, batch in zip(range(start_step, num_train_steps), train_iter):
     # Shard data to devices and do a training step.
     training_state, metrics = run_train_step(
@@ -1193,7 +1192,6 @@ def run_training(
 
     # Periodic metric handling.
     if step % eval_freq == 0:
-      t_train.Stop()
 
       # Training Metrics
       if FLAGS.compute_train_metrics:
@@ -1204,7 +1202,6 @@ def run_training(
 
         metrics_sums = jax.tree_map(jnp.sum, metrics_all)
         denominator = metrics_sums.pop('denominator')
-        or_loss = metrics_sums.pop('or_loss').mean()
         summary = jax.tree_map(lambda x: x / denominator, metrics_sums)  # pylint: disable=cell-var-from-loop
         summary['learning_rate'] = lr
         if FLAGS.log_sparsity_scalars:
@@ -1217,20 +1214,16 @@ def run_training(
           summary['update_weight_sparsity'] = update_weight_sparsity
           summary['update_act_sparsity'] = update_act_sparsity
           summary['num_update_sparsity'] = num_update_sparsity
-        summary['or_loss'] = or_loss
         summary['perplexity'] = jnp.clip(jnp.exp(summary['loss']), a_max=1.0e4)
         logging.info('train in step: %d, loss: %.4f', step, summary['loss'])
         steps_per_eval = eval_freq if step != 0 else 1
         steps_per_sec = steps_per_eval / (time.time() - t_loop_start)
-        train_steps_per_sec = steps_per_eval / t_train.GetDuration()
         t_loop_start = time.time()
 
         if jax.host_id() == 0:
           assert train_summary_writer is not None, ('train_summary_writer was '
                                                     'not initialized on host 0')
           train_summary_writer.scalar('steps per second', steps_per_sec, step)
-          train_summary_writer.scalar('training steps per second',
-                                      train_steps_per_sec, step)
           for key, val in summary.items():
             train_summary_writer.scalar(key, val, step)
 
@@ -1241,7 +1234,6 @@ def run_training(
 
       state_dict_summary_all = []
       metrics_all = []
-      logging.info('train time: %.4f s step %d', t_train.GetDuration(), step)
 
       # TODO(shivaniagrawal): Add bleu score summaries for additional eval
       # datasets?
@@ -1335,9 +1327,6 @@ def run_training(
         eval_summary_writer.text('samples', exemplars, step)
         eval_summary_writer.flush()
 
-      # restart training-only timer
-      t_train.Reset()
-      t_train.Start()
 
 
 if __name__ == '__main__':
