@@ -15,7 +15,7 @@
 """Tests for conv_general."""
 
 import itertools
-from typing import Iterable
+from typing import Iterable, Optional
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -57,8 +57,8 @@ def generate_nondefault_conv_args():
 
 
 class ConvGeneralModule(nn.Module):
-  lhs_config: aqt_config.AqtScheduleConfig
-  rhs_config: aqt_config.AqtScheduleConfig
+  lhs_config: Optional[aqt_config.AqtScheduleConfig]
+  rhs_config: Optional[aqt_config.AqtScheduleConfig]
   lhs_shape: Iterable[int]
   rhs_shape: Iterable[int]
 
@@ -304,6 +304,22 @@ class ConvGeneralTest(aqt_conv_test_base.ConvTest):
     expected *= (batch_inv_scale * feature_inv_scale)
 
     self.assertAllEqual(actual, expected)
+
+  def test_weight_only_quantization(self):
+    x, w = self.create_random_input_and_filter()
+    input_config = aqt_conv_test_base.schedule_config(
+        "input", bits=8, const_coeff=1.0)
+    filter_config = aqt_conv_test_base.schedule_config(
+        "filter", bits=8, const_coeff=1.0)
+    input_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
+
+    kwargs = self.get_conv_kwargs(strides=1, padding="VALID")
+    result_with_float_config = self.conv_op_quantized(
+        x, w, input_config, filter_config, event_count=0, **kwargs)
+    result_with_none_config = self.conv_op_quantized(
+        x, w, None, filter_config, event_count=0, **kwargs)
+
+    self.assertAllEqual(result_with_float_config, result_with_none_config)
 
 
 if __name__ == "__main__":

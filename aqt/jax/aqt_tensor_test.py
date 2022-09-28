@@ -13,7 +13,10 @@
 # limitations under the License.
 """Tests for aqt_tensor."""
 
+import copy
+
 from absl.testing import absltest
+from aqt.common import aqt_config
 from aqt.jax import aqt_tensor
 from aqt.test import aqt_stats_test_base
 from aqt.test import aqt_tensor_test_base
@@ -149,6 +152,60 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
     np.testing.assert_equal(
         jnp.array(1.0),
         jax.grad(aqt_tensor.pass_through)(inp, fn))
+
+  def test_dynamic_quantization(self):
+    iqc = aqt_config.IntQuantConfig(bits=8, preserve_zero=True)
+    cc = aqt_config.CalibrationConfig(max_dev_coeff=1.0)
+    tc_first = aqt_config.AqtTensorConfig(
+        quant_config=iqc,
+        calibration_config=cc,
+        freeze_scale_at_begin=True,
+        begin_at_event=0,
+        end_at_event=1)
+    tc_second = aqt_config.AqtTensorConfig(
+        quant_config=iqc,
+        calibration_config=cc,
+        freeze_scale_at_begin=True,
+        begin_at_event=1,
+        end_at_event=2)
+    sc = aqt_config.StatsConfig(
+        ema_update_count=1,
+        share_stats_axes=[0, 1],
+        tpu_cross_replica_sum=False)
+    tensor_configs = [tc_first, tc_second]
+
+    config_static = aqt_config.AqtScheduleConfig(
+        sc, tensor_configs, use_dynamic_quant=False)
+
+    config_dynamic = copy.deepcopy(config_static)
+    config_dynamic.use_dynamic_quant = True
+    # ema_update_count=5 is supposed to compute stats based on both the old and
+    # new batches with different weights, but use_dynamic_quant=True will
+    # override it by taking only the newest batch.
+    config_dynamic.stats_config.ema_update_count = 5
+
+    rng = np.random.default_rng(1234)
+    x = rng.normal(size=(3, 4)).astype(np.float32)
+    quantizer_static = self.make_tensor_quantizer(
+        data_shape=x.shape, config=config_static, name="static")
+    quantizer_dynamic = self.make_tensor_quantizer(
+        data_shape=x.shape, config=config_dynamic, name="dynamic")
+
+    self.init()
+
+    def update_and_quantize(quantizer, sample, event_count):
+      event_count = np.array(event_count, dtype=np.int64)
+      self.update_quantizer(quantizer, sample, None, event_count)
+      qx = self.quantize(sample, quantizer, True)
+      return qx
+
+    qx_static = update_and_quantize(quantizer_static, x, event_count=0)
+    qx_dynamic = update_and_quantize(quantizer_dynamic, x, event_count=0)
+    self.assertAllClose(qx_static, qx_dynamic)
+
+    qx_static = update_and_quantize(quantizer_static, x * 2, event_count=1)
+    qx_dynamic = update_and_quantize(quantizer_dynamic, x * 2, event_count=1)
+    self.assertAllClose(qx_static, qx_dynamic)
 
 
 if __name__ == "__main__":

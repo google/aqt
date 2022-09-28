@@ -249,11 +249,14 @@ class AqtScheduleConfig(_BaseConfig):
       allows for static switching logic at inference time, which improves
       throughput. If None, then the most recently trained-on config is the one
       that's used.
+    use_dynamic_quant:  If True, use dynamic quantization without collecting
+      statistics.
   """
   stats_config: StatsConfig
   tensor_configs: List[AqtTensorConfig]
   use_quantized_variable: bool = False
   inference_config_index: Optional[int] = None
+  use_dynamic_quant: bool = False
 
   def validate(self, data_shape: List[Optional[int]]):
     """Validates this AqtScheduleConfig for the provided data shape."""

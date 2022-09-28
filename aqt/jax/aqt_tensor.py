@@ -205,26 +205,34 @@ class TensorQuantizer(nn.Module):
       version of the observed tensor from the most recent `update()`.
   """
   data_shape: List[Optional[int]]
-  config: aqt_config.AqtScheduleConfig
+  config: Optional[aqt_config.AqtScheduleConfig] = None
 
   def setup(self):
-    self.config.fill_gaps_with_float_config()
-    self.config.validate(self.data_shape)
-    self._stats = Stats(self.data_shape, self.config.stats_config)
-    self._scale = self.variable('TensorQuantizer', 'scale', jnp.zeros,
-                                self._stats.stats_shape, jnp.float32)
-    self._inv_scale = self.variable('TensorQuantizer', 'inv_scale', jnp.zeros,
+    if self.config is not None:
+      self.config.fill_gaps_with_float_config()
+      self.config.validate(self.data_shape)
+      if self.config.use_dynamic_quant:
+        self._scale = self.variable('TensorQuantizer', 'scale', jnp.zeros,
+                                    (1, 1), jnp.float32)
+        self._inv_scale = self.variable('TensorQuantizer', 'inv_scale',
+                                        jnp.zeros, (1, 1), jnp.float32)
+      else:
+        self._stats = Stats(self.data_shape, self.config.stats_config)
+        self._scale = self.variable('TensorQuantizer', 'scale', jnp.zeros,
                                     self._stats.stats_shape, jnp.float32)
-    if self.config.use_quantized_variable:
-      self.quantized_variable = self.variable('TensorQuantizer',
-                                              'quantized_variable', jnp.zeros,
-                                              self.data_shape, jnp.int8)
-    else:
-      self.quantized_variable = self.variable('TensorQuantizer',
-                                              'quantized_variable',
-                                              lambda: None)
-    self._last_update = self.variable('TensorQuantizer', 'last_update',
-                                      lambda: jnp.iinfo(jnp.int32).min)
+        self._inv_scale = self.variable('TensorQuantizer', 'inv_scale',
+                                        jnp.zeros, self._stats.stats_shape,
+                                        jnp.float32)
+      if self.config.use_quantized_variable:
+        self.quantized_variable = self.variable('TensorQuantizer',
+                                                'quantized_variable', jnp.zeros,
+                                                self.data_shape, jnp.int8)
+      else:
+        self.quantized_variable = self.variable('TensorQuantizer',
+                                                'quantized_variable',
+                                                lambda: None)
+      self._last_update = self.variable('TensorQuantizer', 'last_update',
+                                        lambda: jnp.iinfo(jnp.int32).min)
 
   def __call__(self):
     # Keep __call__() just not to require users to explicitly specify which
@@ -233,6 +241,7 @@ class TensorQuantizer(nn.Module):
 
   def _fresh_scale(
       self,
+      sample: jnp.ndarray,
       config: aqt_config.AqtTensorConfig) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Returns an updated scale provided by a config or the current one if None."""
     if isinstance(config.quant_config, aqt_config.FloatConfig):
@@ -241,7 +250,14 @@ class TensorQuantizer(nn.Module):
       nan = jnp.full(self._stats.stats_shape, jnp.nan, dtype=jnp.float32)
       return nan, nan
 
-    x_bound = self._stats.bound(config.calibration_config)
+    if self.config.use_dynamic_quant:
+      # TODO(jihwanlee): support other calibration methods as well.
+      x_bound = jnp.max(
+          jnp.abs(sample),
+          axis=self.config.stats_config.share_stats_axes,
+          keepdims=True)
+    else:
+      x_bound = self._stats.bound(config.calibration_config)
     clip_bound = aqt_common.get_clip_bound(config.quant_config)
 
     new_scale = clip_bound / x_bound
@@ -264,6 +280,9 @@ class TensorQuantizer(nn.Module):
       event_count: jnp.ndarray):
     """Updates statistics, scale, and quantized variable."""
 
+    if self.config is None:
+      return
+
     active_configs = [
         c for c in self.config.tensor_configs
         if is_config_active(c, event_count)
@@ -285,11 +304,12 @@ class TensorQuantizer(nn.Module):
     should_update_scale = self._should_update_scale(config, event_count)
     self._last_update.value = event_count
 
-    self._stats.update(sample, weight)
+    if not self.config.use_dynamic_quant:
+      self._stats.update(sample, weight)
 
     new_scale, inv_scale = jax.lax.cond(
         should_update_scale,  #
-        lambda: self._fresh_scale(config),
+        lambda: self._fresh_scale(sample, config),
         lambda: (self._scale.value, self._inv_scale.value))
     self._scale.value = new_scale
     self._inv_scale.value = inv_scale
@@ -311,7 +331,7 @@ class TensorQuantizer(nn.Module):
     if isinstance(config.quant_config, aqt_config.FloatConfig):
       return False
 
-    if not config.freeze_scale_at_begin:
+    if not config.freeze_scale_at_begin or self.config.use_dynamic_quant:
       return True
 
     # The first time a config is active, even if we freeze scale, we should
@@ -364,7 +384,11 @@ class TensorQuantizer(nn.Module):
 
       return should_quantize, clip_bound, shift_before, shift_after
 
-    if not train and self.config.inference_config_index is not None:
+    if self.config is None:
+      clip_bound = jnp.array(float('inf'))
+      shift_before = shift_after = 0.0
+      should_quantize = False
+    elif not train and self.config.inference_config_index is not None:
       should_quantize, clip_bound, shift_before, shift_after = qparams(
           self.config.tensor_configs[self.config.inference_config_index],
           check_active=False)
@@ -396,21 +420,24 @@ class TensorQuantizer(nn.Module):
 
   def _get_quant_scale(self, train: bool) -> jnp.ndarray:
     """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
-    if not train and self.config.inference_config_index is not None:
-      inference_config = self.config.tensor_configs[
-          self.config.inference_config_index]
-      should_quantize = isinstance(inference_config.quant_config,
-                                   aqt_config.IntQuantConfig)
+    if self.config is None:
+      scale = inv_scale = jnp.array(1.0, dtype=jnp.float32)
     else:
-      should_quantize = False
-      for config in self.config.tensor_configs:
-        if isinstance(config.quant_config, aqt_config.FloatConfig):
-          continue
-        config_active = is_config_active(config, self._last_update.value)
-        should_quantize |= config_active
+      if not train and self.config.inference_config_index is not None:
+        inference_config = self.config.tensor_configs[
+            self.config.inference_config_index]
+        should_quantize = isinstance(inference_config.quant_config,
+                                     aqt_config.IntQuantConfig)
+      else:
+        should_quantize = False
+        for config in self.config.tensor_configs:
+          if isinstance(config.quant_config, aqt_config.FloatConfig):
+            continue
+          config_active = is_config_active(config, self._last_update.value)
+          should_quantize |= config_active
 
-    scale = jnp.where(should_quantize, self._scale.value,
-                      jnp.ones_like(self._scale.value))
-    inv_scale = jnp.where(should_quantize, self._inv_scale.value,
-                          jnp.ones_like(self._inv_scale.value))
+      scale = jnp.where(should_quantize, self._scale.value,
+                        jnp.ones_like(self._scale.value))
+      inv_scale = jnp.where(should_quantize, self._inv_scale.value,
+                            jnp.ones_like(self._inv_scale.value))
     return scale, inv_scale

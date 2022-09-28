@@ -14,7 +14,7 @@
 
 """Tests for dot_general."""
 import copy
-from typing import Any, Dict, Iterable, Sequence
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -64,8 +64,8 @@ def config_from_schedule(schedule, share_stats_axes):
 
 
 class DotModule(nn.Module):
-  lhs_config: aqt_config.AqtScheduleConfig
-  rhs_config: aqt_config.AqtScheduleConfig
+  lhs_config: Optional[aqt_config.AqtScheduleConfig]
+  rhs_config: Optional[aqt_config.AqtScheduleConfig]
   lhs_shape: Iterable[int]
   rhs_shape: Iterable[int]
 
@@ -83,8 +83,8 @@ class DotModule(nn.Module):
 
 
 class DotGeneralModule(nn.Module):
-  lhs_config: aqt_config.AqtScheduleConfig
-  rhs_config: aqt_config.AqtScheduleConfig
+  lhs_config: Optional[aqt_config.AqtScheduleConfig]
+  rhs_config: Optional[aqt_config.AqtScheduleConfig]
   lhs_shape: Iterable[int]
   rhs_shape: Iterable[int]
 
@@ -187,11 +187,18 @@ class AqtDotGeneralTest(parameterized.TestCase):
         test_stats_config([0, 1, 2]), [])
     lhs = np.random.uniform(-1.0, 1.0, size=(2, 2, 2)).astype(np.float32)
     rhs = np.random.uniform(-1.0, 1.0, size=(2, 2, 2)).astype(np.float32)
+
+    # Creates a dot_general module with empty tensor configs.
     dot_general, _ = self.get_dot_general_module(no_quant_config,
                                                  no_quant_config, lhs, rhs)
     actual_ret = dot_general(lhs, rhs, dimension_numbers=dimension_numbers)
     expected_ret = lax.dot_general(
         lhs, rhs, dimension_numbers=dimension_numbers)
+    np.testing.assert_array_equal(actual_ret, expected_ret)
+
+    # Creates a dot_general module with None schedule configs.
+    dot_general, _ = self.get_dot_general_module(None, None, lhs, rhs)
+    actual_ret = dot_general(lhs, rhs, dimension_numbers=dimension_numbers)
     np.testing.assert_array_equal(actual_ret, expected_ret)
 
   @parameterized.named_parameters(_generate_dimension_numbers())
@@ -299,6 +306,25 @@ class AqtDotGeneralTest(parameterized.TestCase):
       actual = aqt_grad
       expected = jax_grad
       np.testing.assert_array_equal(actual, expected)
+
+  def test_weight_only_quantization(self):
+    lhs = np.random.uniform(-1.0, 1.0, size=(2, 2, 2)).astype(np.float32)
+    rhs = np.random.uniform(-1.0, 1.0, size=(2, 2, 2)).astype(np.float32)
+    lhs_config = config_from_schedule([(None, None, 8)], [0, 1, 2])
+    rhs_config = config_from_schedule([(None, None, 8)], [0, 1, 2])
+    lhs_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
+    # dimension numbers for batch matmul
+    dimension_numbers = (((2,), (1,)), ((0,), (0,)))
+
+    dot_general, _ = self.get_dot_general_module(lhs_config, rhs_config, lhs,
+                                                 rhs)
+    result_with_float_config = dot_general(
+        lhs, rhs, dimension_numbers=dimension_numbers)
+    dot_general, _ = self.get_dot_general_module(None, rhs_config, lhs, rhs)
+    result_with_none_config = dot_general(
+        lhs, rhs, dimension_numbers=dimension_numbers)
+    np.testing.assert_array_equal(result_with_float_config,
+                                  result_with_none_config)
 
 
 if __name__ == "__main__":
