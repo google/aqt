@@ -174,7 +174,8 @@ def get_sparse_config(use_unstructured: bool) -> ml_collections.ConfigDict:
       "smallest": bool_ph(),
       "order": str_ph(),
       "absolute": bool_ph(),
-      "structure_decay": bool_ph()
+      "structure_decay": bool_ph(),
+      "sparse_ste": bool_ph()
   })
   config.lock()
   return config

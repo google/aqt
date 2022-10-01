@@ -177,7 +177,8 @@ class BaseConfigTest(parameterized.TestCase):
         'smallest': None,
         'order': None,
         'absolute': None,
-        'structure_decay': None
+        'structure_decay': None,
+        'sparse_ste': None
     }
 
     quant_act_schema = {

@@ -107,6 +107,7 @@ def get_base_config(n_layers: int, use_auto_acts: bool, fp_quant: bool):
           "absolute": True,
           "smallest": True,
           "structure_decay": False,
+          "sparse_ste": False
       },
   })
   config.act_sparsity.order = "C"

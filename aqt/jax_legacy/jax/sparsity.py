@@ -16,6 +16,7 @@
 
 import dataclasses
 import enum
+import functools
 import math
 import typing
 from typing import Tuple, Union
@@ -26,6 +27,7 @@ from flax import linen as nn
 import jax
 from jax import lax
 import jax.numpy as jnp
+
 
 dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
 
@@ -55,6 +57,12 @@ class SparseHParams:
       updates to `num_update_sparsity` to 16. After 16 iterations, we forcefully
       set `mask_decay_value` to zero. Mask decaying works for both structured
       and unstructured sparsity.
+    sparse_ste: If True, a sparse-refined straight-through estimator (SR-STE)
+      is applied, following the algorithm described in:
+        https://arxiv.org/abs/2102.04010
+    sparse_ste_weight: Denotes the relative weight for the sparse-refined term.
+      As mentioned in the paper (https://arxiv.org/abs/2102.04010), the best
+      default value is 0.0002 (lambda_w in the paper).
   """
 
   type: SparseType
@@ -67,6 +75,8 @@ class SparseHParams:
   smallest: bool = True
   structure_decay: bool = False
   mask_decay_weight: float = 0.0
+  sparse_ste: bool = False
+  sparse_ste_weight: float = 0.0002
 
   def __post_init__(self):
     if self.prune_rate is not None:
@@ -89,6 +99,104 @@ class SparseHParams:
           f'{self.mask_decay_weight}. '
           '`mask_decay_weight` must be positive.')
 
+      if self.sparse_ste:
+        if self.mask_decay_weight != 0.0:
+          raise ValueError('SR-STE only works with non-decaying mask.')
+        if self.structure_decay:
+          raise ValueError(
+              'SR-STE only works with non-decaying sparse structure.')
+        if self.type != SparseType.STRUCTURED_NM:
+          raise ValueError('SR-STE only works with structured sparsity.')
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(4, 5, 6))
+def sr_ste(inputs: jnp.ndarray,
+           mask: jnp.ndarray,
+           update_mask: bool,
+           apply_mask: bool,
+           sparsity_hparams: SparseHParams,
+           n_sparsity: int = 0,
+           m_sparsity: int = 0):
+  """Wrapper function for custom derivative rule for structured sparsity.
+
+  Algorithm description: https://arxiv.org/abs/2102.04010
+
+  The last three arguments are forced to be static to simplify
+    the implementation.
+
+  Args:
+    inputs: Input array for which N:M pruning mask is computed.
+    mask: The mask matrix which defines which elements to be pruned.
+    update_mask: If True, the mask pattern gets updated.
+    apply_mask: If True, the mask is applied to input.
+    sparsity_hparams: The hyperparmeters related to sparsity.
+    n_sparsity: Integer value for N in N:M sparsity.
+    m_sparsity: Integer value for M in N:M sparsity.
+
+  Returns:
+    The updated input values after applying sparsity.
+  """
+
+  return sr_ste_fwd(
+      inputs=inputs,
+      mask=mask,
+      update_mask=update_mask,
+      apply_mask=apply_mask,
+      sparsity_hparams=sparsity_hparams,
+      n_sparsity=n_sparsity,
+      m_sparsity=m_sparsity)[0]
+
+
+@functools.partial(jax.jit, static_argnums=(4, 5, 6))
+def sr_ste_fwd(inputs: jnp.ndarray,
+               mask: jnp.ndarray,
+               update_mask: bool,
+               apply_mask: bool,
+               sparsity_hparams: SparseHParams,
+               n_sparsity: int = 0,
+               m_sparsity: int = 0) -> jnp.ndarray:
+  """Custom forward pass for structured sparsity."""
+  # pylint:disable=g-long-lambda
+  updated_mask = jax.lax.cond(
+      update_mask, lambda: get_sparsity_mask(
+          inputs, sparsity_hparams, n_sparsity, m_sparsity), lambda: mask)
+  updated_inputs = jax.lax.cond(apply_mask,
+                                lambda: jnp.multiply(updated_mask, inputs),
+                                lambda: inputs)
+  # pylint:enable=g-long-lambda
+  return (updated_inputs, updated_mask,
+          jnp.array(SparseHParams.sparse_ste_weight)), (
+              inputs, updated_mask, jnp.array(SparseHParams.sparse_ste_weight))
+
+
+def sr_ste_bwd(sparsity_hparams, n_sparsity, m_sparsity, res, g):
+  """Implements custom gradient for backward pass.
+
+  Args:
+    sparsity_hparams: Non-diff arguments as defined in `sr_ste`.
+    n_sparsity: Non-diff arguments as defined in `sr_ste`.
+    m_sparsity: Non-diff arguments as defined in `sr_ste`.
+    res: Residuals computed in sr_ste_fwd.
+    g: Default calculated gradients.
+
+  Returns:
+    Gradients for differentiable inputs:
+      - inputs
+      - mask
+      - update_mask
+      - apply_mask
+  """
+  del sparsity_hparams, n_sparsity, m_sparsity
+  inputs, updated_mask, ste_weight = res
+  # g contains a list of gradients, one per output.
+  # g1: updated_inputs
+  g1, _, _ = g
+  g1 = g1 + ste_weight * jnp.multiply(~updated_mask, inputs)
+  return (g1, None, None, None)
+
+
+sr_ste.defvjp(sr_ste_fwd, sr_ste_bwd)
+
 
 class Sparsity(nn.Module):
   """Abstract class sparsity for applying sparsity."""
@@ -96,13 +204,17 @@ class Sparsity(nn.Module):
   sparsity_hparams: SparseHParams
 
   @nn.compact
-  def __call__(self, inputs: jnp.ndarray, *, update_mask: bool,
+  def __call__(self,
+               inputs: jnp.ndarray,
+               *,
+               update_mask: bool,
                apply_mask: bool,
                num_update_sparsity: int = 0) -> jnp.ndarray:
 
     # TODO(shivaniagrawal): make a decision on creating/not creating mask for
     # when sparsity hparams is None itself.
-    if self.sparsity_hparams is None or self.sparsity_hparams.prune_rate is None:
+    if (self.sparsity_hparams is None or
+        self.sparsity_hparams.prune_rate is None):
       return inputs
 
     if self.sparsity_hparams.type == 'STRUCTURED_NM':
@@ -134,17 +246,31 @@ class Sparsity(nn.Module):
         mask_decay_value = 0.0
     mask = self.variable('sparsity', 'mask', jnp.ones, inputs.shape, jnp.bool_)
 
-    if update_mask and self.has_variable('sparsity', 'mask'):
-      mask.value = get_sparsity_mask(inputs, self.sparsity_hparams, n_sparsity,
-                                     m_sparsity)
+    if self.sparsity_hparams.sparse_ste:
+      updated_inputs, updated_mask, _ = sr_ste(
+          inputs=inputs,
+          mask=mask.value,
+          update_mask=update_mask,
+          apply_mask=apply_mask,
+          sparsity_hparams=self.sparsity_hparams,
+          n_sparsity=n_sparsity,
+          m_sparsity=m_sparsity)
+      if update_mask and self.has_variable('sparsity', 'mask'):
+        mask.value = updated_mask
+      return updated_inputs
+    else:
+      if update_mask and self.has_variable('sparsity', 'mask'):
+        mask.value = get_sparsity_mask(inputs, self.sparsity_hparams,
+                                       n_sparsity, m_sparsity)
 
-    if apply_mask and self.has_variable('sparsity', 'mask'):
-      if self.sparsity_hparams.mask_decay_weight != 0.0:
-        return jnp.multiply(~mask.value * mask_decay_value + mask.value, inputs)
-      else:
-        return jnp.where(mask.value, inputs,
-                         jnp.zeros(inputs.shape, inputs.dtype))
-    return inputs
+      if apply_mask and self.has_variable('sparsity', 'mask'):
+        if self.sparsity_hparams.mask_decay_weight != 0.0:
+          return jnp.multiply(~mask.value * mask_decay_value + mask.value,
+                              inputs)
+        else:
+          return jnp.where(mask.value, inputs,
+                           jnp.zeros(inputs.shape, inputs.dtype))
+      return inputs
 
 
 def apply_sparsity(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,

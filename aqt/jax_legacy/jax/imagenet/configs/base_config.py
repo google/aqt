@@ -112,7 +112,8 @@ def get_base_config(imagenet_type: ImagenetType, quant_target: QuantTarget):
           "order": "C",
           "absolute": True,
           "smallest": True,
-          "structure_decay": False
+          "structure_decay": False,
+          "sparse_ste": False
       },
       "quant_type": "fake_quant",
       "weight_quant_granularity": "per_channel",

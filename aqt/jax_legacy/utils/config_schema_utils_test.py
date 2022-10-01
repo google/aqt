@@ -180,7 +180,8 @@ class BaseConfigTest(parameterized.TestCase):
         'smallest': True,
         'absolute': False,
         'order': 'C',
-        'structure_decay': False
+        'structure_decay': False,
+        'sparse_ste': False
     }
 
     config.sparsity.update(expected_sparse_dict)
@@ -269,7 +270,8 @@ class BaseConfigTest(parameterized.TestCase):
         'smallest': None,
         'order': None,
         'absolute': None,
-        'structure_decay': None
+        'structure_decay': None,
+        'sparse_ste': None
     }
     expected_top_level_schema = {
         'metadata': {
