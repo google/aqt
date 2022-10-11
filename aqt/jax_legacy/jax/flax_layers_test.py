@@ -1490,6 +1490,47 @@ class DenseGeneralAqtTest(parameterized.TestCase):
     onp.testing.assert_array_equal(outputs, exp_outputs)
 
   @parameterized.named_parameters(
+      dict(
+          testcase_name='densegeneral_quant_8bit',
+          weight_prec=8,
+          expected_output=[[-0.08770747, -0.00193817, 0.08321345, 0.16902271],
+                           [-0.2838632, -0.1654416, -0.04855134, 0.06976502]]),
+      dict(
+          testcase_name='densegeneral_quant_4bit',
+          weight_prec=4,
+          expected_output=[[-0.09499891, -0.016027, 0.09432255, 0.17474438],
+                           [-0.29012504, -0.17881386, -0.02733358,
+                            0.08016007]]),
+      dict(
+          testcase_name='densegeneral_quant_2bit',
+          weight_prec=2,
+          expected_output=[[-0.19150016, 0.0456724, 0.0456724, 0.24732196],
+                           [-0.29805943, -0.12025267, -0.12025267,
+                            0.15108395]]),
+  )
+  def test_float_weights_regression_test(self, weight_prec, expected_output):
+    inputs = random.uniform(self.rng_key, shape=(2, 3))
+    model, state = self.init_model_with_1_layer(
+        inputs, num_features=4, weight_prec=weight_prec)
+    float_weights = jnp.linspace(-1 / 3, 1 / 3, num=12).reshape((3, 4))
+
+    exp_output_without_quant = jnp.matmul(inputs, float_weights)
+    state = state.unfreeze()
+    state['params']['kernel'] = float_weights
+    state = flax.core.freeze(state)
+    outputs_with_quant = model.apply(state, inputs)
+    onp.testing.assert_raises(AssertionError, onp.testing.assert_array_equal,
+                              outputs_with_quant, exp_output_without_quant)
+    onp.testing.assert_allclose(outputs_with_quant, expected_output, rtol=1e-5)
+    onp.testing.assert_allclose(
+        exp_output_without_quant,
+        [[-0.08814345, -0.00231601, 0.0835114, 0.16933881],
+         [-0.2836182, -0.16580023, -0.04798227, 0.06983571]],
+        rtol=1e-5)
+    test_utils.assert_all_close_prec(exp_output_without_quant,
+                                     outputs_with_quant, weight_prec)
+
+  @parameterized.named_parameters(
       # TODO(shivaniagrawal): this test is flaky and fails with rtol=0.0004
       # with given rtol=0.0001
       # dict(
