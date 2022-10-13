@@ -14,6 +14,8 @@
 
 """Tests for matmul."""
 
+import copy
+
 from absl.testing import parameterized
 from aqt.common import aqt_config
 from aqt.test import aqt_test_shared_base
@@ -36,13 +38,19 @@ def calibration_config(const_coeff: float) -> aqt_config.CalibrationConfig:
   return aqt_config.CalibrationConfig(const_bound_coeff=const_coeff)
 
 
-def _schedule_config(bits, const_bound_coeff,
-                     share_stats_axes) -> aqt_config.AqtScheduleConfig:
+def _schedule_config(
+    bits,
+    const_bound_coeff,
+    share_stats_axes,
+    freeze_scale_at_begin=True,
+) -> aqt_config.AqtScheduleConfig:
   """Creates schedule config with dynamic quantization."""
   iqc = aqt_config.IntQuantConfig(bits=bits)
   cc = aqt_config.CalibrationConfig(const_bound_coeff=const_bound_coeff)
   tc = aqt_config.AqtTensorConfig(
-      quant_config=iqc, calibration_config=cc, freeze_scale_at_begin=True)
+      quant_config=iqc,
+      calibration_config=cc,
+      freeze_scale_at_begin=freeze_scale_at_begin)
   sc = aqt_config.StatsConfig(
       ema_update_count=1,
       share_stats_axes=list(share_stats_axes),
@@ -86,11 +94,14 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
   def gradients(self, fwd_func, x, w, reduce_sum=False):
     raise NotImplementedError
 
-  def exact_int8_matmul_example(self,
-                                lhs_use_quantized_variable=False,
-                                rhs_use_quantized_variable=False,
-                                name="aqt",
-                                use_float_config=False):
+  def exact_int8_matmul_example(
+      self,
+      lhs_use_quantized_variable=False,
+      rhs_use_quantized_variable=False,
+      name="aqt",
+      use_float_config=False,
+      use_grad_quantization=False,
+  ):
     """Creates lhs/rhs tensors, their corresponding AQT configs, and matmul op."""
     lhs_config, lhs, rhs_config, rhs = aqt_test_shared_base.exact_int8_example(
         lhs_shape=(3, 2),
@@ -102,11 +113,17 @@ class MatmulTest(tf.test.TestCase, parameterized.TestCase):
 
     if use_float_config:
       lhs_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
+    if use_grad_quantization:
+      grad_config = copy.deepcopy(lhs_config)
+      grad_config.tensor_configs[0].freeze_scale_at_begin = False
+      grad_config.stats_config.ema_update_count = 1
+    else:
+      grad_config = None
 
     lhs = self.constant(lhs)
     rhs = self.constant(rhs)
 
-    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config)
+    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config, grad_config)
     mm = self.matmul(config, lhs.shape, rhs.shape, name)
 
     return mm, lhs, rhs

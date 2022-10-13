@@ -313,8 +313,10 @@ class AqtMatmulConfig(_BaseConfig):
   Attributes:
     lhs: quantization schedule for left-hand side argument
     rhs: quantization schedule for right-hand side argument
+    grad: quantization schedule for gradients (optional).
   """
   lhs: AqtScheduleConfig
   rhs: AqtScheduleConfig
+  grad: Optional[AqtScheduleConfig] = None
 
 

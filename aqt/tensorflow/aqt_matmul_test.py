@@ -42,6 +42,91 @@ def matmul_config(matmul):
                                     matmul.rhs_quantizer.config)
 
 
+def _generate_grad_settings():
+  scale = 10.0
+
+  float_config_tc = aqt_config.AqtTensorConfig(
+      freeze_scale_at_begin=True,
+      quant_config=aqt_config.FloatConfig(),
+      calibration_config=aqt_matmul_test_base.calibration_config(1))
+  float_config = aqt_config.AqtScheduleConfig(
+      aqt_matmul_test_base.test_stats_config(), [float_config_tc])
+  int_config = aqt_matmul_test_base._schedule_config(8, scale, (0, 1))
+
+  return (
+      # Quantization in the forward direction only.
+      # In this case we expect the relative error to be in the range
+      # [0.01, 1.00] due to the int8 quantization of the LHS.
+      dict(
+          testcase_name="no_grad_quantization",
+          config=aqt_config.AqtMatmulConfig(
+              lhs=int_config, rhs=float_config, grad=None),
+          check_individual_entries=True,
+          minimum_rel_error=0.01,
+          maximum_rel_error=1.0,
+          scale=scale,
+      ),
+      # Grad quantization here should not degrade the error by much.
+      # In addition to the quantization of the LHS, we also quantize the
+      # gradient. But since the gradient has 16 bits we don't expect it to
+      # impact the relative error by much.
+      dict(
+          testcase_name="16_bit_grad_quantization",
+          config=aqt_config.AqtMatmulConfig(
+              lhs=int_config,
+              rhs=float_config,
+              grad=aqt_matmul_test_base._schedule_config(
+                  bits=16,
+                  const_bound_coeff=100,
+                  share_stats_axes=(0, 1),
+                  freeze_scale_at_begin=False)),
+          check_individual_entries=True,
+          minimum_rel_error=0.01,
+          maximum_rel_error=1.0,
+          scale=scale,
+      ),
+      # Using low-bit quantization will degrade the error.
+      # In addition to the quantization of the LHS, we apply a very coarse 1-bit
+      # quantization to the gradient. Here we expect the error to be very bad.
+      # In particular, we check that the minimum relative error is at least 1.0,
+      # which was the upper bound of the cases above.
+      dict(
+          testcase_name="1_bit_grad_quantization",
+          config=aqt_config.AqtMatmulConfig(
+              lhs=int_config,
+              rhs=float_config,
+              grad=aqt_matmul_test_base._schedule_config(
+                  bits=1,
+                  const_bound_coeff=100,
+                  share_stats_axes=(0, 1),
+                  freeze_scale_at_begin=False)),
+          check_individual_entries=False,
+          minimum_rel_error=1.0,
+          maximum_rel_error=None,
+          scale=scale,
+      ),
+      # Quantize only the gradient.
+      # We don't quantize the LHS, and the gradient is quantized using 16 bits.
+      # So, the error we expect should be quite small. In particular, we can
+      # upper bound it by 0.01, which was the lower bound for the
+      # no_grad_quantization and 16_bit_grad_quantization cases above.
+      dict(
+          testcase_name="16_bit_grad_quantization_only",
+          config=aqt_config.AqtMatmulConfig(
+              lhs=float_config,
+              rhs=float_config,
+              grad=aqt_matmul_test_base._schedule_config(
+                  bits=16,
+                  const_bound_coeff=100,
+                  share_stats_axes=(0, 1),
+                  freeze_scale_at_begin=False)),
+          check_individual_entries=True,
+          minimum_rel_error=1e-5,
+          maximum_rel_error=0.01,
+          scale=scale,
+      ),)
+
+
 class IntNarrowedMatMulTest(tf.test.TestCase, parameterized.TestCase):
 
   def test_chooses_right_matmul(self):
@@ -157,18 +242,16 @@ class MatmulTest(aqt_matmul_test_base.MatmulTest):
     with self.assertRaisesRegex(aqt_config.ConfigError, "lhs data shape"):
       mm.apply(lhs, rhs)
 
-  def test_grad_linearity(self):
+  @parameterized.named_parameters(*_generate_grad_settings())
+  def test_grad_linearity(
+      self,
+      config,
+      check_individual_entries,
+      minimum_rel_error,
+      maximum_rel_error,
+      scale,
+  ):
     """Validates gradients are correct on basic example."""
-    float_config_tc = aqt_config.AqtTensorConfig(
-        freeze_scale_at_begin=True,
-        quant_config=aqt_config.FloatConfig(),
-        calibration_config=aqt_matmul_test_base.calibration_config(1))
-    float_config = aqt_config.AqtScheduleConfig(
-        aqt_matmul_test_base.test_stats_config(), [float_config_tc])
-    scale = 10.0
-    int_config = aqt_matmul_test_base._schedule_config(8, scale, (0, 1))
-
-    lhs_config, rhs_config = int_config, float_config
     contract_dim = 10
     lhs_shape = (1, contract_dim)
     rhs_shape = (contract_dim, 1)
@@ -178,16 +261,18 @@ class MatmulTest(aqt_matmul_test_base.MatmulTest):
     rhs_ph = tf.placeholder(tf.float32, shape=rhs_shape)
     target_ph = tf.placeholder(tf.float32, shape=target_shape)
 
-    config = aqt_config.AqtMatmulConfig(lhs_config, rhs_config)
     mm = aqt_matmul.Matmul(config, lhs_shape, rhs_shape)
 
     with self.cached_session() as sess, sess.as_default():
       tf.global_variables_initializer().run()
+      if config.grad:
+        with self.subTest("Gradient shape"):
+          self.assertSequenceEqual(mm.grad_quantizer.data_shape, target_shape)
 
       event_count = tf.constant(0, tf.int64)
       updates = [
           mm.update_lhs(tf.ones(lhs_shape), None, event_count),
-          mm.update_rhs(tf.ones(rhs_shape), None, event_count)
+          mm.update_rhs(tf.ones(rhs_shape), None, event_count),
       ]
       with tf.control_dependencies(updates):
         aqt_mm = mm.apply(lhs_ph, rhs_ph)
@@ -211,44 +296,68 @@ class MatmulTest(aqt_matmul_test_base.MatmulTest):
         grad_factor = aqtd.ravel()
         float_grad = lhs.ravel() * grad_factor
         true_grad = aqt_grad.ravel()
+
         diff = np.abs(float_grad - true_grad)
         bucket_width = scale * 2 / 255
         for j, err in enumerate(diff):
-          self.assertLessEqual(
-              err,
-              bucket_width * abs(grad_factor),
-              msg=f"trial {i} position {j}")
+          if check_individual_entries:
+            with self.subTest("Individual entry errors"):
+              self.assertLessEqual(
+                  err,
+                  bucket_width * abs(grad_factor),
+                  msg=f"trial {i} position {j}")
+        if minimum_rel_error:
+          with self.subTest("Minimum overall error"):
+            self.assertGreaterEqual(
+                np.abs(np.sum(diff) / np.sum(float_grad)), minimum_rel_error)
+        if maximum_rel_error:
+          with self.subTest("Maximum overall error"):
+            self.assertLessEqual(
+                np.abs(np.sum(diff) / np.sum(float_grad)), maximum_rel_error)
 
-  def test_diagnostics(self):
-    mm, lhs, rhs = self.exact_int8_matmul_example()
+  @parameterized.named_parameters(
+      dict(testcase_name="no_grad", use_grad_quantization=False),
+      dict(testcase_name="with_grad", use_grad_quantization=True))
+  def test_diagnostics(self, use_grad_quantization):
+    mm, lhs, rhs = self.exact_int8_matmul_example(
+        use_grad_quantization=use_grad_quantization)
 
     with self.cached_session():
       tf.global_variables_initializer().run()
       update_event_count(mm, 0)
 
-      d = mm.diagnostics(lhs, rhs)
+      # We just want to check if diagnostics works, so use a fake gradient.
+      if use_grad_quantization:
+        fake_grad = tf.zeros(shape=(lhs.shape[0], rhs.shape[1]))
+      else:
+        fake_grad = None
+      d = mm.diagnostics(lhs, rhs, fake_grad)
       quantizers = {"lhs": mm.lhs_quantizer, "rhs": mm.rhs_quantizer}
-      for qname, quantizer in quantizers.items():
+      if use_grad_quantization:
+        quantizers["grad"] = mm.grad_quantizer
 
-        for name, expected in quantizer.calibration_variables().items():
-          actual = d[f"aqt/{qname}/{name}"]
+      for qname, quantizer in quantizers.items():
+        with self.subTest(f"qname {qname}."):
+          for name, expected in quantizer.calibration_variables().items():
+            actual = d[f"aqt/{qname}/{name}"]
+            self.assertAllEqual(actual, expected)
+
+          actual = d[f"aqt/{qname}/clipped_proportion"]
+          expected = 0.0
           self.assertAllEqual(actual, expected)
 
-        actual = d[f"aqt/{qname}/clipped_proportion"]
-        expected = 0.0
-        self.assertAllEqual(actual, expected)
+          actual = d[f"aqt/{qname}/clip"]
+          expected = quantizer.clip_range()
+          self.assertAllEqual(actual, expected)
 
-        actual = d[f"aqt/{qname}/clip"]
-        expected = quantizer.clip_range()
-        self.assertAllEqual(actual, expected)
-
-      out_of_range_lhs, out_of_range_rhs = (
-          tf.ones_like(x) * 512.0 for x in (lhs, rhs))
-      d = mm.diagnostics(out_of_range_lhs, out_of_range_rhs)
-      for arg in ["lhs", "rhs"]:
-        actual = d[f"aqt/{arg}/clipped_proportion"]
-        expected = 1.0
-        self.assertAllEqual(actual, expected)
+      with self.subTest("Out of range"):
+        out_of_range_lhs, out_of_range_rhs = (
+            tf.ones_like(x) * 512.0 for x in (lhs, rhs))
+        d = mm.diagnostics(out_of_range_lhs, out_of_range_rhs)
+        for arg in ["lhs", "rhs"]:
+          actual = d[f"aqt/{arg}/clipped_proportion"]
+          expected = 1.0
+          self.assertAllEqual(actual, expected)
 
 
 if __name__ == "__main__":
