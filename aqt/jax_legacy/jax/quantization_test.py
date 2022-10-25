@@ -787,7 +787,7 @@ class AQTTest(parameterized.TestCase):
       dict(act_distribution='positive', prefer_int8_to_int32_dot=True, prec=8),
       dict(
           act_distribution='symmetric', prefer_int8_to_int32_dot=False, prec=4))
-  @mock.patch.object(jax.lax, 'dot_general')
+  @mock.patch.object(jax.lax, 'dot_general', wraps=jax.lax.dot_general)
   def test_lax_dot_has_integer_inputs_in_quantized_dot(self, mock_dot_general,
                                                        act_distribution,
                                                        prefer_int8_to_int32_dot,
