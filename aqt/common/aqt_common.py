@@ -14,9 +14,12 @@
 
 """Common utility functions used for both TF and Jax."""
 
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 from aqt.common import aqt_config
+from aqt.common import emulation_utils
+
+_get_max_number_float = emulation_utils.get_max_number_from_mantissa_and_max_exp
 
 
 def check_shapes_conformal(actual: Sequence[Optional[int]],
@@ -48,13 +51,27 @@ def check_shapes_conformal(actual: Sequence[Optional[int]],
                      f'expected ({expected})')
 
 
-def get_clip_bound(config: aqt_config.IntQuantConfig) -> float:
-  config.validate()
+def _get_clip_bound_int(config: aqt_config.IntQuantConfig):
+  """Returns the clip bound when using integer values."""
   assert config.bits <= 23, 'Too many bits, float32 has less precision.'
   bucket_count = 2.0**config.bits
   if config.preserve_zero:
     bucket_count -= 1.0
   return bucket_count / 2.0
+
+
+def get_clip_bound(
+    config: Union[aqt_config.IntQuantConfig, aqt_config.SmallFloatConfig],
+) -> float:
+  """Returns the clip bound for IntQuantConfig or SmallFloatConfig."""
+  config.validate()
+  if isinstance(config, aqt_config.IntQuantConfig):
+    return _get_clip_bound_int(config)
+  elif isinstance(config, aqt_config.SmallFloatConfig):
+    return _get_max_number_float(config.mantissa_bits, config.max_exp)
+  else:
+    raise ValueError(
+        '_get_clip_bound called without quantization or emulation.')
 
 
 def safe_clip_bound(config: aqt_config.IntQuantConfig) -> float:
@@ -67,6 +84,9 @@ def safe_clip_bound(config: aqt_config.IntQuantConfig) -> float:
   127.5) to map to the integer 127), but the actual clipping of float values
   needs to clip to just below 127.5, to something like 127.499999, such that
   RTNE rounds into range.
+
+  Note: This is not necessary for SmallFloatConfig because the get_clip_bound
+  returns the maximum possible value already.
 
   Args:
     config: the integer quantization config

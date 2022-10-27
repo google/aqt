@@ -19,14 +19,54 @@ is quantizing individual inputs, possibly with functionally coupled parameters.
 This module provides configurable functions for single-tensor calibration and
 quantization.
 """
-
+import dataclasses
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 from aqt.common import aqt_common
 from aqt.common import aqt_config
+from aqt.common import emulated_floating_points
+from aqt.common import emulation_utils
 import tensorflow.compat.v1 as tf
 import tensorflow.compat.v1.tpu as tpu_ops
 
+
+def _emulated_fp(
+    t: tf.Tensor,
+    mantissa_bits: tf.Tensor,
+    min_exp: tf.Tensor,
+    max_exp: tf.Tensor,
+) -> tf.Tensor:
+  """Emulates enumerics in bfloat16 or float32 given the FPMetadata.
+
+  This is based on the implementation in:
+  google3/platforms/deepsea/ffds/reduced_precision/emulated_floating_points.py
+  However a separate implementation is needed to incorporate the metadata as
+  tensors in the TF graph.
+
+  Args:
+    t: a tensor whose dtype is either tf.bfloat16 or tf.float32.
+    mantissa_bits: The mantissa bits in the emulated format.
+    min_exp: the allowed minimum exponents in the emulated format.
+    max_exp: the allowed maximum exponents in the emulated format.
+
+  Returns:
+    a same dtype tensor that emulates floating points.
+  """
+  assert t.dtype == tf.float32
+  output_type = t.dtype
+
+  with tf.name_scope('emulated_fp'):
+    v = emulated_floating_points.handle_mantissa(
+        t,
+        mantissa_bits=mantissa_bits,
+        min_exp=min_exp,
+        rounding_mode=emulation_utils.ROUND_TO_NEAREST_EVEN)
+    v = emulated_floating_points.static_handle_exponent(
+        v,
+        min_exp=min_exp - mantissa_bits,
+        max_exp=max_exp,
+        mantissa_bits=mantissa_bits)
+    return tf.cast(v, output_type)
 
 # For compatibility with different frameworks, such as Babelfish, we allow
 # custom variable creation lambdas. Make sure they're not trainable.
@@ -292,7 +332,8 @@ class TensorQuantizer:
   ) -> Tuple[tf.Tensor, tf.Tensor]:
     """Returns new scale, inverse scale for a given config and stats, if any."""
     if isinstance(config.quant_config, aqt_config.FloatConfig):
-      # We shouldn't update the scale if the given config contains FloatConfig;
+      # We shouldn't update the scale if the given config contains FloatConfig
+      # and no emulation;
       # fill with a poison value if we get into this situation.
       nan = tf.constant(float('nan'), tf.float32, self._stats.stats_shape)
       return nan, nan
@@ -308,7 +349,7 @@ class TensorQuantizer:
     """Returns the tensor clip range or zeros if no int config is active."""
 
     def case_fn(config: aqt_config.AqtTensorConfig) -> tf.Tensor:
-      if not isinstance(config.quant_config, aqt_config.IntQuantConfig):
+      if isinstance(config.quant_config, aqt_config.FloatConfig):
         return tf.zeros(self._stats.stats_shape)
 
       # We return the range derived from the inverse scale, rather than
@@ -403,76 +444,110 @@ class TensorQuantizer:
   def _quantization_params(self, train):
     """Returns parameters for AQT quantization routine."""
 
-    def qparams(
-        config: aqt_config.AqtTensorConfig,
-        check_active: bool = True
-    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    @dataclasses.dataclass
+    class QParams:
+      """Dataclass for quantization parameters."""
+      # Tensors used for quantization
+      should_quantize: tf.Tensor = tf.constant(0.0)
+      clip_bound: tf.Tensor = tf.constant(0.0)
+      shift_before: tf.Tensor = tf.constant(0.0)
+      shift_after: tf.Tensor = tf.constant(0.0)
+
+      # Tensors used for floating point emulation.
+      should_use_small_float: tf.Tensor = tf.constant(0)
+      mantissa_bits: tf.Tensor = tf.constant(0)
+      min_exp: tf.Tensor = tf.constant(0)
+      max_exp: tf.Tensor = tf.constant(0)
+
+      def __iter__(self):
+        return (getattr(self, field.name) for field in dataclasses.fields(self))
+
+    def qparams(config: aqt_config.AqtTensorConfig,
+                check_active: bool = True) -> QParams:
       """Returns quant parameters for fixed AQT config."""
 
-      should_quantize = tf.constant(0.0)
-      clip_bound = tf.constant(0.0)
-      shift_before = tf.constant(0.0)
-      shift_after = tf.constant(0.0)
-
+      params = QParams()
       config_active = is_config_active(config, self._last_update.read_value())
       config_active = not check_active or config_active
 
       if isinstance(config.quant_config, aqt_config.FloatConfig):
-        clip_bound = tf.where_v2(config_active, float('inf'), 0.0)
-        return should_quantize, clip_bound, shift_before, shift_after
+        params.clip_bound = tf.where_v2(config_active, float('inf'), 0.0)
+      elif isinstance(config.quant_config, aqt_config.IntQuantConfig):
+        config_active = tf.cast(config_active, tf.float32)
+        params.should_quantize += config_active
 
-      config_active = tf.cast(config_active, tf.float32)
-      should_quantize += config_active
+        # TODO(vladf): some serving environments, such as adbrain,
+        # automatically rewrite constants from f32 to bf16, which makes the
+        # epsilon used in the function below invalid, so that
+        # safe_clip_bound == clip_bound (incorrectly). We should solve for
+        # that through some configuration.
+        params.clip_bound += config_active * aqt_common.safe_clip_bound(
+            config.quant_config)
+        if config.quant_config.preserve_zero:
+          params.shift_before += config_active * 0.5
+        else:
+          params.shift_after += config_active * 0.5
+      elif isinstance(config.quant_config, aqt_config.SmallFloatConfig):
+        # Note: In the case of small floats, we can just use get_clip_bound
+        # as opposed to safe_clip_bound since we are mapping the clip bound
+        # directly to the highest float that can be represented, while in int
+        # world we are mapping biggest value onto 127.4999 to get a slightly
+        # wider and less biased range.
+        config_active = tf.cast(config_active, tf.int32)
+        params.should_use_small_float += config_active
 
-      # TODO(vladf): some serving environments, such as adbrain,
-      # automatically rewrite constants from f32 to bf16, which makes the
-      # epsilon used in the function below invalid, so that
-      # safe_clip_bound == clip_bound (incorrectly). We should solve for
-      # that through some configuration.
-      clip_bound += config_active * aqt_common.safe_clip_bound(
-          config.quant_config)
+        params.clip_bound += (
+            tf.cast(config_active, tf.float32) *
+            aqt_common.get_clip_bound(config.quant_config))
 
-      if config.quant_config.preserve_zero:
-        shift_before += config_active * 0.5
+        params.mantissa_bits += (
+            config_active * config.quant_config.mantissa_bits)
+        params.min_exp += config_active * config.quant_config.min_exp
+        params.max_exp += config_active * config.quant_config.max_exp
       else:
-        shift_after += config_active * 0.5
+        raise ValueError('config.quant_config must have type '
+                         'FloatConfig, IntQuantConfig, or SmallFloatConfig. '
+                         f'But instead got {type(config.quant_config)}.')
 
-      return should_quantize, clip_bound, shift_before, shift_after
+      return params
 
     if not train and self.config.inference_config_index is not None:
-      should_quantize, clip_bound, shift_before, shift_after = qparams(
+      params = qparams(
           self.config.tensor_configs[self.config.inference_config_index],
           check_active=False)
     elif self.config.tensor_configs:
-      should_quantize, clip_bound, shift_before, shift_after = zip(
-          *map(qparams, self.config.tensor_configs))
-      should_quantize = tf.add_n(should_quantize)
-      clip_bound = tf.add_n(clip_bound)
-      shift_before = tf.add_n(shift_before)
-      shift_after = tf.add_n(shift_after)
+      params = QParams(*map(tf.add_n, zip(
+          *map(qparams, self.config.tensor_configs))))
     else:
-      should_quantize = clip_bound = shift_before = shift_after = tf.constant(
-          0.0)
+      return QParams()
 
-    should_quantize = tf.cast(should_quantize, tf.bool)
-    return should_quantize, clip_bound, shift_before, shift_after
+    params.should_quantize = tf.cast(params.should_quantize, tf.bool)
+    params.should_use_small_float = tf.cast(
+        params.should_use_small_float, tf.bool)
+    return params
 
   def _to_quant(self, x: tf.Tensor, train: bool) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity."""
-    should_quantize, clip_bound, shift_before, shift_after = (
-        self._quantization_params(train))
+    with tf.variable_scope('to_quant'):
+      params = self._quantization_params(train)
 
-    maybe_floor = (
-        lambda y: tf.where_v2(should_quantize, tf.math.floor(y), y))
+      def maybe_floor_or_small_float(y):
+        if self.config.quantization_mode() == aqt_config.SmallFloatConfig:
+          return tf.where_v2(
+              params.should_use_small_float,
+              _emulated_fp(y, params.mantissa_bits, params.min_exp,
+                           params.max_exp), y)
+        else:
+          return tf.where_v2(params.should_quantize, tf.math.floor(y), y)
 
-    # Note that backprop does not depend directly on the value of _last_update
-    # or any_config_active; only scales and constants need to be maintained
-    # and there's no branching on ops including the input tensor x. This
-    # results in significant memory reduction, see cl/415355150.
-    x = tf.clip_by_value(x, -clip_bound, clip_bound)
-    x += shift_before
-    x = tf.grad_pass_through(maybe_floor)(x)
-    x += shift_after
+      # Note that backprop does not depend directly on the value of _last_update
+      # or any_config_active; only scales and constants need to be maintained
+      # and there's no branching on ops including the input tensor x. This
+      # results in significant memory reduction, see cl/415355150.
+      x = tf.clip_by_value(x, -params.clip_bound, params.clip_bound)
+      x += params.shift_before
+      x = tf.grad_pass_through(maybe_floor_or_small_float)(x)
+      x += params.shift_after
 
     return x
 
@@ -482,7 +557,7 @@ class TensorQuantizer:
     # computation in _to_quant to derive this clip mask instead of a separate
     # method.
     with tf.variable_scope('clip_mask'):
-      _, clip_bound, _, _ = (self._quantization_params(train))
+      _, clip_bound, _, _, _, _, _, _ = self._quantization_params(train)
       return tf.abs(x) > clip_bound
 
   def _get_quant_scale(self, train: bool) -> tf.Tensor:
@@ -490,23 +565,22 @@ class TensorQuantizer:
     if not train and self.config.inference_config_index is not None:
       inference_config = self.config.tensor_configs[
           self.config.inference_config_index]
-      should_quantize = tf.constant(
-          isinstance(inference_config.quant_config,
-                     aqt_config.IntQuantConfig))
+      should_scale = tf.constant(
+          not isinstance(inference_config.quant_config, aqt_config.FloatConfig))
     else:
-      should_quantize = tf.constant(False)
+      should_scale = tf.constant(False)
       for config in self.config.tensor_configs:
         if isinstance(config.quant_config, aqt_config.FloatConfig):
           continue
 
         config_active = is_config_active(config, self._last_update)
-        should_quantize |= config_active
+        should_scale |= config_active
 
     # TODO(lew): We can simplify the scopes to just 'compute scales'
     with tf.variable_scope('to_quant'):
       scale = tf.where_v2(  #
-          should_quantize, self._scale, tf.ones_like(self._scale))
+          should_scale, self._scale, tf.ones_like(self._scale))
     with tf.variable_scope('from_quant'):
       inv_scale = tf.where_v2(  #
-          should_quantize, self._inv_scale, tf.ones_like(self._inv_scale))
+          should_scale, self._inv_scale, tf.ones_like(self._inv_scale))
     return scale, inv_scale

@@ -15,7 +15,7 @@
 
 import dataclasses
 import enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 from aqt.common.aqt_config_utils import _BaseConfig
 from aqt.common.aqt_config_utils import _validate_intervals
@@ -49,21 +49,21 @@ class IntQuantConfig(_BaseConfig):
 
 @enum.unique
 class RoundingMode(enum.Enum):
-  """Supported rounding mode for EmulatedFormat."""
+  """Supported rounding mode for SmallFloatConfig."""
   ROUND_AWAY_FROM_ZERO = 'round_away_from_zero'
   ROUND_TO_NEAREST_EVEN = 'round_to_nearest_even'
   ROUND_STOCHASTIC = 'round_stochastic'
 
 
 @dataclasses.dataclass
-class EmulatedFormat(_BaseConfig):
+class SmallFloatConfig(_BaseConfig):
   """Enum for emulated lower-precision formats."""
   exponent_bits: int
   mantissa_bits: int
   min_exp: int
   max_exp: int
-  support_inf: bool
-  rounding_mode: RoundingMode
+  support_inf: bool  # Not yet supported
+  rounding_mode: RoundingMode  # Currently only using ROUND_TO_NEAREST_EVEN
 
 
 @dataclasses.dataclass
@@ -72,10 +72,16 @@ class FloatConfig(_BaseConfig):
 
   Attributes:
     use_bf16: Whether or not to use bfloat16.
-    emulated_format: If specified, emulate a lower-precision format.
   """
   use_bf16: bool = True
-  emulated_format: Optional[EmulatedFormat] = None
+
+
+# Warning: Adding new oneof fields may cause from_dict to select the wrong
+# value. The behavior of dataclasses is to select the first value in the
+# union which has all values specified For example if FloatConfig were first,
+# it would always be selected since its only field use_bf16 has a default
+# value.
+QuantConfig = Union[IntQuantConfig, SmallFloatConfig, FloatConfig]
 
 
 @dataclasses.dataclass
@@ -191,7 +197,7 @@ class AqtTensorConfig(_BaseConfig):
   """Config for aqt_ops.AqtTensor.
 
   Attributes:
-    quant_config: Either IntQuantConfig or FloatConfig.
+    quant_config: Numerical format for quantization.
     calibration_config: Calibration config.
     freeze_scale_at_begin: Freezes the calibration when begin_at_event is
       reached. This breaks the feedback look between calibration scale and
@@ -202,7 +208,7 @@ class AqtTensorConfig(_BaseConfig):
       important if freeze_scale_at_begin == true.
     end_at_event: End of this quantization interval.
   """
-  quant_config: Union[IntQuantConfig, FloatConfig]
+  quant_config: QuantConfig
   calibration_config: CalibrationConfig
   freeze_scale_at_begin: bool
   begin_at_event: Optional[int] = None
@@ -216,9 +222,18 @@ class AqtTensorConfig(_BaseConfig):
                         f'end_at_event={self.end_at_event}')
 
     if not isinstance(self.quant_config, IntQuantConfig) and not isinstance(
-        self.quant_config, FloatConfig):
-      raise ConfigError(
-          'quant_config must be one of {int_quant_config, float_config}.')
+        self.quant_config, FloatConfig) and not isinstance(
+            self.quant_config, SmallFloatConfig):
+      raise ConfigError('quant_config must be one of '
+                        '{int_quant_config, float_config, small_float_config}.')
+    if isinstance(self.quant_config, SmallFloatConfig):
+      small_float = self.quant_config
+      if small_float.support_inf:
+        raise NotImplementedError('support_inf is not yet supported.')
+      if small_float.rounding_mode != RoundingMode.ROUND_TO_NEAREST_EVEN:
+        raise NotImplementedError(
+            'Using small_float.rounding_mode '
+            'only currently supports ROUND_TO_NEAREST_EVEN.')
 
   def to_dict(self) -> Dict[str, Any]:
     # AqtTensorConfig dataclass does not have `int_quant_config` and
@@ -255,8 +270,41 @@ class AqtScheduleConfig(_BaseConfig):
   use_quantized_variable: bool = False
   inference_config_index: Optional[int] = None
 
+  def quantization_mode(self) -> Type[QuantConfig]:
+    """Returns which quantization to use.
+
+    Raises: ConfigError if both IntQuantConfig and SmallFloatConfig are given.
+    """
+    has_quantization = False
+    has_small_float = False
+    for tensor_config in self.tensor_configs:
+      quant_config = tensor_config.quant_config
+      print(type(quant_config))
+      if isinstance(quant_config, IntQuantConfig):
+        has_quantization = True
+      elif isinstance(quant_config, SmallFloatConfig):
+        has_small_float = True
+      elif isinstance(quant_config, FloatConfig):
+        continue
+      else:
+        raise ConfigError(
+            'quant_config must be one of '
+            '{int_quant_config, float_config, small_float_config}.')
+    if has_quantization and has_small_float:
+      raise ConfigError(
+          'Found both IntQuantConfig and SmallFloatConfig. Only '
+          'one of the two should be specified among all tensor_configs.')
+    elif has_quantization:
+      return IntQuantConfig
+    elif has_small_float:
+      return SmallFloatConfig
+    else:
+      return FloatConfig
+
   def validate(self, data_shape: List[Optional[int]]):
     """Validates this AqtScheduleConfig for the provided data shape."""
+    # The output value of quantization_mode is unused.
+    _ = self.quantization_mode()
     _validate_intervals(self.tensor_configs)
     if any(ax is None for ax in data_shape) and self.use_quantized_variable:
       raise ConfigError(

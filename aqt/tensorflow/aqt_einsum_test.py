@@ -51,6 +51,30 @@ def _schedule_config(
   return aqt_config.AqtScheduleConfig(sc, [tc])
 
 
+def _schedule_config_emulation(
+    share_stats_axes) -> aqt_config.AqtScheduleConfig:
+  """Creates schedule config for emulated precision."""
+  iqc = aqt_config.SmallFloatConfig(
+      exponent_bits=5,
+      mantissa_bits=2,
+      min_exp=-14,
+      max_exp=15,
+      support_inf=False,
+      rounding_mode=aqt_config.RoundingMode.ROUND_TO_NEAREST_EVEN)
+  # Using the max number essentially disables scaling.
+  cc = aqt_config.CalibrationConfig(
+      const_bound_coeff=aqt_common._get_max_number_float(
+          mantissa_bits=2, max_exp=15))
+  tc = aqt_config.AqtTensorConfig(
+      quant_config=iqc, calibration_config=cc, freeze_scale_at_begin=True)
+  sc = aqt_config.StatsConfig(
+      ema_update_count=1,
+      share_stats_axes=list(share_stats_axes),
+      update_count_prior=0,
+      tpu_cross_replica_sum=False)
+  return aqt_config.AqtScheduleConfig(sc, [tc])
+
+
 def _empty_config(
     share_stats_axes: Sequence[int]) -> aqt_config.AqtScheduleConfig:
   return aqt_config.AqtScheduleConfig(_stats_config(share_stats_axes), [])
@@ -246,9 +270,52 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
 
     return eq, lhs_config, lhs, qlhs, rhs_config, rhs, qrhs
 
+  def basic_emulation_example(self):
+    eq = "ij,jk->ik"
+    lhs_config = _schedule_config_emulation([0, 1])
+    lhs = tf.constant(
+        np.array(
+            [
+                [-8.5, 4.3, 4.1],  #
+                [-0.05, 0.01, -4.7],
+            ],
+            dtype=np.float32))
+    qlhs = tf.constant(
+        np.array(
+            [
+                [-8.0, 4.0, 4.0],  #
+                [-0.046875, 0.00976562, -5.0]
+            ],
+            dtype=np.float32))
+
+    rhs_config = _schedule_config_emulation([0, 1])
+    rhs = tf.constant(
+        np.array(
+            [
+                [-0.2, 0.02],  #
+                [-1.1, 0],
+                [-0.04, 2.3]
+            ],
+            dtype=np.float32))
+    qrhs = tf.constant(
+        np.array(
+            [
+                [-0.1875, 0.01953125],  #
+                [-1.0, 0.0],
+                [-0.0390625, 2.5]
+            ],
+            dtype=np.float32))
+
+    return eq, lhs_config, lhs, qlhs, rhs_config, rhs, qrhs
+
   def test_basic_einsum(self):
-    eq, lhs_config, lhs, qlhs, rhs_config, rhs, qrhs = self.basic_quant_example(
-    )
+    with self.subTest("quant_example"):
+      eq, lhs_config, lhs, qlhs, rhs_config, rhs, qrhs = (
+          self.basic_quant_example())
+
+    with self.subTest("emulation_example"):
+      eq, lhs_config, lhs, qlhs, rhs_config, rhs, qrhs = (
+          self.basic_emulation_example())
 
     actual = _einsum_op(eq, lhs, rhs, lhs_config, rhs_config)
     expected = tf.einsum(eq, qlhs, qrhs)

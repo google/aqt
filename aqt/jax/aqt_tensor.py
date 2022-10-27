@@ -350,19 +350,22 @@ class TensorQuantizer(nn.Module):
       if isinstance(config.quant_config, aqt_config.FloatConfig):
         clip_bound = jnp.where(config_active, float('inf'), 0.0)
         return should_quantize, clip_bound, shift_before, shift_after
+      elif isinstance(config.quant_config, aqt_config.IntQuantConfig):
+        should_quantize |= config_active
+        config_active = jnp.float32(config_active)
 
-      should_quantize |= config_active
-      config_active = jnp.float32(config_active)
+        clip_bound += config_active * aqt_common.safe_clip_bound(
+            config.quant_config)
 
-      clip_bound += config_active * aqt_common.safe_clip_bound(
-          config.quant_config)
+        if config.quant_config.preserve_zero:
+          shift_before += config_active * 0.5
+        else:
+          shift_after += config_active * 0.5
 
-      if config.quant_config.preserve_zero:
-        shift_before += config_active * 0.5
+        return should_quantize, clip_bound, shift_before, shift_after
       else:
-        shift_after += config_active * 0.5
-
-      return should_quantize, clip_bound, shift_before, shift_after
+        raise NotImplementedError(
+            'Only supporting FloatConfig and IntQuantConfig for now.')
 
     if not train and self.config.inference_config_index is not None:
       should_quantize, clip_bound, shift_before, shift_after = qparams(
