@@ -19,6 +19,7 @@ from aqt.jax import aqt_tensor
 import jax.numpy as jnp
 
 # pylint: disable=protected-access
+# pytype: disable=attribute-error
 
 
 def possibly_use_quantized_variable(
@@ -41,7 +42,7 @@ def possibly_use_quantized_variable(
   Returns:
     The input tensor x or its quantized one.
   """
-  if quantizer.config.use_quantized_variable and not train:
+  if quantizer.config is not None and quantizer.config.use_quantized_variable and not train:
     qx = quantizer.quantized_variable.value
     qx = qx.astype(x.dtype)
     return qx
@@ -52,6 +53,9 @@ def should_int8_quantize(
     lhs_quantizer: aqt_tensor.TensorQuantizer,
     rhs_quantizer: aqt_tensor.TensorQuantizer) -> bool:
   """Determines whether or not to quantize."""
+
+  if lhs_quantizer.config is None or rhs_quantizer.config is None:
+    return jnp.bool_(False)
 
   lhs_configs = lhs_quantizer.config.tensor_configs
   rhs_configs = rhs_quantizer.config.tensor_configs

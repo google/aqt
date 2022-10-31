@@ -25,6 +25,7 @@ from jax import lax
 import jax.numpy as jnp
 
 # pylint: disable=protected-access
+# pytype: disable=attribute-error
 
 
 @functools.partial(
@@ -185,28 +186,31 @@ def _validate_inputs(
       per `aqt_config._validate_alignment`.
   """
 
-  aqt_config_utils._validate_alignment(
-      'input_quantizer.config.tensor_configs',
-      input_quantizer.config.tensor_configs,
-      'filter_quantizer.config.tensor_configs',
-      filter_quantizer.config.tensor_configs)
+  if input_quantizer.config is not None and filter_quantizer.config is not None:
+    aqt_config_utils._validate_alignment(
+        'input_quantizer.config.tensor_configs',
+        input_quantizer.config.tensor_configs,
+        'filter_quantizer.config.tensor_configs',
+        filter_quantizer.config.tensor_configs)
 
   input_spec, filter_spec, _ = dimension_numbers  # pytype: disable=attribute-error
   _, *input_contracted_dims = input_spec
   _, *filter_contracted_dims = filter_spec
 
-  for axis in input_contracted_dims:
-    if axis not in input_quantizer.config.stats_config.share_stats_axes:
-      raise aqt_config.ConfigError(
-          f'expected contraction axis ({axis}) to be in '
-          f'input_quantizer.config.stats_config.share_stats_axes={input_quantizer.config.stats_config.share_stats_axes}'
-      )
-  for axis in filter_contracted_dims:
-    if axis not in filter_quantizer.config.stats_config.share_stats_axes:
-      raise aqt_config.ConfigError(
-          f'expected contraction axis ({axis}) to be in '
-          f'filter_quantizer.config.stats_config.share_stats_axes={filter_quantizer.config.stats_config.share_stats_axes}'
-      )
+  if input_quantizer.config is not None:
+    for axis in input_contracted_dims:
+      if axis not in input_quantizer.config.stats_config.share_stats_axes:
+        raise aqt_config.ConfigError(
+            f'expected contraction axis ({axis}) to be in '
+            f'input_quantizer.config.stats_config.share_stats_axes={input_quantizer.config.stats_config.share_stats_axes}'
+        )
+  if filter_quantizer.config is not None:
+    for axis in filter_contracted_dims:
+      if axis not in filter_quantizer.config.stats_config.share_stats_axes:
+        raise aqt_config.ConfigError(
+            f'expected contraction axis ({axis}) to be in '
+            f'filter_quantizer.config.stats_config.share_stats_axes={filter_quantizer.config.stats_config.share_stats_axes}'
+        )
 
 
 def _transpose_inv_scale(x, dimension_numbers_before, dimension_numbers_after):
@@ -307,11 +311,12 @@ def conv_general_dilated(lhs: jnp.ndarray,
       'NHWC': (0, 3, 1, 2),
       'HWIO': (3, 2, 0, 1),
   }
-  lhs_inv_scale = _transpose_inv_scale(lhs_inv_scale, dimension_numbers[0],
-                                       dim_numbers['NHWC'])
-  rhs_inv_scale = _transpose_inv_scale(rhs_inv_scale, dimension_numbers[1],
-                                       dim_numbers['HWIO'])
-  assert len(lhs_inv_scale.shape) == len(rhs_inv_scale.shape)
+  if lhs_quantizer.config is not None and rhs_quantizer.config is not None:
+    lhs_inv_scale = _transpose_inv_scale(lhs_inv_scale, dimension_numbers[0],
+                                         dim_numbers['NHWC'])
+    rhs_inv_scale = _transpose_inv_scale(rhs_inv_scale, dimension_numbers[1],
+                                         dim_numbers['HWIO'])
+    assert len(lhs_inv_scale.shape) == len(rhs_inv_scale.shape)
 
   inv_scale = lhs_inv_scale * rhs_inv_scale
   # Reverse the shape of inv_scale back to one specified by out_spec in

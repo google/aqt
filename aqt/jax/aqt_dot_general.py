@@ -132,21 +132,24 @@ def _validate_inputs(
   lhs_config = lhs_quantizer.config
   rhs_config = rhs_quantizer.config
 
-  aqt_config_utils._validate_alignment(
-      'lhs_config',  #
-      lhs_config.tensor_configs,
-      'rhs_config',
-      rhs_config.tensor_configs)
+  if lhs_config is not None and rhs_config is not None:
+    aqt_config_utils._validate_alignment(
+        'lhs_config',  #
+        lhs_config.tensor_configs,
+        'rhs_config',
+        rhs_config.tensor_configs)
 
   lhs_contracting_dims, rhs_contracting_dims = dimension_numbers[0]
 
-  if not any(a in lhs_config.stats_config.share_stats_axes
-             for a in lhs_contracting_dims):
+  if not (lhs_config is None or
+          any(a in lhs_config.stats_config.share_stats_axes
+              for a in lhs_contracting_dims)):
     raise aqt_config.ConfigError(
         f'expected lhs dot_general contraction axis to be in '
         f'share_stats_axes={lhs_config.stats_config.share_stats_axes}')
-  if not any(a in rhs_config.stats_config.share_stats_axes
-             for a in rhs_contracting_dims):
+  if not (rhs_config is None or
+          any(a in rhs_config.stats_config.share_stats_axes
+              for a in rhs_contracting_dims)):
     raise aqt_config.ConfigError(
         f'expected rhs dot_general contraction axis to be in '
         f'share_stats_axes={rhs_config.stats_config.share_stats_axes}')
@@ -230,8 +233,11 @@ def dot_general(lhs: jnp.ndarray,
       should_int8_quantize=should_int8_quantize,
       train=train)
 
-  inv_scale = lax.dot_general(
-      lhs_inv_scale, rhs_inv_scale, dimension_numbers=dimension_numbers)
+  if lhs_quantizer.config is not None and rhs_quantizer.config is not None:
+    inv_scale = lax.dot_general(
+        lhs_inv_scale, rhs_inv_scale, dimension_numbers=dimension_numbers)
+  else:
+    inv_scale = lhs_inv_scale * rhs_inv_scale
 
   return out * inv_scale
 
