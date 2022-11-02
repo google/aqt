@@ -279,7 +279,6 @@ class AqtScheduleConfig(_BaseConfig):
     has_small_float = False
     for tensor_config in self.tensor_configs:
       quant_config = tensor_config.quant_config
-      print(type(quant_config))
       if isinstance(quant_config, IntQuantConfig):
         has_quantization = True
       elif isinstance(quant_config, SmallFloatConfig):
