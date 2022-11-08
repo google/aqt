@@ -274,7 +274,7 @@ class GetBoundsTest(parameterized.TestCase):
           granularity=quant_config.QuantGranularity.PER_TENSOR))
   def test_dynamic_bounds(self, clipping_coeff, granularity):
     hyperparam = get_bounds.DynamicBounds.Hyper(
-        granularity=granularity, clipping_coeff=clipping_coeff)
+        clipping_coeff=clipping_coeff)
     if granularity == quant_config.QuantGranularity.PER_TENSOR:
       quant_axis = None
     else:

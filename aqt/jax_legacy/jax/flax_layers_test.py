@@ -1366,30 +1366,26 @@ class DenseGeneralAqtTest(parameterized.TestCase):
   def init_model_with_1_layer(self,
                               inputs,
                               num_features,
-                              axis=-1,
+                              axis=(1,),
                               kernel_init=flax_layers.default_kernel_init,
                               weight_prec=None,
                               weight_half_shift=False,
-                              quant_act=None,
-                              train=False,
                               kernel_axis_names=None,
-                              reshape_kernel=True,
-                              possibly_use_quantized_vars=False):
+                              reshape_kernel=True):
     """Create and initialize a flax model with a single DenseAqt layer."""
     layer_kwargs = {
         'kernel_init': kernel_init,
         'features': num_features,
         'axis': axis,
         'use_bias': False,
-        'train': train,
+        'train': False,
         'dtype': jnp.float32,
         'kernel_axis_names': kernel_axis_names,
         'reshape_kernel': reshape_kernel,
-        'possibly_use_quantized_vars': possibly_use_quantized_vars,
     }
     layer_kwargs['hparams'] = flax_layers.DenseGeneralAqt.HParams(
         weight_prec=weight_prec,
-        quant_act=quant_act,
+        quant_act=None,
         weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL,
         weight_half_shift=weight_half_shift)
 
@@ -1397,11 +1393,16 @@ class DenseGeneralAqtTest(parameterized.TestCase):
     initial_state = dense_module.init(self.rng_key, jnp.zeros(inputs.shape))
     return dense_module, initial_state
 
-  # DenseGeneral does not support fq version, hence fp quantization isn't
-  # supported either
   @parameterized.named_parameters(
       dict(testcase_name='float', weight_prec=None),
-
+      dict(
+          testcase_name='quant_fp143_scaled',
+          weight_prec=fp143_scaled,
+      ),
+      dict(
+          testcase_name='quant_fp143',
+          weight_prec=fp143_unscaled,
+      ),
       dict(testcase_name='quant_8bit', weight_prec=8),
       dict(testcase_name='quant_4bit', weight_prec=4),
       dict(testcase_name='quant_4bit_no_reshape', weight_prec=4, reshape=False),
@@ -1579,27 +1580,11 @@ class DenseGeneralAqtTest(parameterized.TestCase):
         rtol=jnp.sqrt(input_dim) * 2**(-weight_prec) * tol_const)
 
   @parameterized.named_parameters(
-      dict(testcase_name='dense_quant_4bit', weight_prec=4),
-      dict(testcase_name='dense_quant_2bit', weight_prec=2),
-  )
-  def test_float_weights_should_give_close_output(self, weight_prec):
-    inputs = random.uniform(self.rng_key, shape=(2, 3))
-    model, state = self.init_model_with_1_layer(
-        inputs, num_features=4, weight_prec=weight_prec)
-    float_weights = jnp.linspace(-1 / 3, 1 / 3, num=12).reshape((3, 4))
-
-    exp_output_without_quant = jnp.matmul(inputs, float_weights)
-    state = state.unfreeze()
-    state['params']['kernel'] = float_weights
-    state = flax.core.freeze(state)
-    outputs_with_quant = model.apply(state, inputs)
-    onp.testing.assert_raises(AssertionError, onp.testing.assert_array_equal,
-                              outputs_with_quant, exp_output_without_quant)
-
-    test_utils.assert_all_close_prec(exp_output_without_quant,
-                                     outputs_with_quant, weight_prec)
-
-  @parameterized.named_parameters(
+      dict(
+          testcase_name='dense_quant_fp143_scaled',
+          weight_prec=fp143_scaled,
+          weight_scale=onp.array([1, 2, 4, 8]),
+      ),
       dict(
           testcase_name='dense_quant_8bit',
           weight_prec=8,
@@ -1650,73 +1635,24 @@ class DenseGeneralAqtTest(parameterized.TestCase):
   # TODO(shivaniagrawal): change mock tests to check for QuantOps than
   # primitives.
   @parameterized.named_parameters(
-      dict(
-          testcase_name='dense_weight_quant_8bit',
-          weight_prec=8,
-          acts_prec=None),
-      dict(
-          testcase_name='dense_weight_quant_4bit',
-          weight_prec=4,
-          acts_prec=None),
-      dict(
-          testcase_name='dense_weight_quant_2bit',
-          weight_prec=2,
-          acts_prec=None),
-      dict(
-          testcase_name='dense_signed_input_quant_8bit',
-          weight_prec=None,
-          acts_prec=8),
-      dict(
-          testcase_name='dense_signed_input_quant_4bit',
-          weight_prec=None,
-          acts_prec=4),
-      dict(
-          testcase_name='dense_signed_input_quant_2bit',
-          weight_prec=None,
-          acts_prec=2),
-      dict(
-          testcase_name='dense_signed_input_auto_quant_8bit',
-          weight_prec=None,
-          acts_prec=8,
-          fixed_bounds=False),
-      dict(
-          testcase_name='dense_signed_input_auto_quant_4bit',
-          weight_prec=None,
-          acts_prec=4,
-          fixed_bounds=False),
+      dict(testcase_name='dense_quant_8bit', weight_prec=8),
+      dict(testcase_name='dense_quant_4bit', weight_prec=4),
+      dict(testcase_name='dense_quant_2bit', weight_prec=2),
   )
   @mock.patch.object(primitives, 'round_with_gradient')
   @mock.patch.object(primitives, 'floor_with_gradient')
-  def test_quantized_weights_and_symmetrics_acts_should_call_clip_and_round(
-      self,
-      floor_with_gradient,
-      round_with_gradient,
-      weight_prec,
-      acts_prec,
-      fixed_bounds=False):
+  def test_quantized_weights_should_call_clip_and_round(self,
+                                                        floor_with_gradient,
+                                                        round_with_gradient,
+                                                        weight_prec):
 
     round_with_gradient.side_effect = lambda x: x
     floor_with_gradient.side_effect = lambda x: x
 
-    if fixed_bounds:
-      bounds = 6.0
-    else:
-      bounds = get_bounds.DynamicBounds.Hyper(
-          granularity=quant_config.QuantGranularity.PER_CHANNEL)
-    quant_act = quantization.QuantOps.ActHParams(
-        input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-        prec=acts_prec,
-        bounds=bounds,
-        half_shift=False)
     num_features = 4
     inputs = jnp.ones((2, 3), dtype=jnp.float32)
     model, state = self.init_model_with_1_layer(
-        inputs,
-        num_features,
-        weight_prec=weight_prec,
-        weight_half_shift=False,
-        quant_act=quant_act,
-    )
+        inputs, num_features, weight_prec=weight_prec, weight_half_shift=False)
 
     round_with_gradient.assert_called_with(mock.ANY)
     self.assertEqual(round_with_gradient.call_count, 1)
@@ -1744,173 +1680,6 @@ class DenseGeneralAqtTest(parameterized.TestCase):
     _ = model.apply(state, inputs)
     round_with_gradient.assert_not_called()
     floor_with_gradient.assert_not_called()
-
-  # TODO(shivaniagrawal): change mock tests to check for QuantOps than
-  # primitives.
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='dense_pos_quant_8bit',
-          pos_inputs_prec=8,
-          fixed_bounds=True),
-      dict(
-          testcase_name='dense_pos_quant_4bit',
-          pos_inputs_prec=4,
-          fixed_bounds=True),
-      dict(
-          testcase_name='dense_pos_quant_8bit_auto_clip',
-          pos_inputs_prec=8,
-          fixed_bounds=False),
-      dict(
-          testcase_name='dense_pos_quant_4bit_auto_clip',
-          pos_inputs_prec=4,
-          fixed_bounds=False),
-  )
-  @mock.patch.object(primitives, 'round_with_gradient')
-  @mock.patch.object(primitives, 'floor_with_gradient')
-  def test_quantized_inputs_should_call_clip_and_round(self,
-                                                       floor_with_gradient,
-                                                       round_with_gradient,
-                                                       pos_inputs_prec,
-                                                       fixed_bounds):
-
-    round_with_gradient.side_effect = lambda x: x
-    floor_with_gradient.side_effect = lambda x: x
-    if fixed_bounds:
-      bounds = 6.0
-    else:
-      bounds = get_bounds.DynamicBounds.Hyper(
-          granularity=quant_config.QuantGranularity.PER_CHANNEL)
-    quant_act = quantization.QuantOps.ActHParams(
-        input_distribution=QuantOps.ActHParams.InputDistribution.POSITIVE,
-        prec=pos_inputs_prec,
-        bounds=bounds,
-        half_shift=False)
-    inputs = jnp.ones((2, 3), dtype=jnp.float32)
-    model, init_state = self.init_model_with_1_layer(
-        inputs,
-        num_features=4,
-        weight_prec=None,
-        quant_act=quant_act,
-        weight_half_shift=False)
-    floor_with_gradient.assert_called_with(mock.ANY)
-    self.assertEqual(floor_with_gradient.call_count, 1)
-    round_with_gradient.assert_not_called()
-
-    round_with_gradient.reset_mock()
-    floor_with_gradient.reset_mock()
-
-    model.apply(init_state, inputs)
-
-    floor_with_gradient.assert_called_with(mock.ANY)
-    self.assertEqual(floor_with_gradient.call_count, 1)
-    round_with_gradient.assert_not_called()
-
-  @parameterized.parameters(
-      dict(granularity=quant_config.QuantGranularity.PER_CHANNEL, axis=(0, 1)),
-      dict(granularity=quant_config.QuantGranularity.PER_TENSOR, axis=None))
-  @mock.patch.object(quantization, 'flaxformer_dot_general')
-  @mock.patch.object(shape_utils, 'assert_shapes_equal')
-  def test_weights_quant_granularity(self, _, mock_flaxformer_dot_general,
-                                     granularity, axis):
-    hparams = flax_layers.DenseGeneralAqt.HParams(
-        weight_prec=8,
-        quant_act=None,
-        weight_quant_granularity=granularity,
-        weight_half_shift=False)
-    layer = flax_layers.DenseGeneralAqt(
-        features=3,
-        axis=(1, 2),
-        hparams=hparams,
-        train=False,
-        use_bias=False,
-        dtype=jnp.float32)
-    x = jnp.ones((2, 3, 4))
-    state = layer.init(self.rng_key, x)
-    layer.apply(state, x)
-    weight_params = mock_flaxformer_dot_general.call_args[1]['weight_params']
-    self.assertEqual(weight_params.axis, axis)
-
-  @parameterized.parameters(
-      dict(
-          granularity=quant_config.QuantGranularity.PER_CHANNEL,
-          quant_axis=(1, 2)),
-      dict(
-          granularity=quant_config.QuantGranularity.PER_TENSOR,
-          quant_axis=None))
-  @mock.patch.object(quantization, 'flaxformer_dot_general')
-  @mock.patch.object(shape_utils, 'assert_shapes_equal')
-  def test_acts_quant_granularity(self, _, mock_flaxformer_dot_general,
-                                  granularity, quant_axis):
-    bounds = get_bounds.DynamicBounds.Hyper(granularity=granularity)
-    quant_act = quantization.QuantOps.ActHParams(
-        input_distribution=QuantOps.ActHParams.InputDistribution.POSITIVE,
-        prec=8,
-        bounds=bounds,
-        half_shift=False)
-    hparams = flax_layers.DenseGeneralAqt.HParams(
-        weight_prec=None,
-        quant_act=quant_act,
-        weight_quant_granularity=quant_config.QuantGranularity.PER_TENSOR,
-        weight_half_shift=False)
-    layer = flax_layers.DenseGeneralAqt(
-        features=2,
-        axis=(1, 2),
-        hparams=hparams,
-        train=False,
-        use_bias=False,
-        dtype=jnp.float32)
-    x = jnp.ones((2, 3, 4))
-    state = layer.init(self.rng_key, x)
-    layer.apply(state, x)
-    bounds_params = mock_flaxformer_dot_general.call_args[1]['bounds_params']
-    self.assertEqual(bounds_params.quant_axis, quant_axis)
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='train_quant',
-          train=True,
-          possibly_use_quantized_vars=True,
-          param_info={
-              'kernel': ['float32', 'embed=3', 'mlp=3'],
-              'qkernel': ['float32', 'embed=3', 'mlp=3'],
-              'qscale': ['float32', 'embed_qscale=1', 'mlp=3']
-          }),
-      dict(
-          testcase_name='inference_quant',
-          train=False,
-          possibly_use_quantized_vars=True,
-          param_info={
-              'qkernel': ['int8', 'embed=3', 'mlp=3'],
-              'qscale': ['float32', 'embed_qscale=1', 'mlp=3']
-          }),
-      dict(
-          testcase_name='train_without_quant',
-          train=True,
-          possibly_use_quantized_vars=False,
-          param_info={'kernel': ['float32', 'embed=3', 'mlp=3']}),
-      dict(
-          testcase_name='inference_without_quant',
-          train=True,
-          possibly_use_quantized_vars=False,
-          param_info={'kernel': ['float32', 'embed=3', 'mlp=3']}),
-  )
-  def test_train_inference_differentiation(self, train,
-                                           possibly_use_quantized_vars,
-                                           param_info):
-    num_features = 3
-    inputs = random.uniform(self.rng_key, shape=(2, 3))
-
-    _, state = self.init_model_with_1_layer(
-        inputs,
-        num_features=num_features,
-        weight_prec=8,
-        train=train,
-        possibly_use_quantized_vars=possibly_use_quantized_vars,
-        kernel_axis_names=('embed', 'mlp'))
-
-    self.assertDictEqual(
-        param_dtypes_shapes_axes(state['params'], state['params_axes']),
-        param_info)
 
 
 class DenseGeneralTest(parameterized.TestCase):
