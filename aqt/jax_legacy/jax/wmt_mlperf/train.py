@@ -827,10 +827,13 @@ class TrainingState:
                          prefix: str = 'checkpoint_') -> 'TrainingState':
     """Restore TrainingState from checkpoint in model_dir."""
     unreplicated_flax_state = jax_utils.unreplicate(self.flax_state)
-    optimizer, flax_state, dropout_rngs, transformer_kwargs = checkpoints.restore_checkpoint(
-        model_dir, (self.optimizer, unreplicated_flax_state, self.dropout_rngs,
-                    self.transformer_kwargs),
-        prefix=prefix)
+    target_state = (self.optimizer, unreplicated_flax_state, self.dropout_rngs,
+                    self.transformer_kwargs)
+    try:
+      optimizer, flax_state, dropout_rngs, transformer_kwargs = checkpoints.restore_checkpoint(
+          model_dir, target_state, prefix=prefix)
+    except ValueError:
+      optimizer, flax_state, dropout_rngs, transformer_kwargs = target_state
     flax_state = jax_utils.replicate(flax_state)
     return type(self)(
         flax_state=flax_state,
