@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for report_utils.py."""
+"""Unit tests for ExperimentReport generation and metric aggregation."""
 import json
 import os
 import pathlib
@@ -647,7 +647,12 @@ class ReportUtilsTest(parameterized.TestCase):
                                            exp_first_nan_step, exp_agg_metrics,
                                            exp_agg_metrics_unsmoothed):
 
-    agg_metrics_unsmoothed, agg_metrics, stop_step, first_nan_step = report_utils.compute_agg_metrics_from_events(
+    (
+        agg_metrics_unsmoothed,
+        agg_metrics,
+        stop_step,
+        first_nan_step,
+    ) = report_utils.compute_agg_metrics_from_events(
         all_events=all_events,
         early_stop_component='eval',
         early_stop_attr='loss',
@@ -695,6 +700,8 @@ class ReportUtilsTest(parameterized.TestCase):
       self.assertEqual(report, report_from_file)
 
     shutil.rmtree(temp_dir)
+
+
 
 
 if __name__ == '__main__':

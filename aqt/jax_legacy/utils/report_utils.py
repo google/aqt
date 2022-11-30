@@ -399,7 +399,12 @@ def compute_agg_metrics_from_events(
   else:
     all_metrics_smoothed = None
 
-  return all_agg_metrics_unsmoothed, all_metrics_smoothed, early_stop_step, first_nan_step
+  return (
+      all_agg_metrics_unsmoothed,
+      all_metrics_smoothed,
+      early_stop_step,
+      first_nan_step,
+  )
 
 
 def create_end_of_training_report(
@@ -492,7 +497,12 @@ def create_end_of_training_report(
     all_events[early_stop_component] = tfevent_utils.get_parsed_tfevents(
         model_dir, tags_to_include)  # pyrefly: ignore[bad-argument-type]
 
-  all_agg_metrics_unsmoothed, all_agg_metrics_smoothed, early_stop_step, first_nan_step = compute_agg_metrics_from_events(
+  (
+      all_agg_metrics_unsmoothed,
+      all_agg_metrics_smoothed,
+      early_stop_step,
+      first_nan_step,
+  ) = compute_agg_metrics_from_events(
       all_events=all_events,
       early_stop_component=early_stop_component,
       early_stop_attr=early_stop_attr,
