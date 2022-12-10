@@ -21,7 +21,6 @@ from tensorflow.compiler.tf2xla.python import xla  # pylint: disable=g-direct-te
 
 FPMetadata = emulation_utils.FPMetadata
 EXPONENT_BIAS = emulation_utils.EXPONENT_BIAS
-get_possible_mantissa_values = emulation_utils.get_possible_mantissa_values
 get_max_number = emulation_utils.get_max_number
 
 

@@ -14,7 +14,6 @@
 
 """Metadata class and utils shared by the TF and JAX implementations."""
 import enum
-import itertools
 
 
 # the bias of exponent in bfloat16/float32.
@@ -134,34 +133,13 @@ def is_e8_format(target_format):
   return get_metadata(target_format).exponent_bits == 8
 
 
-def get_possible_mantissa_values(mantissa_bits):
-  """Return a list that includes the possible values given the mantissa_bits.
-
-  Following the leading-bit-convention using 1.m * (2 ** e), this function
-  returns all possible values of 1.m given the mantissa bits. For example,
-  mantissa_bits=2, the returned list is [1.0, 1.25, 1.5, 1.75].
-
-  Args:
-    mantissa_bits: the number of mantissa bits.
-
-  Returns:
-    a list that includes the possible values that are in [1.0, 2.0).
-  """
-  comb = [
-      ''.join(x) for x in itertools.product(['0', '1'], repeat=mantissa_bits)
-  ]
-  values = []
-  for v in comb:
-    value = 1.0
-    for i, b in enumerate(v):
-      value += int(b) * 2**(-i - 1)
-    values.append(value)
-  return values
-
-
 def get_max_number_from_mantissa_and_max_exp(mantissa_bits, max_exp):
   """Returns the maximum possible number (not inf) allowed by the format."""
-  return (2**max_exp) * get_possible_mantissa_values(mantissa_bits)[-1]
+  # NOTE(dotzel): max_mantissa_value is always 1.1111111...1 where number of
+  # fractional 1s is mantissa_bits. In the limit mantissa_bits => inf, this exp
+  # => 2. It only deviates from 2 by its LSB, 2 ** (-mantissa_bits).
+  max_mantissa_value = 2 - 2 ** (-mantissa_bits)
+  return (2**max_exp) * max_mantissa_value
 
 
 def get_max_number(target_format):
