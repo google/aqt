@@ -55,6 +55,12 @@ class EmulatedFromatsEnum(enum.Enum):
   # E8M6B127 with round-to-nearest-even
   E8M6B127_RTNE = 'e8m6b7_rtne'
 
+  # INT8 with rounding formats
+  # INT8 with round-to-nearest-even
+  INT8_RTNE = 'int8_rtne'
+  # INT8 with stochastic rounding
+  INT8_STOC = 'int8_stoc'
+
   # Not emulated formats. placed here for comparison.
   BFLOAT16 = 'bfloat16'
   INT8 = 'int8'
