@@ -80,9 +80,12 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_bool(
     'log_sparsity_scalars',
-    default=False,
-    help='Log `apply_sparsity`, `update_weight_sparsity` and '
-    '`update_act_sparsity`  scalars to Tensorboard')
+    default=True,
+    help=(
+        'Log `apply_sparsity`, `update_weight_sparsity` and '
+        '`update_act_sparsity`  scalars to Tensorboard'
+    ),
+)
 
 config_flags.DEFINE_config_file('hparams_config_dict', None,
                                 'Path to file defining a config dict.')
@@ -1007,11 +1010,18 @@ def save_best_checkpoint(*, model_dir: str, training_state: TrainingState,
 
   for dir_name, _, file_names in tf.io.gfile.walk(model_dir):
     for filename in file_names:
+      if filename == 'best_checkpoint_eval_loss_tmp':
+        file_path = tf.io.gfile.join(dir_name, filename)
+        tf.io.gfile.remove(file_path)
+        return
       # This regex will match a filename like 'best_checkpoint_eval_loss_1.5'
       # and will extract '1.5' into 'current_best_loss'.
       checkpoint_match = re.match(rf'.*{prefix}(.*)$', str(filename))
       if checkpoint_match is not None:
-        current_best_loss = float(checkpoint_match.group(1))
+        current_best_loss_str = checkpoint_match.group(1)
+        if current_best_loss_str == 'tmp':
+          return
+        current_best_loss = float(current_best_loss_str)
         if loss >= current_best_loss:
           return
         else:

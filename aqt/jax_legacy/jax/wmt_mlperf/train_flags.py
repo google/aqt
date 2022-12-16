@@ -135,10 +135,13 @@ flags.DEFINE_bool(
 
 flags.DEFINE_string(
     'output_hlo_filename',
-    default='hlo',
-    help='Output model HLO to filename in FLAGS.model_dir. Both HLO text '
-    '(filename.txt) and protobuf (filename.pb) are emitted. If None, or empty '
-    'string, no HLO files will be written.')
+    default=None,
+    help=(
+        'Output model HLO to filename in FLAGS.model_dir. Both HLO text'
+        ' (filename.txt) and protobuf (filename.pb) are emitted. If None, or'
+        ' empty string, no HLO files will be written.'
+    ),
+)
 
 flags.DEFINE_string(
     'output_beam_hlo_filename',
@@ -159,7 +162,9 @@ flags.DEFINE_integer(
     default=0,
     help=(
         'How often (number of steps )to update sparsity mask, defaults to 0 in '
-        'which case we do noy update again.'))
+        'which case we do not update again.'
+    ),
+)
 
 flags.DEFINE_bool(
     'visualize_acts_bound',
