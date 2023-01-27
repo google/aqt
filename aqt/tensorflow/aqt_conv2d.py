@@ -55,7 +55,7 @@ def _assert_dilation_argument(lhs_quantizer, rhs_quantizer, dilations):
                    | rhs_config.quant_config.preserve_zero)
 
   assert_op = tf.debugging.Assert(is_valid, [
-      'rhs_config.quant_config.preserve_zero must be True if the filter is dilated.'
+      'rhs_config.quant_config.preserve_zero must be True if the filter is dilated.'   # pylint: disable=line-too-long
   ])
 
   return assert_op
@@ -201,3 +201,70 @@ def conv2d(
       with tf.name_scope('inv_scale'):
         # [N, H, W, O] * ([N, 1, 1, 1] * [1, 1, 1, O])
         return conv * (input_inv_scale * filter_inv_scale)
+
+
+def depthwise_conv2d(
+    input_quantizer: aqt_tensor.TensorQuantizer,  #
+    input: tf.Tensor,  # pylint: disable=redefined-builtin
+    filter_quantizer: aqt_tensor.TensorQuantizer,
+    filter: tf.Tensor,  # pylint: disable=redefined-builtin
+    train: bool = True,
+    **tf_dw_conv2d_kwargs):
+  r"""Quantized :py:func:`tf.nn.depthwise_conv2d`.
+
+  Quantization is symmetric and uniform, with range determined by the
+  `config`. Otherwise, all arguments are passed on to
+  :py:func:`tf.nn.depthwise_conv2d`.
+
+  Args:
+    input_quantizer: TensorQuantizer for input
+    input: A `tf.Tensor`. Must be `float32`. The convolution input.
+    filter_quantizer: TensorQuantizer for filter
+    filter: A `tf.Tensor`. Must have the same type as `input`. The convolution
+      kernel.
+    train: if False, allows static switching for inference quantization
+      configuration, a performance optimization.
+    **tf_dw_conv2d_kwargs: Keyword arguments to pass onto `depthwise_conv2d`.
+
+  Returns:
+    A tensor of the same type as `input` conformal to what
+    `depthwise_conv2d` would return.
+  """
+  data_format = tf_dw_conv2d_kwargs.get('data_format', 'NHWC')
+  _validate_inputs(input_quantizer, filter_quantizer, data_format)
+  assert_op = _assert_dilation_argument(
+      input_quantizer, filter_quantizer,
+      tf_dw_conv2d_kwargs.get('dilations', None))
+
+  with tf.control_dependencies([assert_op]):
+    with tf.name_scope('AqtDepthwiseConv2d'):
+      with tf.name_scope('get_quant_scale'):
+        with tf.name_scope('input'):
+          input_scale, input_inv_scale = input_quantizer._get_quant_scale(
+              train)  # [N, 1, 1, 1]
+        with tf.name_scope('filter'):
+          filter_scale, filter_inv_scale = filter_quantizer._get_quant_scale(
+              train)  # [1, 1, 1, O]
+
+      input = input_scale * input  # [N, 1, 1, 1] * [N, H, W, C]
+      filter = filter_scale * filter  # [1, 1, 1, O] * [H, W, I, O]
+
+      with tf.name_scope('to_quant'):
+        with tf.name_scope('input'):
+          input = input_quantizer._to_quant(input, train)  # [N, H, W, C]
+        with tf.name_scope('filter'):
+          filter = filter_quantizer._to_quant(filter, train)  # [H, W, I, O]
+
+      if input_quantizer.config.use_quantized_variable and not train:
+        input = tf.cast(input_quantizer.quantized_variable.read_value(),
+                        tf.float32)
+      if filter_quantizer.config.use_quantized_variable and not train:
+        filter = tf.cast(filter_quantizer.quantized_variable.read_value(),
+                         tf.float32)
+
+      with tf.name_scope('depthwise_conv2d'):
+        dw_conv = tf.nn.depthwise_conv2d(input, filter, **tf_dw_conv2d_kwargs)
+
+      with tf.name_scope('inv_scale'):
+        # [N, H, W, O] * ([N, 1, 1, 1] * [1, 1, 1, O])
+        return dw_conv * (input_inv_scale * filter_inv_scale)

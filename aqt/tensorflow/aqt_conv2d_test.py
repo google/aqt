@@ -131,5 +131,62 @@ class Conv2dTest(aqt_conv_test_base.ConvTest):
       self.assertAllEqual(actual_infer, expected)
 
 
+class DepthwiseConv2dTest(Conv2dTest):
+
+  def conv_op_quantized(
+      self,
+      input,  # pylint: disable=redefined-builtin
+      filter,  # pylint: disable=redefined-builtin
+      input_config,
+      filter_config,
+      event_count,
+      event_count_for_filter=None,
+      input_weights=None,
+      train=True,
+      var_scope_name=None,
+      **kwargs):
+    event_count_for_filter = tf.constant(
+        event_count_for_filter if event_count_for_filter else event_count,
+        dtype=tf.int64)
+    event_count = tf.constant(event_count, dtype=tf.int64)
+
+    input = self.constant(input)
+    filter = self.constant(filter)
+
+    with tf.variable_scope(var_scope_name, default_name="default"):
+      input_tq = aqt_tensor.TensorQuantizer(
+          input.shape, input_config, name="input")
+      filter_tq = aqt_tensor.TensorQuantizer(
+          filter.shape, filter_config, name="filter")
+
+    updates = [input_tq.update(input, input_weights, event_count),
+               filter_tq.update(filter, None, event_count_for_filter)]
+
+    # depthwise_conv2d expects a different stride format than conv2d
+    if "strides" in kwargs:
+      stride = kwargs["strides"]
+      kwargs["strides"] = [1, stride, stride, 1]
+
+    with tf.control_dependencies(updates):
+      result = aqt_ops.aqt_depthwise_conv2d(input_tq, input, filter_tq,
+                                            filter, **kwargs)
+
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+      return result.eval()
+
+  def conv_op_unquantized(self, input, filter, **kwargs):  # pylint: disable=redefined-builtin
+    input = self.constant(input)
+    filter = self.constant(filter)
+
+    # tf.nn.depthwise_conv2d expects a different stride format than *_conv2d
+    if "strides" in kwargs:
+      stride = kwargs["strides"]
+      kwargs["strides"] = [1, stride, stride, 1]
+
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+      return tf.nn.depthwise_conv2d(input, filter, **kwargs).eval()
+
 if __name__ == "__main__":
   absltest.main()

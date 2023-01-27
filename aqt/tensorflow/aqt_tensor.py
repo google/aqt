@@ -365,13 +365,14 @@ class TensorQuantizer:
     return self._config_case(case_fn, self._last_update.read_value())
 
   def update(self,  #
-             sample: tf.Tensor,
+             sample: Optional[tf.Tensor],
              weight: Optional[tf.Tensor],
              event_count: tf.Tensor) -> tf.Operation:
     """Op to update statistics, scale, and quantized variable.
 
     Args:
-      sample: an observation of the tensor to quantize.
+      sample: an observation of the tensor to quantize. If None, only update
+        the state variables without updating the stats
       weight: the weight of each observation for updating statistics.
       event_count: the event count this observation corresponds to; this
         determines the scale that's active for any quantized methods referencing
@@ -381,7 +382,11 @@ class TensorQuantizer:
       A tensorflow operation corresponding to the updates to internal variables
       for capturing this observation of `sample`.
     """
-    with tf.control_dependencies([self._stats.update(sample, weight)]):
+    dependencies = []
+    if sample is not None:
+      # update the stats if a sample is passed, else only update state
+      dependencies.append(self._stats.update(sample, weight))
+    with tf.control_dependencies(dependencies):
 
       def case_fn(config):
         return self._update_state_config(config, sample, event_count)
@@ -532,13 +537,22 @@ class TensorQuantizer:
       params = self._quantization_params(train)
 
       def maybe_floor_or_small_float(y):
-        if self.config.quantization_mode() == aqt_config.SmallFloatConfig:
-          return tf.where_v2(
-              params.should_use_small_float,
-              _emulated_fp(y, params.mantissa_bits, params.min_exp,
-                           params.max_exp), y)
+        # Static check for whether int and small float can coexist in schedule
+        if self.config.allow_int_small_float:
+          return tf.where_v2(params.should_use_small_float,
+                             _emulated_fp(y, params.mantissa_bits,
+                                          params.min_exp,
+                                          params.max_exp),
+                             tf.where_v2(params.should_quantize,
+                                         tf.math.floor(y), y))
         else:
-          return tf.where_v2(params.should_quantize, tf.math.floor(y), y)
+          if self.config.quantization_mode() == aqt_config.SmallFloatConfig:
+            return tf.where_v2(
+                params.should_use_small_float,
+                _emulated_fp(y, params.mantissa_bits, params.min_exp,
+                             params.max_exp), y)
+          else:
+            return tf.where_v2(params.should_quantize, tf.math.floor(y), y)
 
       # Note that backprop does not depend directly on the value of _last_update
       # or any_config_active; only scales and constants need to be maintained

@@ -83,6 +83,7 @@ from aqt.tensorflow import aqt_matmul
 # TODO(vladf): aqt_ops.aqt_matmul is redundant, we should consider
 # renaming to just the short operation name, e.g., aqt_ops.matmul.
 
+aqt_depthwise_conv2d = aqt_conv2d.depthwise_conv2d
 aqt_conv2d = aqt_conv2d.conv2d
 aqt_einsum = aqt_einsum.einsum
 aqt_matmul = aqt_matmul.matmul
