@@ -264,15 +264,11 @@ class AqtScheduleConfig(_BaseConfig):
       allows for static switching logic at inference time, which improves
       throughput. If None, then the most recently trained-on config is the one
       that's used.
-    allow_int_small_float: Whether Integer and SmallFloat configs can exist in
-      the same schedule. This field allows later checks to be done at the Python
-      level instead of introducing additional tf.where operations.
   """
   stats_config: StatsConfig
   tensor_configs: List[AqtTensorConfig]
   use_quantized_variable: bool = False
   inference_config_index: Optional[int] = None
-  allow_int_small_float: Optional[bool] = False
 
   def quantization_mode(self) -> Type[QuantConfig]:
     """Returns which quantization to use.
@@ -307,8 +303,7 @@ class AqtScheduleConfig(_BaseConfig):
   def validate(self, data_shape: List[Optional[int]]):
     """Validates this AqtScheduleConfig for the provided data shape."""
     # The output value of quantization_mode is unused.
-    if not self.allow_int_small_float:
-      self.quantization_mode()
+    _ = self.quantization_mode()
     _validate_intervals(self.tensor_configs)
     if any(ax is None for ax in data_shape) and self.use_quantized_variable:
       raise ConfigError(

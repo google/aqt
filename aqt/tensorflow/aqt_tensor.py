@@ -537,22 +537,13 @@ class TensorQuantizer:
       params = self._quantization_params(train)
 
       def maybe_floor_or_small_float(y):
-        # Static check for whether int and small float can coexist in schedule
-        if self.config.allow_int_small_float:
-          return tf.where_v2(params.should_use_small_float,
-                             _emulated_fp(y, params.mantissa_bits,
-                                          params.min_exp,
-                                          params.max_exp),
-                             tf.where_v2(params.should_quantize,
-                                         tf.math.floor(y), y))
+        if self.config.quantization_mode() == aqt_config.SmallFloatConfig:
+          return tf.where_v2(
+              params.should_use_small_float,
+              _emulated_fp(y, params.mantissa_bits, params.min_exp,
+                           params.max_exp), y)
         else:
-          if self.config.quantization_mode() == aqt_config.SmallFloatConfig:
-            return tf.where_v2(
-                params.should_use_small_float,
-                _emulated_fp(y, params.mantissa_bits, params.min_exp,
-                             params.max_exp), y)
-          else:
-            return tf.where_v2(params.should_quantize, tf.math.floor(y), y)
+          return tf.where_v2(params.should_quantize, tf.math.floor(y), y)
 
       # Note that backprop does not depend directly on the value of _last_update
       # or any_config_active; only scales and constants need to be maintained
