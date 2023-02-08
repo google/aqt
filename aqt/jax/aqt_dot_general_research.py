@@ -25,6 +25,7 @@ class TensorConfig:
   bits: int
   share_calibration_axes: Optional[list[int]]
   preserve_zero: bool
+  bound: Optional[float]
 
 
 @dataclasses.dataclass
@@ -33,12 +34,17 @@ class DotGeneralConfig:
   rhs: Optional[TensorConfig]
 
 
-def make_config(lhs_bits=None, rhs_bits=None):
+def make_config(lhs_bits=None, rhs_bits=None, bound=None):
+  """Create quantization configs for input matrices to a matmul."""
+
   def tensor(bits):
     if bits is None:
       return None
     return TensorConfig(
-        bits=bits, share_calibration_axes=None, preserve_zero=True
+        bits=bits,
+        share_calibration_axes=None,
+        preserve_zero=False if bits == 1 else True,
+        bound=bound
     )
 
   return DotGeneralConfig(lhs=tensor(lhs_bits), rhs=tensor(rhs_bits))
@@ -61,7 +67,13 @@ def _fresh_scale(
   if config is None:
     return jnp.ones_like(x), jnp.ones_like(x)
   c_axes = config.share_calibration_axes or contracting
-  x_bound = jnp.max(jnp.abs(x), axis=c_axes, keepdims=True)
+  # x_bound is the input range that gets mapped to the integer clip_bound
+  # For dynamic quant x_bound = max(x); for static quant x_bound = config.bound
+  if config.bound is None:
+    x_bound = jnp.max(jnp.abs(x), axis=c_axes, keepdims=True)
+  else:
+    assert config.bound > 0, 'Static quantization bound should be positive.'
+    x_bound = jnp.asarray(config.bound)
   x_bound = jnp.where(x == 0.0, 1.0, x)
 
   clip_bound = _get_clip_bound(config)
@@ -70,7 +82,7 @@ def _fresh_scale(
   return new_scale, inv_scale
 
 
-def _to_quant(x, config):
+def _to_quant(x, config: TensorConfig):
   if config is None:
     return x
   eps = 0.125
