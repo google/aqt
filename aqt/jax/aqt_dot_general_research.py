@@ -116,9 +116,10 @@ def _to_quant(x, config: TensorConfig):
   return x
 
 
-def make_dot_general(config):
+def make_dot_general(config: Optional[DotGeneralConfig]):
   """Makes quantized dot_general."""
-
+  if config is None:
+    config = DotGeneralConfig(None, None)
   def my_dot_general(lhs, rhs, dimension_numbers, precision):
     (lhs_contracting, rhs_contracting), _ = dimension_numbers
 
