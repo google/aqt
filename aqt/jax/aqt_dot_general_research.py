@@ -16,6 +16,7 @@
 import dataclasses
 from typing import Optional, Tuple
 
+import jax
 from jax import lax
 import jax.numpy as jnp
 
@@ -26,6 +27,7 @@ class TensorConfig:
   share_calibration_axes: Optional[list[int]]
   preserve_zero: bool
   bound: Optional[float]
+  bound_stop_grad: bool
 
 
 @dataclasses.dataclass
@@ -34,7 +36,9 @@ class DotGeneralConfig:
   rhs: Optional[TensorConfig]
 
 
-def make_config(lhs_bits=None, rhs_bits=None, bound=None):
+def make_config(
+    lhs_bits=None, rhs_bits=None, bound=None, bound_stop_grad=True
+):
   """Create quantization configs for input matrices to a matmul."""
 
   def tensor(bits):
@@ -44,7 +48,8 @@ def make_config(lhs_bits=None, rhs_bits=None, bound=None):
         bits=bits,
         share_calibration_axes=None,
         preserve_zero=False if bits == 1 else True,
-        bound=bound
+        bound=bound,
+        bound_stop_grad=bound_stop_grad
     )
 
   return DotGeneralConfig(lhs=tensor(lhs_bits), rhs=tensor(rhs_bits))
@@ -75,11 +80,27 @@ def _fresh_scale(
     assert config.bound > 0, 'Static quantization bound should be positive.'
     x_bound = jnp.asarray(config.bound)
   x_bound = jnp.where(x == 0.0, 1.0, x)
+  if config.bound_stop_grad:
+    x_bound = lax.stop_gradient(x_bound)
 
   clip_bound = _get_clip_bound(config)
   new_scale = clip_bound / x_bound
   inv_scale = x_bound / clip_bound
   return new_scale, inv_scale
+
+
+# Reference for the following customized gradient: http://shortn/_Da1Jgzc4lo
+@jax.custom_jvp
+def floor_with_gradient(x):
+  """Floor with Straight-Through-Estimator gradient."""
+  return jnp.floor(x)
+
+
+# add_straight_through_estimator(floor_with_gradient)
+def ste(primals, tangents):
+  return floor_with_gradient(primals[0]), tangents[0]
+
+floor_with_gradient.defjvp(ste)
 
 
 def _to_quant(x, config: TensorConfig):
@@ -89,9 +110,9 @@ def _to_quant(x, config: TensorConfig):
   clip_bound = _get_clip_bound(config) - eps
   x = jnp.clip(x, -clip_bound, clip_bound)
   if config.preserve_zero:
-    x = jnp.floor(x + 0.5)
+    x = floor_with_gradient(x + 0.5)
   else:
-    x = jnp.floor(x) + 0.5
+    x = floor_with_gradient(x) + 0.5
   return x
 
 
