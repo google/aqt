@@ -39,7 +39,9 @@ def load_hlo_proto_from_jax_fn(fn: Callable[..., Any], *fn_args: Any,
     An HloModuleProto object.
 
   """
-  computation = jax.xla_computation(fn)(*fn_args, **fn_kwargs)
+  computation = (
+      jax.jit(fn).lower(*fn_args, **fn_kwargs).compiler_ir(dialect='hlo')
+  )
   serialized_hlo = computation.as_serialized_hlo_module_proto()
   hlo_module_proto = hlo_pb2.HloModuleProto.FromString(serialized_hlo)
   return hlo_module_proto
@@ -77,7 +79,7 @@ def output_hlo(computation: Any, file_path: str):
   saves the hlo as text, and for .pb file save the hlo module proto binary.
 
   Args:
-    computation: wrapped jax.xla_computation
+    computation: wrapped XlaComputation
     file_path: file path to write the HLO to.
   """
   hlo_module_proto_str = computation.as_serialized_hlo_module_proto()

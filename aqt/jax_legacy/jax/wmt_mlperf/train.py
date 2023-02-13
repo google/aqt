@@ -542,7 +542,9 @@ def _write_hlo(output, fn, *fn_args, **fn_kwargs):
     None.
   """
   try:
-    computation = jax.xla_computation(fn)(*fn_args, **fn_kwargs)
+    computation = (
+        jax.jit(fn).lower(*fn_args, **fn_kwargs).compiler_ir(dialect='hlo')
+    )
     logging.info('Generated XLA computation for HLO.')
     pb_path = tf.io.gfile.join(FLAGS.model_dir, f'{output}.pb')
     if not tf.io.gfile.exists(pb_path):

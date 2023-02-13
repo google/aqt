@@ -102,8 +102,11 @@ def encoder_from_file(config: config_dict.ConfigDict,
     return model.apply(state, inputs, mutable=False)
 
   if not use_xla_optimizations:
-    computation = jax.xla_computation(_fn)(init_state,
-                                           jnp.ones(input_shape, jnp.float32))
+    computation = (
+        jax.jit(_fn)
+        .lower(init_state, jnp.ones(input_shape, jnp.float32))
+        .compiler_ir(dialect='hlo')
+    )
     hlo_utils.output_hlo(computation, FLAGS.hlo_output)
 
   else:
@@ -180,7 +183,11 @@ def encoder_n_32(layers: int):
   def _fn(state, inputs):
     return model.apply(state, inputs)
 
-  computation = jax.xla_computation(_fn)(init_state, jnp.ones(input_shape))
+  computation = (
+      jax.jit(_fn)
+      .lower(init_state, jnp.ones(input_shape))
+      .compiler_ir(dialect='hlo')
+  )
   hlo_utils.output_hlo(computation, FLAGS.hlo_output)
 
 
@@ -268,7 +275,9 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
           dynamic_context=quant_config.DynamicContext(
               update_bounds=False, quantize_acts=True))
 
-    computation = jax.xla_computation(_with_weights)(input_dummy)
+    computation = (
+        jax.jit(_with_weights).lower(input_dummy).compiler_ir(dialect='hlo')
+    )
   else:
 
     def _without_weights(inputs, params):
@@ -284,7 +293,11 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
           dynamic_context=quant_config.DynamicContext(
               update_bounds=False, quantize_acts=True))
 
-    computation = jax.xla_computation(_without_weights)(input_dummy, params)
+    computation = (
+        jax.jit(_without_weights)
+        .lower(input_dummy, params)
+        .compiler_ir(dialect='hlo')
+    )
 
   hlo_utils.output_hlo(computation, FLAGS.hlo_output)
 
