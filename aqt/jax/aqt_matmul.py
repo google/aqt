@@ -16,10 +16,9 @@
 
 import builtins
 
+import jax
 from jax import core
 from jax import lax
-from jax._src.numpy.util import _check_arraylike
-from jax._src.numpy.util import _promote_dtypes
 import jax.numpy as jnp
 import numpy as np
 
@@ -47,14 +46,18 @@ def matmul(a: jnp.ndarray,  #
   Returns:
     An array containing the result with the same dtype as 'a' and 'b'.
   """
-  _check_arraylike("matmul", a, b)
+  arraylike = (jax.Array, np.ndarray)
+  if not isinstance(a, arraylike) or not isinstance(b, arraylike):
+    raise TypeError(f"matmul requires array-like arguments, got {a} and {b}")
   for i, x in enumerate((a, b)):
     if ndim(x) < 1:
       msg = (f"matmul input operand {i} must have ndim at least 1, "
              f"but it has ndim {ndim(x)}")
       raise ValueError(msg)
 
-  a, b = _promote_dtypes(a, b)
+  dtype = jnp.result_type(a.dtype, b.dtype)
+  a = a.astype(dtype)
+  b = b.astype(dtype)
 
   a_is_mat, b_is_mat = (ndim(a) > 1), (ndim(b) > 1)
   a_batch_dims = shape(a)[:-2] if a_is_mat else ()
