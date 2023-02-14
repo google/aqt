@@ -69,6 +69,8 @@ import tensorflow_text as tftxt
 
 
 
+flax.config.update('flax_use_orbax_checkpointing', False)
+
 T = TypeVar('T')
 
 EOS_TOKEN = 2  # Default Sentencepiece EOS token.
@@ -484,12 +486,15 @@ def estimate_compute_and_memory_cost(
                    Any], hparams: training_hparams.TrainingHParams) -> None:
   """Estimate compute and memory cost of model."""
 
-  without_weights_fn, input_dummy, target_dummy, state, params = get_jax_computation_of_model(
-      params=params,
-      transformer_kwargs=transformer_kwargs,
-      state=state,
-      hparams=hparams,
-      with_weights=False)
+  without_weights_fn, input_dummy, target_dummy, state, params = (
+      get_jax_computation_of_model(
+          params=params,
+          transformer_kwargs=transformer_kwargs,
+          state=state,
+          hparams=hparams,
+          with_weights=False,
+      )
+  )
   cost_dict = compute_cost_utils.estimate_costs_of_dot_and_conv_ops_from_jax_fn(
       without_weights_fn, params, input_dummy, target_dummy, state)
 
@@ -507,20 +512,26 @@ def _write_train_hlo(transformer_kwargs: Mapping[str, Any],
     return
 
   basename, _ = os.path.splitext(FLAGS.output_hlo_filename)
-  without_weights_fn, input_dummy, target_dummy, state, model = get_jax_computation_of_model(
-      params=params,
-      transformer_kwargs=transformer_kwargs,
-      state=state,
-      hparams=hparams,
-      with_weights=False)
+  without_weights_fn, input_dummy, target_dummy, state, model = (
+      get_jax_computation_of_model(
+          params=params,
+          transformer_kwargs=transformer_kwargs,
+          state=state,
+          hparams=hparams,
+          with_weights=False,
+      )
+  )
   _write_hlo(basename, without_weights_fn, model, input_dummy, target_dummy,
              state)
-  with_weights_fn, input_dummy, target_dummy, state, model = get_jax_computation_of_model(
-      params=params,
-      transformer_kwargs=transformer_kwargs,
-      state=state,
-      hparams=hparams,
-      with_weights=True)
+  with_weights_fn, input_dummy, target_dummy, state, model = (
+      get_jax_computation_of_model(
+          params=params,
+          transformer_kwargs=transformer_kwargs,
+          state=state,
+          hparams=hparams,
+          with_weights=True,
+      )
+  )
   _write_hlo(basename + '_with_weights', with_weights_fn, input_dummy,
              target_dummy, state)
 
@@ -835,8 +846,9 @@ class TrainingState:
     target_state = (self.optimizer, unreplicated_flax_state, self.dropout_rngs,
                     self.transformer_kwargs)
     try:
-      optimizer, flax_state, dropout_rngs, transformer_kwargs = checkpoints.restore_checkpoint(
-          model_dir, target_state, prefix=prefix)
+      optimizer, flax_state, dropout_rngs, transformer_kwargs = (
+          checkpoints.restore_checkpoint(model_dir, target_state, prefix=prefix)
+      )
     except ValueError:
       optimizer, flax_state, dropout_rngs, transformer_kwargs = target_state
     flax_state = jax_utils.replicate(flax_state)
@@ -933,18 +945,21 @@ class Datasets:
     vocab_path = FLAGS.vocab_path
     if vocab_path is None:
       vocab_path = os.path.join(FLAGS.model_dir, 'sentencepiece_model')
-    train_ds, eval_ds_dict, train_eval_ds, predict_ds_dict, encoder = input_pipeline.get_wmt_datasets(
-        n_devices=n_devices,
-        dataset_name=FLAGS.dataset_name,
-        eval_dataset_list=eval_dataset_list,
-        shard_idx=jax.host_id(),
-        shard_count=jax.host_count(),
-        data_dir=FLAGS.data_dir,
-        vocab_path=vocab_path,
-        batch_size=batch_size,
-        max_length=FLAGS.max_target_length,
-        max_eval_length=FLAGS.max_eval_target_length,
-        seed=random_seed)
+    train_ds, eval_ds_dict, train_eval_ds, predict_ds_dict, encoder = (
+        input_pipeline.get_wmt_datasets(
+            n_devices=n_devices,
+            dataset_name=FLAGS.dataset_name,
+            eval_dataset_list=eval_dataset_list,
+            shard_idx=jax.host_id(),
+            shard_count=jax.host_count(),
+            data_dir=FLAGS.data_dir,
+            vocab_path=vocab_path,
+            batch_size=batch_size,
+            max_length=FLAGS.max_target_length,
+            max_eval_length=FLAGS.max_eval_target_length,
+            seed=random_seed,
+        )
+    )
     return cls(
         train_ds=train_ds,
         eval_ds_dict=eval_ds_dict,
@@ -1139,13 +1154,16 @@ def run_training(
   # bfloat16 model directory trained to convergence and this training run will
   # perform quantization-aware finetuning of that model.
   checkpoint_model_dir = None
-  if FLAGS.restore_checkpoint_model_dir is not None and not does_checkpoint_exist(
-      FLAGS.model_dir):
+  if (
+      FLAGS.restore_checkpoint_model_dir is not None
+      and not does_checkpoint_exist(FLAGS.model_dir)
+  ):
     checkpoint_model_dir = FLAGS.restore_checkpoint_model_dir
   elif FLAGS.restore_checkpoints:
     if not FLAGS.save_checkpoints:
       raise ValueError(
-          'If restore_checkpoints is enabled, then save_checkpoints must be enabled as well.'
+          'If restore_checkpoints is enabled, then save_checkpoints must be'
+          ' enabled as well.'
       )
     checkpoint_model_dir = FLAGS.model_dir
   if checkpoint_model_dir is not None:
