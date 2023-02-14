@@ -272,7 +272,7 @@ class AqtScheduleConfig(_BaseConfig):
   tensor_configs: List[AqtTensorConfig]
   use_quantized_variable: bool = False
   inference_config_index: Optional[int] = None
-  allow_int_small_float: Optional[bool] = False
+  allow_int_small_float: Optional[bool] = None
 
   def quantization_mode(self) -> Type[QuantConfig]:
     """Returns which quantization to use.
