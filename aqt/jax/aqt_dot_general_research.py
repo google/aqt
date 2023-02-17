@@ -23,6 +23,7 @@ import jax.numpy as jnp
 
 @dataclasses.dataclass
 class TensorConfig:
+  """Configuration of quantization of one tensor or one side of tensor op."""
   bits: int
   share_calibration_axes: Optional[list[int]]
   preserve_zero: bool
@@ -31,18 +32,25 @@ class TensorConfig:
   # false = map max val on the end of the last bucket
   # true = map max val on the middle of the last
   preserve_max_val: bool
+  clip: bool
+  round: bool
+  # Round up the calibration to power of 2 (po2).
+  po2_scale: bool
 
 
-def make_tensor_config(bits, share_calibration_axes) -> TensorConfig | None:
+def make_tensor_config(bits) -> TensorConfig | None:
   if bits is None:
     return None
   return TensorConfig(
       bits=bits,
-      share_calibration_axes=share_calibration_axes,
+      share_calibration_axes=None,
       preserve_zero=False if bits == 1 else True,
       bound=None,
       bound_stop_grad=True,
       preserve_max_val=False,
+      clip=True,
+      round=True,
+      po2_scale=False,
   )
 
 
@@ -52,12 +60,13 @@ class DotGeneralConfig:
   rhs: Optional[TensorConfig]
 
 
-def make_config(lhs_bits=None, rhs_bits=None) -> DotGeneralConfig:
+def make_dot_general_config(lhs_bits=None, rhs_bits=None) -> DotGeneralConfig:
   """Create quantization configs for input matrices to a matmul."""
   return DotGeneralConfig(
-      lhs=make_tensor_config(lhs_bits, None),
-      rhs=make_tensor_config(rhs_bits, None),
+      lhs=make_tensor_config(lhs_bits),
+      rhs=make_tensor_config(rhs_bits),
   )
+
 
 # The arithmetic of scaling, clipping and rounding can be confusing.
 # Here I add some documentation to hopefully clarify it.
@@ -147,7 +156,7 @@ def _fresh_scale(
   c_axes = config.share_calibration_axes
   a_axes = contracting
   msg = 'We need contraction axes either in config or as an argument.'
-  assert c_axes or a_axes, msg
+  assert c_axes or a_axes, (msg, c_axes, a_axes)
   if c_axes is not None and a_axes is not None:
     assert c_axes == a_axes, (c_axes, a_axes)
 
@@ -165,8 +174,9 @@ def _fresh_scale(
   # This is the value that the x_bound is mapped to.
   x_bound_repr = _get_max_value_representation(config)
   new_scale = x_bound_repr / x_bound
-  inv_scale = x_bound / x_bound_repr
-  return new_scale, inv_scale
+  if config.po2_scale:
+    new_scale = 2 ** jnp.ceil(jnp.log2(new_scale))
+  return new_scale, 1.0 / new_scale
 
 
 @jax.custom_jvp
@@ -192,9 +202,12 @@ def _round(x, round_to_halves=False):
 def _clip_and_round(x, config: TensorConfig):
   if config is None:
     return x
-  clip_bound = _get_clip_bound(config)
-  x = jnp.clip(x, -clip_bound, clip_bound)
-  return _round(x, round_to_halves=not config.preserve_zero)
+  if config.clip:
+    clip_bound = _get_clip_bound(config)
+    x = jnp.clip(x, -clip_bound, clip_bound)
+  if config.round:
+    x = _round(x, round_to_halves=not config.preserve_zero)
+  return x
 
 
 def make_fake_quant(config: Optional[TensorConfig]):

@@ -166,6 +166,50 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
                 sample_size=sample_size,
             )
 
+  @parameterized.parameters([
+      (1, 1),
+      (1, 2),
+      (2, 1),
+      (2, 2),
+      (8, 8),
+      (None, 8),
+      (8, None),
+      (None, None),
+  ])
+  def test_po2_fake_quant_is_equivalent_with_aqt(
+      self,
+      lhs_bits,
+      rhs_bits,
+      lhs_maxval=10.0,
+      rhs_maxval=20.0,
+      d1=10,
+      d2=20,
+      d3=30,
+  ):
+    lhs = rand_unif((d1, d2), lhs_maxval)
+    rhs = rand_unif((d2, d3), rhs_maxval)
+
+    # We are passing dims to config so that we can reuse it in fake_quant.
+    config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
+
+    if config.lhs:
+      # Power-of-2 scales allow FQ and AQT to be exactly the same.
+      config.lhs.po2_scale = True
+      # Needed if we want to reuse config in the fake_quant.
+      config.lhs.share_calibration_axes = (1,)
+    if config.rhs:
+      config.rhs.po2_scale = True
+      config.rhs.share_calibration_axes = (0,)
+
+    mfq = aqtr.make_fake_quant
+    lax_dg = jax.lax.dot_general
+    aqt_dg = aqtr.make_dot_general(config)
+
+    dims = ((1,), (0,)), ((), ())  # classical matmul
+    prod_fq = lax_dg(mfq(config.lhs)(lhs), mfq(config.rhs)(rhs), dims)
+    prod_aqt = aqt_dg(lhs, rhs, dims)
+    assert (prod_aqt == prod_fq).all()
+
 
 if __name__ == "__main__":
   absltest.main()
