@@ -13,9 +13,9 @@
 # limitations under the License.
 """Quantized dot_general."""
 
+import copy
 import dataclasses
 from typing import Optional
-
 import jax
 from jax import lax
 import jax.numpy as jnp
@@ -25,7 +25,7 @@ import jax.numpy as jnp
 class TensorConfig:
   """Configuration of quantization of one tensor or one side of tensor op."""
   bits: int
-  share_calibration_axes: Optional[list[int]]
+  calib_shared_axes: Optional[list[int]]
   preserve_zero: bool
   bound: Optional[float]
   bound_stop_grad: bool
@@ -43,7 +43,7 @@ def make_tensor_config(bits) -> TensorConfig | None:
     return None
   return TensorConfig(
       bits=bits,
-      share_calibration_axes=None,
+      calib_shared_axes=None,
       preserve_zero=False if bits == 1 else True,
       bound=None,
       bound_stop_grad=True,
@@ -66,6 +66,20 @@ def make_dot_general_config(lhs_bits=None, rhs_bits=None) -> DotGeneralConfig:
       lhs=make_tensor_config(lhs_bits),
       rhs=make_tensor_config(rhs_bits),
   )
+
+
+def make_config_conv_general_dilated(
+    spatial_dimensions=2,
+    lhs_bits=None,
+    rhs_bits=None,
+) -> DotGeneralConfig:
+  config = make_dot_general_config(lhs_bits, rhs_bits)
+  # Hardcoding flax assumptions.
+  if config.lhs:
+    config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
+  if config.rhs:
+    config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
+  return config
 
 
 # The arithmetic of scaling, clipping and rounding can be confusing.
@@ -145,29 +159,18 @@ def _get_clip_bound(config: TensorConfig):
   return clip_bound
 
 
-def _fresh_scale(
-    x, config: TensorConfig, contracting: list[int] | None
-) -> jnp.ndarray:
+def _fresh_scale(x, config: TensorConfig) -> jnp.ndarray:
   """Calibration scale."""
   if config is None:
-    shape = list(x.shape)
-    for axis in contracting:
-      shape[axis] = 1
-    scale_one = jnp.ones(shape, dtype=x.dtype)
-    return scale_one
+    return jnp.ones((1,) * len(x.shape), dtype=x.dtype)
 
   # We have 2 sources for contraction axes:
-  c_axes = config.share_calibration_axes
-  a_axes = contracting
-  msg = 'We need contraction axes either in config or as an argument.'
-  assert c_axes or a_axes, (msg, c_axes, a_axes)
-  if c_axes is not None and a_axes is not None:
-    assert c_axes == a_axes, (c_axes, a_axes)
+  assert config.calib_shared_axes
 
   # x_bound is the input range that gets mapped to the integer clip_bound
   # For dynamic quant x_bound = max(x); for static quant x_bound = config.bound
   if config.bound is None:
-    x_bound = jnp.max(jnp.abs(x), axis=c_axes or a_axes, keepdims=True)
+    x_bound = jnp.max(jnp.abs(x), axis=config.calib_shared_axes, keepdims=True)
   else:
     assert config.bound > 0, 'Static quantization bound should be positive.'
     x_bound = jnp.asarray(config.bound)
@@ -218,7 +221,7 @@ def make_fake_quant(config: Optional[TensorConfig]):
   def fake_quant(x):
     if not config:
       return x
-    scale = _fresh_scale(x, config, None)
+    scale = _fresh_scale(x, config)
     x = x * scale
     x = _clip_and_round(x, config)
     x = x / scale
@@ -229,32 +232,52 @@ def make_fake_quant(config: Optional[TensorConfig]):
 
 def make_dot_general(config: Optional[DotGeneralConfig]):
   """Makes quantized lax.dot_general replacement."""
+  config = copy.copy(config)
   if config is None:
     config = DotGeneralConfig(None, None)
 
   def my_dot_general(lhs, rhs, dimension_numbers, precision=None):
-    (lhs_contracting, rhs_contracting), _ = dimension_numbers
+    # Axes can be partitioned into:
+    # - contraction axes (ca)
+    # - batch axes (ba)
+    # - remaining axes (ra).
+    (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+    if config.lhs:
+      config.lhs.calib_shared_axes = config.lhs.calib_shared_axes or lhs_ca
+      lhs_scale = _fresh_scale(lhs, config.lhs)
+      lhs = lhs * lhs_scale
+      lhs = _clip_and_round(lhs, config.lhs)
 
-    # TODO(lew): Optimize if there is no one side config.
-    lhs_scale = _fresh_scale(lhs, config.lhs, lhs_contracting)
-    rhs_scale = _fresh_scale(rhs, config.rhs, rhs_contracting)
-    lhs = lhs * lhs_scale
-    rhs = rhs * rhs_scale
-
-    lhs = _clip_and_round(lhs, config.lhs)
-    rhs = _clip_and_round(rhs, config.rhs)
+    if config.rhs:
+      config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
+      rhs_scale = _fresh_scale(rhs, config.rhs)
+      rhs = rhs * rhs_scale
+      rhs = _clip_and_round(rhs, config.rhs)
 
     out = lax.dot_general(
         lhs, rhs, dimension_numbers=dimension_numbers, precision=precision
     )
 
-    combined_inv_scale = lax.dot_general(
-        1.0 / lhs_scale,
-        1.0 / rhs_scale,
-        dimension_numbers=dimension_numbers,
-        precision=precision,
-    )
-    out = out * combined_inv_scale
+    def scale_trans(x, ca, ba, pre_ones=0, post_ones=0):
+      for i in ca:
+        assert x.shape[i] == 1
+      ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
+      x = jnp.transpose(x, ba + ra + ca)
+      s1 = x.shape[: len(ba)]
+      s2 = x.shape[len(ba) : -len(ca)]
+      x = x.reshape(s1 + (1,) * pre_ones + s2 + (1,) * post_ones)
+      return x
+
+    if config.lhs:
+      rhs_ra_n = len(rhs.shape) - len(rhs_ca) - len(rhs_ba)
+      lhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba, post_ones=rhs_ra_n)
+      out = out / lhs_scale_t
+
+    if config.rhs:
+      lhs_ra = len(lhs.shape) - len(lhs_ca) - len(lhs_ba)
+      rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba, pre_ones=lhs_ra)
+      out = out / rhs_scale_t
+
     return out
 
   return my_dot_general
@@ -263,6 +286,7 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
 def make_conv_general_dilated(config: Optional[DotGeneralConfig]):
   """Makes quantized lax.make_conv_general_dilated replacement."""
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific config.
+  config = copy.copy(config)
   if config is None:
     config = DotGeneralConfig(None, None)
 
@@ -296,18 +320,19 @@ However if there is any other use, we will drop that assumption."""
     #
     # we need to share these axes: lhs[1:] , rhs[:-1]
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
-    lhs_contracting = list(range(1, rank))
-    rhs_contracting = list(range(0, rank - 1))
 
-    lhs_scale = _fresh_scale(lhs, config.lhs, lhs_contracting)
-    rhs_scale = _fresh_scale(rhs, config.rhs, rhs_contracting)
-    assert lhs_scale.shape == (lhs.shape[0],) + (1,) * (rank - 1)
-    assert rhs_scale.shape == (1,) * (rank - 1) + (rhs.shape[-1],)
-    lhs = lhs * lhs_scale
-    rhs = rhs * rhs_scale
+    if config.lhs:
+      # Flax assumptions.
+      assert config.lhs.calib_shared_axes == list(range(1, rank))
+      lhs_scale = _fresh_scale(lhs, config.lhs)
+      lhs = lhs * lhs_scale
+      lhs = _clip_and_round(lhs, config.lhs)
 
-    lhs = _clip_and_round(lhs, config.lhs)
-    rhs = _clip_and_round(rhs, config.rhs)
+    if config.rhs:
+      assert config.rhs.calib_shared_axes == list(range(0, rank - 1))
+      rhs_scale = _fresh_scale(rhs, config.rhs)
+      rhs = rhs * rhs_scale
+      rhs = _clip_and_round(rhs, config.rhs)
 
     out = lax.conv_general_dilated(
         lhs=lhs,
@@ -322,8 +347,12 @@ However if there is any other use, we will drop that assumption."""
         precision=precision,
         preferred_element_type=preferred_element_type,
     )
-    out /= lhs_scale
-    out /= rhs_scale
+
+    if config.lhs:
+      out /= lhs_scale
+
+    if config.rhs:
+      out /= rhs_scale
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales
     # in 1xN (rows x colums) conv each row can have different scale, but
