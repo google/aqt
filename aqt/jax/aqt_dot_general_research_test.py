@@ -73,12 +73,10 @@ def expected_std_noise(x, *, prec, axis):
     maxval = jnp.max(jnp.abs(x), axis=axis, keepdims=True)
     new_shape = list(x.shape)
     if axis is None:
-      # print(new_shape)
       new_shape = (1,) * len(x.shape)
     else:
       new_shape[axis] = 1
     ret2 = jnp.full(new_shape, stddev_of_uniform(maxval / bucket_count))
-    # print(ret.shape, ret2.shape)
     assert (jnp.abs(ret - ret2) < 0.001).all(), (ret, ret2)
 
   test()
@@ -191,10 +189,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
       config.lhs.po2_scale = True
       # Needed if we want to reuse config in the fake_quant.
-      config.lhs.share_calibration_axes = (1,)
+      config.lhs.calib_shared_axes = (1,)
     if config.rhs:
       config.rhs.po2_scale = True
-      config.rhs.share_calibration_axes = (0,)
+      config.rhs.calib_shared_axes = (0,)
 
     # test dot_general
     batch_n = 10
@@ -228,16 +226,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       lhs_maxval=10.0,
       rhs_maxval=20.0,
   ):
-    config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
+    config = aqtr.make_config_conv_general_dilated(2, lhs_bits, rhs_bits)
 
     if config.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
       config.lhs.po2_scale = True
-      # Needed if we want to reuse config in the fake_quant.
-      config.lhs.share_calibration_axes = [1, 2, 3]
     if config.rhs:
       config.rhs.po2_scale = True
-      config.rhs.share_calibration_axes = [0, 1, 2]
 
     batch_n = 10
     contr_n = 20
