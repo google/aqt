@@ -14,7 +14,7 @@
 """Quantized dot_general."""
 
 import dataclasses
-from typing import Optional, Tuple
+from typing import Optional
 
 import jax
 from jax import lax
@@ -147,11 +147,15 @@ def _get_clip_bound(config: TensorConfig):
 
 def _fresh_scale(
     x, config: TensorConfig, contracting: list[int] | None
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+) -> jnp.ndarray:
   """Calibration scale."""
   if config is None:
-    scale_one = jnp.ones([1 for _ in x.shape], dtype=x.dtype)
-    return scale_one, scale_one
+    shape = list(x.shape)
+    for axis in contracting:
+      shape[axis] = 1
+    scale_one = jnp.ones(shape, dtype=x.dtype)
+    return scale_one
+
   # We have 2 sources for contraction axes:
   c_axes = config.share_calibration_axes
   a_axes = contracting
@@ -176,7 +180,7 @@ def _fresh_scale(
   new_scale = x_bound_repr / x_bound
   if config.po2_scale:
     new_scale = 2 ** jnp.ceil(jnp.log2(new_scale))
-  return new_scale, 1.0 / new_scale
+  return new_scale
 
 
 @jax.custom_jvp
@@ -212,42 +216,130 @@ def _clip_and_round(x, config: TensorConfig):
 
 def make_fake_quant(config: Optional[TensorConfig]):
   def fake_quant(x):
-    scale, inv_scale = _fresh_scale(x, config, None)
+    if not config:
+      return x
+    scale = _fresh_scale(x, config, None)
     x = x * scale
     x = _clip_and_round(x, config)
-    x = x * inv_scale
+    x = x / scale
     return x
 
   return fake_quant
 
 
 def make_dot_general(config: Optional[DotGeneralConfig]):
-  """Makes quantized dot_general."""
+  """Makes quantized lax.dot_general replacement."""
   if config is None:
     config = DotGeneralConfig(None, None)
 
   def my_dot_general(lhs, rhs, dimension_numbers, precision=None):
     (lhs_contracting, rhs_contracting), _ = dimension_numbers
 
-    lhs_scale, lhs_inv_scale = _fresh_scale(lhs, config.lhs, lhs_contracting)
-    rhs_scale, rhs_inv_scale = _fresh_scale(rhs, config.rhs, rhs_contracting)
+    # TODO(lew): Optimize if there is no one side config.
+    lhs_scale = _fresh_scale(lhs, config.lhs, lhs_contracting)
+    rhs_scale = _fresh_scale(rhs, config.rhs, rhs_contracting)
     lhs = lhs * lhs_scale
     rhs = rhs * rhs_scale
 
     lhs = _clip_and_round(lhs, config.lhs)
     rhs = _clip_and_round(rhs, config.rhs)
 
-    ret = lax.dot_general(
+    out = lax.dot_general(
         lhs, rhs, dimension_numbers=dimension_numbers, precision=precision
     )
 
     combined_inv_scale = lax.dot_general(
-        lhs_inv_scale,
-        rhs_inv_scale,
+        1.0 / lhs_scale,
+        1.0 / rhs_scale,
         dimension_numbers=dimension_numbers,
         precision=precision,
     )
-    ret = ret * combined_inv_scale
-    return ret
+    out = out * combined_inv_scale
+    return out
 
   return my_dot_general
+
+
+def make_conv_general_dilated(config: Optional[DotGeneralConfig]):
+  """Makes quantized lax.make_conv_general_dilated replacement."""
+  # TODO(lew): Either rename DotGeneralConfig or make a conv-specific config.
+  if config is None:
+    config = DotGeneralConfig(None, None)
+
+  def my_conv_general_dilated(
+      lhs,
+      rhs,
+      window_strides,
+      padding,
+      lhs_dilation=None,
+      rhs_dilation=None,
+      dimension_numbers=None,
+      feature_group_count=1,
+      batch_group_count=1,
+      precision=None,
+      preferred_element_type=None,
+  ) -> jax.Array:
+    msg1 = """
+To simplify the code, we currently assume a Flax-particular layout of the data.
+This makes sense, because this is the main use-case of this function.
+However if there is any other use, we will drop that assumption."""
+    rank = len(lhs.shape)
+    assert len(rhs.shape) == rank
+    assert dimension_numbers is not None, msg1
+    assert dimension_numbers.lhs_spec[0:2] == (0, rank - 1), msg1
+    assert dimension_numbers.rhs_spec[0:2] == (rank - 1, rank - 2), msg1
+    assert dimension_numbers.out_spec[0:2] == (0, rank - 1), msg1
+    # In Flax, lhs is the inputs, rhs is the kernel.
+    # lhs layout is B, spatials..., Ci
+    # rhs layout is: spatials..., Ci, Co
+    # out layous it: B, spatials..., Co
+    #
+    # we need to share these axes: lhs[1:] , rhs[:-1]
+    # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
+    lhs_contracting = list(range(1, rank))
+    rhs_contracting = list(range(0, rank - 1))
+
+    lhs_scale = _fresh_scale(lhs, config.lhs, lhs_contracting)
+    rhs_scale = _fresh_scale(rhs, config.rhs, rhs_contracting)
+    assert lhs_scale.shape == (lhs.shape[0],) + (1,) * (rank - 1)
+    assert rhs_scale.shape == (1,) * (rank - 1) + (rhs.shape[-1],)
+    lhs = lhs * lhs_scale
+    rhs = rhs * rhs_scale
+
+    lhs = _clip_and_round(lhs, config.lhs)
+    rhs = _clip_and_round(rhs, config.rhs)
+
+    out = lax.conv_general_dilated(
+        lhs=lhs,
+        rhs=rhs,
+        window_strides=window_strides,
+        padding=padding,
+        lhs_dilation=lhs_dilation,
+        rhs_dilation=rhs_dilation,
+        dimension_numbers=dimension_numbers,
+        feature_group_count=feature_group_count,
+        batch_group_count=batch_group_count,
+        precision=precision,
+        preferred_element_type=preferred_element_type,
+    )
+    out /= lhs_scale
+    out /= rhs_scale
+    # # Future scale granularity optimization.
+    # In 1x1 conv, each pixel (spatial location) can have different scales
+    # in 1xN (rows x colums) conv each row can have different scale, but
+    # columns need to share the scales ,  because we are adding pixels across.
+    #
+    # For patch convs we could have separate scales per patch.
+    # We don't do that optimization, because there is a  Flax op: ConvLocal
+    # using lax.conv_general_dilated_local which uses lax.dot_general.
+    #
+    # Dilations: If a dilation of LHS is bigger than the total spatial size of
+    # RHS, we could use separe (per LHS pixel) scales.
+    # The same applies to dilated RHS.
+    # We don't do that optimization yet.
+    #
+    # We can have different scales across different groups.
+    # This applies to both feature and batch.
+    return out
+
+  return my_conv_general_dilated

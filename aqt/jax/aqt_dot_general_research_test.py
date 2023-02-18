@@ -18,6 +18,7 @@ from absl.testing import parameterized
 import aqt.jax.aqt_dot_general_research as aqtr
 from aqt.jax_legacy.jax import primitives
 
+import flax.linen.linear as fl
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -176,19 +177,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       (8, None),
       (None, None),
   ])
-  def test_po2_fake_quant_is_equivalent_with_aqt(
+  def test_po2_fake_quant_is_equivalent_with_aqt_dot_general(
       self,
       lhs_bits,
       rhs_bits,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
-      d1=10,
-      d2=20,
-      d3=30,
   ):
-    lhs = rand_unif((d1, d2), lhs_maxval)
-    rhs = rand_unif((d2, d3), rhs_maxval)
-
     # We are passing dims to config so that we can reuse it in fake_quant.
     config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
 
@@ -201,13 +196,66 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       config.rhs.po2_scale = True
       config.rhs.share_calibration_axes = (0,)
 
-    mfq = aqtr.make_fake_quant
-    lax_dg = jax.lax.dot_general
-    aqt_dg = aqtr.make_dot_general(config)
+    # test dot_general
+    batch_n = 10
+    contr_n = 20
+    feature_n = 30
+    lhs = rand_unif((batch_n, contr_n), lhs_maxval)
+    rhs = rand_unif((contr_n, feature_n), rhs_maxval)
+
+    lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
+    rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
 
     dims = ((1,), (0,)), ((), ())  # classical matmul
-    prod_fq = lax_dg(mfq(config.lhs)(lhs), mfq(config.rhs)(rhs), dims)
-    prod_aqt = aqt_dg(lhs, rhs, dims)
+    prod_fq = jax.lax.dot_general(lhs_fq, rhs_fq, dims)
+    prod_aqt = aqtr.make_dot_general(config)(lhs, rhs, dims)
+    assert (prod_aqt == prod_fq).all()
+
+  @parameterized.parameters([
+      (1, 1),
+      (1, 2),
+      (2, 1),
+      (2, 2),
+      (8, 8),
+      (None, 8),
+      (8, None),
+      (None, None),
+  ])
+  def test_po2_fake_quant_is_equivalent_with_aqt_conv_general_dilated(
+      self,
+      lhs_bits,
+      rhs_bits,
+      lhs_maxval=10.0,
+      rhs_maxval=20.0,
+  ):
+    config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
+
+    if config.lhs:
+      # Power-of-2 scales allow FQ and AQT to be exactly the same.
+      config.lhs.po2_scale = True
+      # Needed if we want to reuse config in the fake_quant.
+      config.lhs.share_calibration_axes = [1, 2, 3]
+    if config.rhs:
+      config.rhs.po2_scale = True
+      config.rhs.share_calibration_axes = [0, 1, 2]
+
+    batch_n = 10
+    contr_n = 20
+    feature_n = 30
+    lhs = rand_unif((batch_n, 4, 5, contr_n), lhs_maxval)
+    rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval)
+
+    lax_conv = jax.lax.conv_general_dilated
+    aqt_conv = aqtr.make_conv_general_dilated(config)
+    kwargs = {
+        "window_strides": (1, 1),
+        "padding": "SAME",
+        "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
+    }
+    lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
+    rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
+    prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
+    prod_aqt = aqt_conv(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
 
 
