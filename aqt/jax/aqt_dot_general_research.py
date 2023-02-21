@@ -233,11 +233,15 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
     config = DotGeneralConfig(None, None)
 
   def my_dot_general(lhs, rhs, dimension_numbers, precision=None):
-    (lhs_contracting, rhs_contracting), _ = dimension_numbers
+    # All axes can be partitioned into:
+    # - contraction axes (ca)
+    # - batch axes (ba)
+    # - remaining axes (ra).
+    (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
     # TODO(lew): Optimize if there is no one side config.
-    lhs_scale = _fresh_scale(lhs, config.lhs, lhs_contracting)
-    rhs_scale = _fresh_scale(rhs, config.rhs, rhs_contracting)
+    lhs_scale = _fresh_scale(lhs, config.lhs, lhs_ca)
+    rhs_scale = _fresh_scale(rhs, config.rhs, rhs_ca)
     lhs = lhs * lhs_scale
     rhs = rhs * rhs_scale
 
@@ -247,14 +251,30 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
     out = lax.dot_general(
         lhs, rhs, dimension_numbers=dimension_numbers, precision=precision
     )
+    # The axis order in dot_general is as follows: batch, lhs_ra, rhs_ra
+    # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
+    # - contraction axes ca disappear from the output
+    # - order of the remaining access ra is preserved.
 
-    combined_inv_scale = lax.dot_general(
-        1.0 / lhs_scale,
-        1.0 / rhs_scale,
-        dimension_numbers=dimension_numbers,
-        precision=precision,
-    )
-    out = out * combined_inv_scale
+    # scale_trans transposes scales returned by _fresh_scale to
+    # the dot_general's output order
+    # pre_ones and post_ones are axes size=1 corresponding to lhs_ra and rhs_ra
+    def scale_trans(x, ca, ba, pre_ones=0, post_ones=0):
+      for i in ca:
+        assert x.shape[i] == 1
+      ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
+      x = jnp.transpose(x, ba + ra + ca)
+      s1 = x.shape[: len(ba)]
+      s2 = x.shape[len(ba) : -len(ca)]
+      x = x.reshape(s1 + (1,) * pre_ones + s2 + (1,) * post_ones)
+      return x
+
+    lhs_ra_count = len(lhs.shape) - len(lhs_ca) - len(lhs_ba)
+    rhs_ra_count = len(rhs.shape) - len(rhs_ca) - len(rhs_ba)
+    lhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba, post_ones=rhs_ra_count)
+    rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba, pre_ones=lhs_ra_count)
+    out = out / lhs_scale_t / rhs_scale_t
+
     return out
 
   return my_dot_general
