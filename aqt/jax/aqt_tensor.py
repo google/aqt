@@ -409,7 +409,7 @@ class TensorQuantizer(nn.Module):
     """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
     if self.config is None:
       scale = inv_scale = jnp.array(1.0, dtype=jnp.float32)
-      return scale, inv_scale
+      return scale, inv_scale  # pytype: disable=bad-return-type  # jax-ndarray
 
     if not train and self.config.inference_config_index is not None:
       inference_config = self.config.tensor_configs[
@@ -429,4 +429,4 @@ class TensorQuantizer(nn.Module):
     inv_scale = jnp.where(should_quantize, self._inv_scale.value,
                           jnp.ones_like(self._inv_scale.value))
 
-    return scale, inv_scale
+    return scale, inv_scale  # pytype: disable=bad-return-type  # jax-ndarray

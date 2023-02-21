@@ -496,7 +496,7 @@ class DenseGeneralAqt(nn.Module):
     act_quant_axis = None
     if hparams.quant_act:
       if isinstance(hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
-        act_quant_granularity = hparams.quant_act.bounds.granularity
+        act_quant_granularity = hparams.quant_act.bounds.granularity  # pytype: disable=attribute-error  # jax-ndarray
         if act_quant_granularity == quant_config.QuantGranularity.PER_CHANNEL:
           act_quant_axis = tuple(axis)
         elif act_quant_granularity == quant_config.QuantGranularity.PER_TENSOR:

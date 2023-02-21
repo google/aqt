@@ -275,7 +275,7 @@ class QuantOps:
     # when scale is not a constant, but computed as a function of activations or
     # weights.
     scale = lax.stop_gradient(scale)
-    return cls(
+    return cls(  # pytype: disable=wrong-arg-types  # jax-ndarray
         prec=prec,
         scale=scale,
         symmetric=True,
@@ -302,7 +302,7 @@ class QuantOps:
     # NOTE: stop_gradient is needed here to prevent gradient flow through scale
     # when scale is not a constant, but computed as a function of activations.
     scale = lax.stop_gradient(scale)
-    return cls(
+    return cls(  # pytype: disable=wrong-arg-types  # jax-ndarray
         prec=prec,
         scale=scale,
         symmetric=False,

@@ -138,7 +138,7 @@ def _conv_general_aqt_jvp(
       differentiable_conv_general,  #
       (lhs, rhs),
       (lhs_dot, rhs_dot))
-  return y, y_tangent
+  return y, y_tangent  # pytype: disable=bad-return-type  # jax-ndarray
 
 
 def _validate_dilation_argument(
