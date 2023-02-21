@@ -262,27 +262,29 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
     # - contraction axes ca disappear from the output
     # - order of the remaining access ra is preserved.
 
-    # scale_trans transposes scales returned by _fresh_scale to
-    # the dot_general's output order
-    # pre_ones and post_ones are axes size=1 corresponding to lhs_ra and rhs_ra
-    def scale_trans(x, ca, ba, pre_ones=0, post_ones=0):
+    def scale_trans(x, ca, ba):
       for i in ca:
         assert x.shape[i] == 1
       ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
       x = jnp.transpose(x, ba + ra + ca)
-      s1 = x.shape[: len(ba)]
-      s2 = x.shape[len(ba) : -len(ca)]
-      x = x.reshape(s1 + (1,) * pre_ones + s2 + (1,) * post_ones)
+      shape_ba = x.shape[: len(ba)]
+      shape_ra = x.shape[len(ba) : -len(ca)]
+      # Will need to add additional axes (size 1) for the other shape_ra
+      x = x.reshape(shape_ba + shape_ra)
       return x
 
     if config.lhs:
-      rhs_ra_n = len(rhs.shape) - len(rhs_ca) - len(rhs_ba)
-      lhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba, post_ones=rhs_ra_n)
+      lhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba)
+      dummy_axes_count = len(rhs.shape) - len(rhs_ca) - len(rhs_ba)
+      dummy_axes = (len(lhs_ba) + len(lhs_ca),) * dummy_axes_count
+      lhs_scale_t = jnp.expand_dims(lhs_scale_t, axis=dummy_axes)
       out = out / lhs_scale_t
 
     if config.rhs:
-      lhs_ra = len(lhs.shape) - len(lhs_ca) - len(lhs_ba)
-      rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba, pre_ones=lhs_ra)
+      rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
+      dummy_axes_count = len(lhs.shape) - len(lhs_ca) - len(lhs_ba)
+      dummy_axes = (len(rhs_ba),) * dummy_axes_count
+      rhs_scale_t = jnp.expand_dims(rhs_scale_t, axis=dummy_axes)
       out = out / rhs_scale_t
 
     return out
