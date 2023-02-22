@@ -275,16 +275,18 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
 
     if config.lhs:
       lhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba)
-      dummy_axes_count = len(rhs.shape) - len(rhs_ca) - len(rhs_ba)
-      dummy_axes = (len(lhs_ba) + len(lhs_ca),) * dummy_axes_count
-      lhs_scale_t = jnp.expand_dims(lhs_scale_t, axis=dummy_axes)
+      # inserting dummy axes for rhs_ra
+      assert len(lhs_scale_t.shape) == len(lhs.shape) - len(lhs_ca)
+      start = len(lhs_scale_t.shape)
+      end = len(rhs.shape) - len(rhs_ca) - len(rhs_ba) + start
+      lhs_scale_t = jnp.expand_dims(lhs_scale_t, axis=range(start, end))
       out = out / lhs_scale_t
 
     if config.rhs:
       rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
-      dummy_axes_count = len(lhs.shape) - len(lhs_ca) - len(lhs_ba)
-      dummy_axes = (len(rhs_ba),) * dummy_axes_count
-      rhs_scale_t = jnp.expand_dims(rhs_scale_t, axis=dummy_axes)
+      start = len(rhs_ba)
+      end = len(lhs.shape) - len(lhs_ca) - len(lhs_ba) + start
+      rhs_scale_t = jnp.expand_dims(rhs_scale_t, axis=range(start, end))
       out = out / rhs_scale_t
 
     return out

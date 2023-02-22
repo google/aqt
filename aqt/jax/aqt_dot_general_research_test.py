@@ -166,48 +166,56 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             )
 
   @parameterized.parameters([
-      (1, 1),
-      (1, 2),
-      (2, 1),
-      (2, 2),
-      (8, 8),
-      (None, 8),
-      (8, None),
-      (None, None),
+      dict(lhs_bits=1, rhs_bits=1),
+      dict(lhs_bits=1, rhs_bits=2),
+      dict(lhs_bits=2, rhs_bits=1),
+      dict(lhs_bits=2, rhs_bits=2),
+      dict(lhs_bits=8, rhs_bits=8),
+      dict(lhs_bits=None, rhs_bits=8),
+      dict(lhs_bits=8, rhs_bits=None),
+      dict(lhs_bits=None, rhs_bits=None),
+      dict(
+          dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
+          lhs_shape=(2, 3, 5, 4),
+          rhs_shape=(5, 2, 4, 5, 3),
+      ),
   ])
-  def test_po2_fake_quant_is_equivalent_with_aqt_dot_general(
+  def test_dot_general(
       self,
-      lhs_bits,
-      rhs_bits,
+      lhs_bits=1,
+      rhs_bits=4,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
+      dims=(((1,), (0,)), ((), ())),  # classical matmul
+      lhs_shape=(10, 20),
+      rhs_shape=(20, 30),
   ):
     # We are passing dims to config so that we can reuse it in fake_quant.
     config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
-
     if config.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
       config.lhs.po2_scale = True
       # Needed if we want to reuse config in the fake_quant.
-      config.lhs.calib_shared_axes = (1,)
+      config.lhs.calib_shared_axes = dims[0][0]
     if config.rhs:
       config.rhs.po2_scale = True
-      config.rhs.calib_shared_axes = (0,)
+      config.rhs.calib_shared_axes = dims[0][1]
 
     # test dot_general
-    batch_n = 10
-    contr_n = 20
-    feature_n = 30
-    lhs = rand_unif((batch_n, contr_n), lhs_maxval)
-    rhs = rand_unif((contr_n, feature_n), rhs_maxval)
+    lhs = rand_unif(lhs_shape, lhs_maxval)
+    rhs = rand_unif(rhs_shape, rhs_maxval)
 
     lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
     rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
 
-    dims = ((1,), (0,)), ((), ())  # classical matmul
     prod_fq = jax.lax.dot_general(lhs_fq, rhs_fq, dims)
     prod_aqt = aqtr.make_dot_general(config)(lhs, rhs, dims)
-    assert (prod_aqt == prod_fq).all()
+    assert (prod_aqt == prod_fq).all(), (
+        prod_aqt.shape,
+        prod_fq.shape,
+        prod_aqt[:2, :2],
+        prod_fq[:2, :2],
+    )
 
   @parameterized.parameters([
       (1, 1),
@@ -219,7 +227,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       (8, None),
       (None, None),
   ])
-  def test_po2_fake_quant_is_equivalent_with_aqt_conv_general_dilated(
+  def test_conv_general_dilated(
       self,
       lhs_bits,
       rhs_bits,
