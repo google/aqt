@@ -38,13 +38,17 @@ class TensorConfig:
   po2_scale: bool
 
 
-def make_tensor_config(bits, pz=None) -> TensorConfig | None:
+def make_tensor_config(bits, preserve_zero=None) -> TensorConfig | None:
   if bits is None:
     return None
+  pz = False if bits == 1 else True
+  if preserve_zero is not None:
+    pz = preserve_zero
+
   return TensorConfig(
       bits=bits,
       calib_shared_axes=None,
-      preserve_zero=pz if pz is not None else (False if bits == 1 else True),
+      preserve_zero=pz,
       bound=None,
       bound_stop_grad=True,
       preserve_max_val=False,
@@ -63,12 +67,12 @@ class DotGeneralConfig:
 def make_dot_general_config(
     lhs_bits=None,
     rhs_bits=None,
-    pz=None,
+    preserve_zero=None,
 ) -> DotGeneralConfig:
   """Create quantization configs for input matrices to a matmul."""
   return DotGeneralConfig(
-      lhs=make_tensor_config(lhs_bits, pz=pz),
-      rhs=make_tensor_config(rhs_bits, pz=pz),
+      lhs=make_tensor_config(lhs_bits, preserve_zero=preserve_zero),
+      rhs=make_tensor_config(rhs_bits, preserve_zero=preserve_zero),
   )
 
 
