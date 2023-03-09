@@ -31,6 +31,7 @@ from aqt.jax_legacy.jax.wmt_mlperf.hparams_configs.experimental import small_mod
 from aqt.jax_legacy.jax.wmt_mlperf.hparams_configs.leaderboard import full_model_bfloat16
 from aqt.jax_legacy.utils import hparams_utils
 from flax import serialization
+from flax.core import pop
 import jax
 import jax.numpy as jnp
 from jax.tools import jax_to_ir
@@ -135,34 +136,37 @@ def encoder_n_32(layers: int):
 
   input_shape = (1, 32)
   rng = jax.random.PRNGKey(0)
-  model_hparams = training_hparams_generator_lib.create_base_transformer_hparams(
-      embedding_weight_prec=None,
-      attention_weight_prec=None,
-      mlp_weight_prec=None,
-      mlp_pos_inputs_prec=None,
-      mlp_pos_inputs_hyper=None,
-      mlp_signed_inputs_prec=None,
-      mlp_signed_inputs_hyper=None,
-      attention_kqv_inputs_prec=None,
-      attention_kqv_inputs_hyper=None,
-      attention_out_inputs_prec=None,
-      attention_out_inputs_hyper=None,
-      logits_inputs_prec=None,
-      logits_inputs_hyper=None,
-      logits_via_embeddings=True,
-      attention_act_q_inputs_prec=None,
-      attention_act_q_inputs_hyper=None,
-      attention_act_k_inputs_prec=None,
-      attention_act_k_inputs_hyper=None,
-      attention_act_probs_inputs_prec=None,
-      attention_act_v_inputs_prec=None,
-      attention_act_v_inputs_hyper=None,
-      num_layers=layers,
-      emb_dim=1024,
-      num_heads=1,
-      qkv_dim=1024,
-      mlp_dim=4096,
-      quant_type=QuantType.FAKE_QUANT)
+  model_hparams = (
+      training_hparams_generator_lib.create_base_transformer_hparams(
+          embedding_weight_prec=None,
+          attention_weight_prec=None,
+          mlp_weight_prec=None,
+          mlp_pos_inputs_prec=None,
+          mlp_pos_inputs_hyper=None,
+          mlp_signed_inputs_prec=None,
+          mlp_signed_inputs_hyper=None,
+          attention_kqv_inputs_prec=None,
+          attention_kqv_inputs_hyper=None,
+          attention_out_inputs_prec=None,
+          attention_out_inputs_hyper=None,
+          logits_inputs_prec=None,
+          logits_inputs_hyper=None,
+          logits_via_embeddings=True,
+          attention_act_q_inputs_prec=None,
+          attention_act_q_inputs_hyper=None,
+          attention_act_k_inputs_prec=None,
+          attention_act_k_inputs_hyper=None,
+          attention_act_probs_inputs_prec=None,
+          attention_act_v_inputs_prec=None,
+          attention_act_v_inputs_hyper=None,
+          num_layers=layers,
+          emb_dim=1024,
+          num_heads=1,
+          qkv_dim=1024,
+          mlp_dim=4096,
+          quant_type=QuantType.FAKE_QUANT,
+      )
+  )
   model = models.Encoder(
       vocab_size=32711,
       hparams=model_hparams.encoder,
@@ -257,8 +261,8 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
                               jnp.ones(decode_shape, jnp.float32))
   if FLAGS.checkpoint:
     model = _restore_from_checkpoint(model, FLAGS.checkpoint)
-  state, cache = state.pop('cache')  # pytype: disable=attribute-error
-  state, params = state.pop('params')  # pytype: disable=attribute-error
+  state, cache = pop(state, 'cache')  # pytype: disable=attribute-error
+  state, params = pop(state, 'params')  # pytype: disable=attribute-error
   input_dummy = jnp.ones(encode_shape)
   if FLAGS.checkpoint:
 
