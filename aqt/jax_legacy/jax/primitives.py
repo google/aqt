@@ -16,7 +16,6 @@
 from typing import Any, Iterable, Optional, TypeVar
 
 import jax
-from jax.interpreters.xla import DeviceArray
 import jax.numpy as jnp
 
 # Custom type for bounds for type hinting
@@ -55,7 +54,7 @@ def add_straight_through_estimator(jax_function) -> None:
 
 
 @jax.custom_jvp
-def floor_with_gradient(x: DeviceArray) -> DeviceArray:
+def floor_with_gradient(x: jax.Array) -> jax.Array:
   """Floor with Straight-Through-Estimator gradient."""
   return jnp.floor(x)
 
@@ -64,7 +63,7 @@ add_straight_through_estimator(floor_with_gradient)
 
 
 @jax.custom_jvp
-def round_with_gradient(x: DeviceArray) -> DeviceArray:
+def round_with_gradient(x: jax.Array) -> jax.Array:
   """Round with Straight-Through-Estimator gradient."""
   return jnp.floor(x + jnp.array(0.5))
 
@@ -72,8 +71,8 @@ def round_with_gradient(x: DeviceArray) -> DeviceArray:
 add_straight_through_estimator(round_with_gradient)
 
 
-def round_and_clip_to_signed_int(x: DeviceArray, *, prec: int, dtype: jnp_dtype,
-                                 half_shift: bool) -> DeviceArray:
+def round_and_clip_to_signed_int(x: jax.Array, *, prec: int, dtype: jnp_dtype,
+                                 half_shift: bool) -> jax.Array:
   """Round and clip x to range of signed type with precision 'prec'.
 
   Requires prec <= 24.
@@ -108,9 +107,9 @@ def round_and_clip_to_signed_int(x: DeviceArray, *, prec: int, dtype: jnp_dtype,
   return x
 
 
-def floor_and_clip_to_unsigned_int(x: DeviceArray, *, prec: int,
+def floor_and_clip_to_unsigned_int(x: jax.Array, *, prec: int,
                                    dtype: jnp_dtype,
-                                   half_shift: bool) -> DeviceArray:
+                                   half_shift: bool) -> jax.Array:
   """Floor-and-clip x to range of unsigned type with precision 'prec'.
 
   Requires prec <= 24.
@@ -148,7 +147,7 @@ def signed_int_bound(prec: int, half_shift: bool) -> float:
     raise ValueError('prec value should be >= 1.')
 
 
-def max_abs_weights(x: DeviceArray,
+def max_abs_weights(x: jax.Array,
                     *,
                     axis: Optional[Iterable[int]] = None) -> BoundsT:
   """Computes the maximum of the absolute value of weights along the axis."""
