@@ -49,7 +49,7 @@ FLAGS = flags.FLAGS
 # Alias for initializer function.
 # Should follow the template `def init(key, shape, dtype=dtype) -> ndarray:`.
 # See flax.linen.initializers and jax.nn.initializers for more details.
-InitializerType = Callable[[jnp.ndarray, Iterable[int], Type[Any]], jnp.ndarray]
+InitializerType = Callable[[jnp.ndarray, Sequence[int], Type[Any]], jnp.ndarray]
 
 default_kernel_init = nn.initializers.lecun_normal()
 
@@ -58,7 +58,7 @@ dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.d
 Array = jnp.ndarray
 DType = jnp.dtype
 PRNGKey = jnp.ndarray
-Shape = Iterable[int]
+Shape = Sequence[int]
 Initializer = Callable[[PRNGKey, Shape, DType], Array]
 PrecisionLike = Union[None, str, lax.Precision, Tuple[str, str],
                       Tuple[lax.Precision, lax.Precision]]
