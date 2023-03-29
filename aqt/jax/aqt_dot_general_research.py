@@ -13,6 +13,8 @@
 # limitations under the License.
 """Quantized dot_general."""
 
+# pylint: disable=g-explicit-bool-comparison
+
 import copy
 import dataclasses
 from typing import Optional
@@ -24,6 +26,7 @@ import jax.numpy as jnp
 @dataclasses.dataclass
 class TensorConfig:
   """Configuration of quantization of one tensor or one side of tensor op."""
+
   bits: int
   calib_shared_axes: Optional[list[int]]
   preserve_zero: bool
@@ -142,8 +145,12 @@ def make_config_conv_general_dilated(
 # Clipping is there only to round all the buckets beyond prec to the biggest
 # bucket. (we will have a separate method for gradients)
 #
+# We need eps>0.0 so that the fwd pass of round_int0(x) = floor(x+0.5) does not
+# have an edge condition on -(2^(n-1) - 0.5). That would add additional bucket.
 # eps can be anywhere in (0, 1.0) for correctness (sharp inequalities).
 # We choose eps=0.5
+# However this messes with the gradient.
+# Also reducing eps is not good enough for po2 case.
 
 
 def _get_max_value_representation(config: TensorConfig):
@@ -160,8 +167,7 @@ def _get_max_value_representation(config: TensorConfig):
 def _get_clip_bound(config: TensorConfig):
   """Returns the clip bound when using integer values."""
   assert config.bits <= 22, 'Too many bits, float32 has less precision.'
-  eps = 0.5
-  clip_bound = 2.0 ** (config.bits - 1) - eps
+  clip_bound = 2.0 ** (config.bits - 1)
   if config.preserve_zero:
     clip_bound -= 0.5
   return clip_bound
@@ -190,39 +196,55 @@ def _fresh_scale(x, config: TensorConfig) -> jnp.ndarray:
   x_bound_repr = _get_max_value_representation(config)
   new_scale = x_bound_repr / x_bound
   if config.po2_scale:
-    new_scale = 2 ** jnp.ceil(jnp.log2(new_scale))
+    # With floor the bigges value (we are using jnp.max) is in the range of
+    # clipping and therefore have a correct gradinet.
+    new_scale = 2 ** jnp.floor(jnp.log2(new_scale))
   return new_scale
-
-
-@jax.custom_jvp
-def floor_with_ste(x):
-  """Floor with Straight-Through-Estimator gradient."""
-  return jnp.floor(x)
-
-
-# Add STE.
-floor_with_ste.defjvp(
-    lambda primals, tangents: (floor_with_ste(primals[0]), tangents[0])
-)
 
 
 def _round(x, round_to_halves=False):
   """(Mostly) unbiased rounding to either an integer or integer+0.5 ."""
   if round_to_halves:
-    return floor_with_ste(x) + 0.5
+    return jnp.floor(x) + 0.5
   else:
-    return floor_with_ste(x + 0.5)
+    return jnp.floor(x + 0.5)
 
 
-def _clip_and_round(x, config: TensorConfig):
-  if config is None:
+def _make_clip_and_round(config: TensorConfig):
+  """Function make_clip_and_round."""
+  clip_bound = _get_clip_bound(config)
+
+  def fwd(x):
+    if config is None:
+      return x
+    if config.clip:
+      # We use eps = 0.5 to make sure that after clipping we, `x` is wholly in
+      # the buckets. This does not affect us, because there is _round following.
+      if config.round:
+        eps = 0.5
+      else:
+        # If we are not rounding, we don't care about the largest value possible
+        # jumping into additional bucket. Because we are not using real ints.
+        eps = 0.0
+      fwd_clip_bound = clip_bound - eps
+      x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
+    if config.round:
+      x = _round(x, round_to_halves=not config.preserve_zero)
     return x
-  if config.clip:
-    clip_bound = _get_clip_bound(config)
-    x = jnp.clip(x, -clip_bound, clip_bound)
-  if config.round:
-    x = _round(x, round_to_halves=not config.preserve_zero)
-  return x
+
+  def vjp_fwd(x):
+    res = (x,)
+    return fwd(x), res
+
+  def vjp_bwd(res, grad):
+    (x,) = res
+    # This is gradient of clip. For boundary values we will have full graindent.
+    ret = (x <= clip_bound) * (x >= -clip_bound) * grad
+    return (ret,)
+
+  vjp = jax.custom_vjp(fwd)
+  vjp.defvjp(vjp_fwd, vjp_bwd)
+  return vjp
 
 
 def make_fake_quant(config: Optional[TensorConfig]):
@@ -231,7 +253,7 @@ def make_fake_quant(config: Optional[TensorConfig]):
       return x
     scale = _fresh_scale(x, config)
     x = x * scale
-    x = _clip_and_round(x, config)
+    x = _make_clip_and_round(config)(x)
     x = x / scale
     return x
 
@@ -254,27 +276,28 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
       config.lhs.calib_shared_axes = config.lhs.calib_shared_axes or lhs_ca
       lhs_scale = _fresh_scale(lhs, config.lhs)
       lhs = lhs * lhs_scale
-      lhs = _clip_and_round(lhs, config.lhs)
+      lhs = _make_clip_and_round(config.lhs)(lhs)
 
     if config.rhs:
       config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
-      rhs = _clip_and_round(rhs, config.rhs)
+      rhs = _make_clip_and_round(config.rhs)(rhs)
 
     out = lax.dot_general(
         lhs, rhs, dimension_numbers=dimension_numbers, precision=precision
     )
-    # The axis order in dot_general is as follows: batch, lhs_ra, rhs_ra
+    # The axis order in out is as follows: batch, lhs_ra, rhs_ra
     # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
     # - contraction axes ca disappear from the output
-    # - order of the remaining access ra is preserved.
+    # - order of the remaining axes (ra) is preserved.
 
     def scale_trans(x, ca, ba):
       for i in ca:
         assert x.shape[i] == 1
       ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
       x = jnp.transpose(x, ba + ra + ca)
+      # TODO(lew): x = jnp.squeeze(x, axis=range(len(ba+ra): len(x.shape))
       shape_ba = x.shape[: len(ba)]
       shape_ra = x.shape[len(ba) : -len(ca)]
       # Will need to add additional axes (size 1) for the other shape_ra
@@ -287,14 +310,16 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
       assert len(lhs_scale_t.shape) == len(lhs.shape) - len(lhs_ca)
       start = len(lhs_scale_t.shape)
       end = len(rhs.shape) - len(rhs_ca) - len(rhs_ba) + start
-      lhs_scale_t = jnp.expand_dims(lhs_scale_t, axis=range(start, end))
+      lhs_dummy_axes = range(start, end)
+      lhs_scale_t = jnp.expand_dims(lhs_scale_t, axis=lhs_dummy_axes)
       out = out / lhs_scale_t
 
     if config.rhs:
       rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
       start = len(rhs_ba)
       end = len(lhs.shape) - len(lhs_ca) - len(lhs_ba) + start
-      rhs_scale_t = jnp.expand_dims(rhs_scale_t, axis=range(start, end))
+      rhs_dummy_axes = range(start, end)
+      rhs_scale_t = jnp.expand_dims(rhs_scale_t, axis=rhs_dummy_axes)
       out = out / rhs_scale_t
 
     return out
@@ -345,13 +370,13 @@ However if there is any other use, we will drop that assumption."""
       assert config.lhs.calib_shared_axes == list(range(1, rank))
       lhs_scale = _fresh_scale(lhs, config.lhs)
       lhs = lhs * lhs_scale
-      lhs = _clip_and_round(lhs, config.lhs)
+      lhs = _make_clip_and_round(config.lhs)(lhs)
 
     if config.rhs:
       assert config.rhs.calib_shared_axes == list(range(0, rank - 1))
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
-      rhs = _clip_and_round(rhs, config.rhs)
+      rhs = _make_clip_and_round(config.rhs)(rhs)
 
     out = lax.conv_general_dilated(
         lhs=lhs,

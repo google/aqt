@@ -26,7 +26,7 @@ import numpy as np
 
 # seed = np.random.randint(0, 100)
 seed = 0
-rngkey = jax.random.PRNGKey(seed)
+rngkey = None
 
 
 def fake_quant(x, prec):
@@ -38,6 +38,8 @@ def fake_quant(x, prec):
 
 def rand_unif(shape, maxval):
   global rngkey
+  if rngkey is None:
+    rngkey = jax.random.PRNGKey(seed)
   k1, k2 = jax.random.split(rngkey)
   rngkey = k1
   return jax.random.uniform(key=k2, shape=shape, minval=-maxval, maxval=maxval)
@@ -92,7 +94,9 @@ def fq_noise_test(*, prec, maxval, sample_size, do_print=False):
   # qa_aqt_dg = dot_general(a, np.identity(sample_size), axes)
 
   qa_fq = fake_quant(a, prec)
-  qa_aqt_fq = aqtr.make_fake_quant(aqtr.make_tensor_config(prec, (0,)))(a)
+  cfg = aqtr.make_tensor_config(prec, (0,))
+  cfg.calib_shared_axes = (0,)
+  qa_aqt_fq = aqtr.make_fake_quant(cfg)(a)
 
   def compare(name, qa):
     mean_abs_noise = jnp.mean(jnp.abs((qa - a)))
@@ -148,6 +152,12 @@ def fq_noise_test(*, prec, maxval, sample_size, do_print=False):
   # compare("dot_general", qa_aqt_dg)
 
 
+# TODO(lew): Tests are a bit incomplete. What we need:
+# - Better than fq_noise_test test of fq noise.
+# - fq JVP: where it is zero and where it is one exactly
+# - Test of fq vs dot_general equivalence in fwd and bwd
+
+
 class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   def test_empty(self):
@@ -166,7 +176,41 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             )
 
   @parameterized.parameters([
+      dict(bits=1),
+  ])
+  def test_fake_quant(
+      self,
+      bits=4,
+      maxval=10.0,
+      shape=(20, 1),
+  ):
+    config = aqtr.make_tensor_config(bits)
+    config.po2_scale = True
+    config.calib_shared_axes = (0,)
+    x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
+    grad = jnp.ones(shape) * 12345.0
+    x_fq, backprop = jax.vjp(aqtr.make_fake_quant(config), x)
+    gx_fq = backprop(grad)
+    # print(f"x     =\n{x}")
+    # print(f"x_fq  =\n{x_fq}")
+    # print(f"grad  =\n{grad}")
+    # print(f"gx_fq =\n{gx_fq}")
+    del x
+    del x_fq
+    del grad
+    del gx_fq
+
+    # TODO(lew): test
+
+  @parameterized.parameters([
       dict(lhs_bits=1, rhs_bits=1),
+      dict(
+          lhs_bits=1,
+          rhs_bits=1,
+          lhs_shape=(3, 2),
+          rhs_shape=(2, 4),
+          gra_shape=(3, 4),
+      ),
       dict(lhs_bits=1, rhs_bits=2),
       dict(lhs_bits=2, rhs_bits=1),
       dict(lhs_bits=2, rhs_bits=2),
@@ -176,8 +220,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(lhs_bits=None, rhs_bits=None),
       dict(
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
-          lhs_shape=(2, 3, 5, 4),
-          rhs_shape=(5, 2, 4, 5, 3),
+          # contraction: 2, 5; batch: 4, 3
+          lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
+          rhs_shape=(5, 2, 4, 6, 3),  # non-contr: 4, 6, 3
+          gra_shape=(4, 3, 6),
       ),
   ])
   def test_dot_general(
@@ -186,10 +232,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_bits=4,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
+      gra_maxval=30.0,
       dims=(((1,), (0,)), ((), ())),  # classical matmul
       lhs_shape=(10, 20),
       rhs_shape=(20, 30),
+      gra_shape=(10, 30),  # has to be the shape of the output
   ):
+    # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
+    # have the same numerics when scales are power of two (po2).
     # We are passing dims to config so that we can reuse it in fake_quant.
     config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
     if config.lhs:
@@ -204,18 +254,42 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # test dot_general
     lhs = rand_unif(lhs_shape, lhs_maxval)
     rhs = rand_unif(rhs_shape, rhs_maxval)
+    gra = rand_unif(gra_shape, gra_maxval)
 
-    lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
-    rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
+    def fq_dot_general(lhs, rhs):
+      lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
+      rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
+      return jax.lax.dot_general(lhs_fq, rhs_fq, dims)
 
-    prod_fq = jax.lax.dot_general(lhs_fq, rhs_fq, dims)
-    prod_aqt = aqtr.make_dot_general(config)(lhs, rhs, dims)
-    assert (prod_aqt == prod_fq).all(), (
-        prod_aqt.shape,
-        prod_fq.shape,
-        prod_aqt[:2, :2],
-        prod_fq[:2, :2],
-    )
+    def aqt_dot_general(lhs, rhs):
+      return aqtr.make_dot_general(config)(lhs, rhs, dims)
+      # return aqtr.make_dot_general_full(config, None, None)(lhs, rhs, dims)
+
+    lr_fq, backprop_fq = jax.vjp(fq_dot_general, lhs, rhs)
+    gl_fq, gr_fq = backprop_fq(gra)
+    lr_aqt, backprop_aqt = jax.vjp(aqt_dot_general, lhs, rhs)
+    gl_aqt, gr_aqt = backprop_aqt(gra)
+
+    assert lr_fq.shape == gra_shape
+    assert lr_aqt.shape == gra_shape
+
+    def test_eq(name, a, b):
+      # TODO(lew): use library function.
+      mean_err = jnp.mean(jnp.abs(a - b))
+      if mean_err != 0.0:
+        print(name)
+        print(mean_err)
+        # print(a)
+        # print(b)
+        print(a.shape)
+        print(a[:3, :3])
+        print(b.shape)
+        print(b[:3, :3])
+        assert False
+
+    test_eq("lr", lr_fq, lr_aqt)  # forward pass
+    test_eq("gl", gl_fq, gl_aqt)  # backward pass
+    test_eq("gr", gr_fq, gr_aqt)  # backward pass
 
   @parameterized.parameters([
       (1, 1),
