@@ -152,10 +152,27 @@ def fq_noise_test(*, prec, maxval, sample_size, do_print=False):
   # compare("dot_general", qa_aqt_dg)
 
 
+# The main test strategyis :
+# - Test that FQ is sensible (improve fq_noise_test)
+# - Test that we really use int8/int4/bool in XLA/HLO
+# - Test of fq vs dot_general equivalence in po2
+# - Test that it all applies to gradients
 # TODO(lew): Tests are a bit incomplete. What we need:
-# - Better than fq_noise_test test of fq noise.
-# - fq JVP: where it is zero and where it is one exactly
-# - Test of fq vs dot_general equivalence in fwd and bwd
+# On top of that we shell test:
+#  - Gradinent is 1 in the range, 0 outside the abs-max range.
+
+
+def test_eq(name, a, b):
+  # TODO(lew): use library function.
+  mean_err = jnp.mean(jnp.abs(a - b))
+  if mean_err != 0.0:
+    print(name)
+    print(mean_err)
+    print(a.shape)
+    print(a[:3, :3])
+    print(b.shape)
+    print(b[:3, :3])
+    assert False
 
 
 class AqtDotGeneralResearchTest(parameterized.TestCase):
@@ -256,40 +273,56 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif(rhs_shape, rhs_maxval)
     gra = rand_unif(gra_shape, gra_maxval)
 
-    def fq_dot_general(lhs, rhs):
-      lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
-      rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
-      return jax.lax.dot_general(lhs_fq, rhs_fq, dims)
+    def check_eq(dg1, dg2, lr_mult=1.0, gl_mult=1.0, gr_mult=1.0):
+      """Tests whether dg1 and dg2 are identical or proportional."""
+      def app(dg):
+        lr, backprop = jax.vjp(dg, lhs, rhs)
+        gl, gr = backprop(gra)
+        return lr, gl, gr
 
-    def aqt_dot_general(lhs, rhs):
-      return aqtr.make_dot_general(config)(lhs, rhs, dims)
-      # return aqtr.make_dot_general_full(config, None, None)(lhs, rhs, dims)
+      lr1, gl1, gr1 = app(dg1)
+      lr2, gl2, gr2 = app(dg2)
+      test_eq("lr", lr1 * lr_mult, lr2)  # forward pass
+      test_eq("gl", gl1 * gl_mult, gl2)  # backward pass
+      test_eq("gr", gr1 * gr_mult, gr2)  # backward pass
 
-    lr_fq, backprop_fq = jax.vjp(fq_dot_general, lhs, rhs)
-    gl_fq, gr_fq = backprop_fq(gra)
-    lr_aqt, backprop_aqt = jax.vjp(aqt_dot_general, lhs, rhs)
-    gl_aqt, gr_aqt = backprop_aqt(gra)
+    def aqt_dg(use_fake_quant):
+      dg = aqtr.make_dot_general(config, use_fake_quant)
+      return lambda lhs, rhs: dg(lhs, rhs, dims)
 
-    assert lr_fq.shape == gra_shape
-    assert lr_aqt.shape == gra_shape
+    check_eq(aqt_dg(False), aqt_dg(True))
 
-    def test_eq(name, a, b):
-      # TODO(lew): use library function.
-      mean_err = jnp.mean(jnp.abs(a - b))
-      if mean_err != 0.0:
-        print(name)
-        print(mean_err)
-        # print(a)
-        # print(b)
-        print(a.shape)
-        print(a[:3, :3])
-        print(b.shape)
-        print(b[:3, :3])
-        assert False
+    # Test that with backprop correctly composes 3 functions.
+    # We need to test shape calculations and the returned values.
+    # For the former we have multiple shapes,
+    # for the latter we add some constant and test it on return.
+    def lax_dg(lhs, rhs):
+      return jax.lax.dot_general(lhs, rhs, dims)
 
-    test_eq("lr", lr_fq, lr_aqt)  # forward pass
-    test_eq("gl", gl_fq, gl_aqt)  # backward pass
-    test_eq("gr", gr_fq, gr_aqt)  # backward pass
+    def lax_dg_248(lhs, rhs):
+      def dg_mul(delta):
+        def dg(
+            lhs,
+            rhs,
+            dimension_numbers,
+            precision=None,
+            preferred_element_type=None,
+        ):
+          return (
+              jax.lax.dot_general(
+                  lhs, rhs, dimension_numbers, precision, preferred_element_type
+              )
+              * delta
+          )
+
+        return dg
+
+      m1 = dg_mul(2.0)
+      m2 = dg_mul(4.0)
+      m3 = dg_mul(8.0)
+      return aqtr.dot_general_with_gradient(m1, m2, m3)(lhs, rhs, dims)
+
+    check_eq(lax_dg, lax_dg_248, lr_mult=2.0, gl_mult=4.0, gr_mult=8.0)
 
   @parameterized.parameters([
       (1, 1),

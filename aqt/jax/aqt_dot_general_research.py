@@ -21,6 +21,7 @@ from typing import Optional
 import jax
 from jax import lax
 import jax.numpy as jnp
+import numpy as onp
 
 
 @dataclasses.dataclass
@@ -260,13 +261,20 @@ def make_fake_quant(config: Optional[TensorConfig]):
   return fake_quant
 
 
-def make_dot_general(config: Optional[DotGeneralConfig]):
+# TODO(lew): Gradient of this function is costly. Optimize.
+def make_dot_general(config: Optional[DotGeneralConfig], use_fake_quant=False):
   """Makes quantized lax.dot_general replacement."""
   config = copy.deepcopy(config)
   if config is None:
     config = DotGeneralConfig(None, None)
 
-  def my_dot_general(lhs, rhs, dimension_numbers, precision=None):
+  def my_dot_general(
+      lhs,
+      rhs,
+      dimension_numbers,
+      precision=None,
+      preferred_element_type=None,
+  ):
     # All axes can be partitioned into:
     # - contraction axes (ca)
     # - batch axes (ba)
@@ -285,7 +293,11 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
       rhs = _make_clip_and_round(config.rhs)(rhs)
 
     out = lax.dot_general(
-        lhs, rhs, dimension_numbers=dimension_numbers, precision=precision
+        lhs,
+        rhs,
+        dimension_numbers=dimension_numbers,
+        precision=precision,
+        preferred_element_type=preferred_element_type,
     )
     # The axis order in out is as follows: batch, lhs_ra, rhs_ra
     # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
@@ -324,7 +336,87 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
 
     return out
 
-  return my_dot_general
+  def fq_dot_general(
+      lhs,
+      rhs,
+      dimension_numbers,
+      precision=None,
+      preferred_element_type=None,
+  ):
+    msg = (
+        'use_fake_quant mode is used in tests and it is exactly equal when'
+        ' po2_scale == True; Did you forget to set it?'
+    )
+    assert config.lhs is None or config.lhs.po2_scale, msg
+    assert config.rhs is None or config.rhs.po2_scale, msg
+    lhs_fq = make_fake_quant(config.lhs)(lhs)
+    rhs_fq = make_fake_quant(config.rhs)(rhs)
+    return jax.lax.dot_general(
+        lhs_fq,
+        rhs_fq,
+        dimension_numbers,
+        precision,
+        preferred_element_type=preferred_element_type,
+    )
+
+  if use_fake_quant:
+    return fq_dot_general
+  else:
+    return my_dot_general
+
+
+def dot_general_with_gradient(
+    fwd_dot_general, dlhs_dot_general, drhs_dot_general
+):
+  """Makes quantized lax.dot_general replacement with attached gradients."""
+
+  def vjp_fwd(lhs, rhs, dimension_numbers, precision, preferred_element_type):
+    res = (lhs, rhs)
+    return (
+        fwd_dot_general(
+            lhs,
+            rhs,
+            dimension_numbers,
+            precision,
+            preferred_element_type=preferred_element_type,
+        ),
+        res,
+    )
+
+  def vjp_bwd(fwd_dims, precision, preferred_element_type, res, g):
+    def ranges_like(*xs, start=0):
+      for x in xs:
+        yield tuple(range(start, start + len(x)))
+        start += len(x)
+
+    def grad_dot_general(y, dot_general, y_is_lhs):
+      (x_ca, y_ca), (x_ba, y_ba) = fwd_dims
+      if y_is_lhs:
+        (y_ca, x_ca) = (x_ca, y_ca)
+        (y_ba, x_ba) = (x_ba, y_ba)
+      g_ndim = g.ndim - y.ndim + len(x_ba) + 2 * len(x_ca)
+      x_ra = tuple(i for i in range(g_ndim) if i not in set(x_ca + x_ba))
+      y_ra = tuple(i for i in range(y.ndim) if i not in set(y_ca + y_ba))
+      if y_is_lhs:
+        g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
+      else:
+        g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
+      out = dot_general(
+          g, y, ((g_ca, y_ra), (g_ba, y_ba)), precision, preferred_element_type
+      )
+
+      x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
+      out_axes = tuple(onp.argsort(x_ba + x_ra + x_ca_sorted_by_y))
+      return jax.lax.transpose(out, out_axes)
+
+    (lhs, rhs) = res
+    dlhs = grad_dot_general(rhs, dlhs_dot_general, False)
+    drhs = grad_dot_general(lhs, drhs_dot_general, True)
+    return dlhs, drhs
+
+  vjp = jax.custom_vjp(fwd_dot_general, nondiff_argnums=(2, 3, 4))
+  vjp.defvjp(vjp_fwd, vjp_bwd)
+  return vjp
 
 
 def make_conv_general_dilated(config: Optional[DotGeneralConfig]):
