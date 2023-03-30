@@ -66,6 +66,7 @@ def make_tensor_config(bits, preserve_zero=None) -> TensorConfig | None:
 class DotGeneralConfig:
   lhs: Optional[TensorConfig]
   rhs: Optional[TensorConfig]
+  use_hardware_int8: bool
 
 
 def make_dot_general_config(
@@ -77,6 +78,7 @@ def make_dot_general_config(
   return DotGeneralConfig(
       lhs=make_tensor_config(lhs_bits, preserve_zero=preserve_zero),
       rhs=make_tensor_config(rhs_bits, preserve_zero=preserve_zero),
+      use_hardware_int8=False,
   )
 
 
@@ -266,7 +268,7 @@ def make_dot_general(config: Optional[DotGeneralConfig], use_fake_quant=False):
   """Makes quantized lax.dot_general replacement."""
   config = copy.deepcopy(config)
   if config is None:
-    config = DotGeneralConfig(None, None)
+    config = DotGeneralConfig(None, None, False)
 
   def my_dot_general(
       lhs,
@@ -291,6 +293,11 @@ def make_dot_general(config: Optional[DotGeneralConfig], use_fake_quant=False):
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
       rhs = _make_clip_and_round(config.rhs)(rhs)
+
+    if config.use_hardware_int8:
+      lhs = lhs.astype(jnp.int8)
+      rhs = rhs.astype(jnp.int8)
+      preferred_element_type = jnp.int32
 
     out = lax.dot_general(
         lhs,
@@ -366,7 +373,9 @@ def make_dot_general(config: Optional[DotGeneralConfig], use_fake_quant=False):
 
 
 def dot_general_with_gradient(
-    fwd_dot_general, dlhs_dot_general, drhs_dot_general
+    fwd_dot_general,
+    dlhs_dot_general,
+    drhs_dot_general,
 ):
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
@@ -424,7 +433,7 @@ def make_conv_general_dilated(config: Optional[DotGeneralConfig]):
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific config.
   config = copy.deepcopy(config)
   if config is None:
-    config = DotGeneralConfig(None, None)
+    config = DotGeneralConfig(None, None, False)
 
   def my_conv_general_dilated(
       lhs,
