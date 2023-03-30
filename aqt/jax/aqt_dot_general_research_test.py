@@ -29,6 +29,15 @@ seed = 0
 rngkey = None
 
 
+def get_dot_generals(f, *args):
+  jaxpr = jax.make_jaxpr(f)(*args)
+  for i in jaxpr.eqns:
+    if i.primitive.name == "dot_general":
+      [lhs, rhs] = i.invars
+      [out] = i.outvars
+      yield (lhs.aval, rhs.aval, out.aval)
+
+
 def fake_quant(x, prec):
   x_bound = jnp.max(jnp.abs(x))
   scale = (2 ** (prec - 1) - 0.5) / x_bound
@@ -323,6 +332,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return aqtr.dot_general_with_gradient(m1, m2, m3)(lhs, rhs, dims)
 
     check_eq(lax_dg, lax_dg_248, lr_mult=2.0, gl_mult=4.0, gr_mult=8.0)
+
+  def test_hardware_int8(self):
+    def dg(lhs, rhs):
+      config = aqtr.make_dot_general_config(8, 8)
+      config.use_hardware_int8 = True
+      return aqtr.make_dot_general(config)(
+          lhs, rhs, dimension_numbers=(((1,), (0,)), ((), ()))
+      )
+
+    lhs = rand_unif((10, 20), 1.0)
+    rhs = rand_unif((20, 30), 1.0)
+    [(lhs, rhs, out)] = get_dot_generals(dg, lhs, rhs)
+    assert lhs.dtype == jnp.int8
+    assert rhs.dtype == jnp.int8
+    assert out.dtype == jnp.int32
 
   @parameterized.parameters([
       (1, 1),
