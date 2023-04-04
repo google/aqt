@@ -16,17 +16,12 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 import aqt.jax.aqt_dot_general_research as aqtr
-from aqt.jax_legacy.jax import primitives
 
 import flax.linen.linear as fl
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-
-# seed = np.random.randint(0, 100)
-seed = 0
-rngkey = None
+import scipy.stats
 
 
 def get_dot_generals(f, *args):
@@ -38,134 +33,28 @@ def get_dot_generals(f, *args):
       yield (lhs.aval, rhs.aval, out.aval)
 
 
-def fake_quant(x, prec):
-  x_bound = jnp.max(jnp.abs(x))
-  scale = (2 ** (prec - 1) - 0.5) / x_bound
-  rc = primitives.round_and_clip_to_signed_int
-  return rc(x * scale, prec=prec, dtype=x.dtype, half_shift=False) / scale
+rngkey = None
 
 
 def rand_unif(shape, maxval):
   global rngkey
   if rngkey is None:
-    rngkey = jax.random.PRNGKey(seed)
+    rngkey = jax.random.PRNGKey(0)
   k1, k2 = jax.random.split(rngkey)
   rngkey = k1
   return jax.random.uniform(key=k2, shape=shape, minval=-maxval, maxval=maxval)
 
 
-def stddev_of_uniform(maxval):
-  return jnp.sqrt((2 * maxval) ** 2 / 12.0)
-
-
-def bucket_abs_noise(x, *, prec, axis, preserve_zero=True):
-  """noise_in_bucket * bucket_size ."""
-  # TODO(lew): use preserve_zero
-  # 2* becasue interval is [-maxabs(x), maxabs(x)]
-  interval_length = 2 * jnp.max(jnp.abs(x), axis=axis, keepdims=True)
-  bucket_count = 2**prec
-  if preserve_zero:
-    bucket_count -= 1
-  # We assuming here presever_max_val = false because we assume usage of the
-  # whole length of the edge buckets.
-  # presever_max_val = true would mean we use only half of edge buckets.
-  bucket_size = interval_length / bucket_count
-  noise_in_bucket = 1.0 / 4.0
-  return bucket_size * noise_in_bucket
-
-
-def expected_std_noise(x, *, prec, axis):
-  interval_length = 2 * jnp.max(jnp.abs(x), axis=axis, keepdims=True)
-  bucket_count = 2**prec - 1
-  bucket_size = interval_length / bucket_count
-  ret = bucket_size / jnp.sqrt(12.0)
-
-  def test():
-    maxval = jnp.max(jnp.abs(x), axis=axis, keepdims=True)
-    new_shape = list(x.shape)
-    if axis is None:
-      new_shape = (1,) * len(x.shape)
-    else:
-      new_shape[axis] = 1
-    ret2 = jnp.full(new_shape, stddev_of_uniform(maxval / bucket_count))
-    assert (jnp.abs(ret - ret2) < 0.001).all(), (ret, ret2)
-
-  test()
-  return ret
-
-
-def fq_noise_test(*, prec, maxval, sample_size, do_print=False):
-  a = rand_unif((sample_size,), maxval)
-  # aqt_config = aqtr.make_config(prec, prec)
-  # aqt_config = None  # TODO(lew): make a separate unit test
-  # dot_general = aqtr.make_dot_general(aqt_config)
-  # axes = (((0,), (0,)), ((), ()))
-  # qa_aqt_dg = dot_general(a, np.identity(sample_size), axes)
-
-  qa_fq = fake_quant(a, prec)
-  cfg = aqtr.make_tensor_config(prec, (0,))
-  cfg.calib_shared_axes = (0,)
-  qa_aqt_fq = aqtr.make_fake_quant(cfg)(a)
-
-  def compare(name, qa):
-    mean_abs_noise = jnp.mean(jnp.abs((qa - a)))
-    mean_std_noise = jnp.sqrt(jnp.mean((qa - a) ** 2))
-
-    # We need to show that mean_abs_noise is close to bucket_abs_noise
-    rel_abs_noise = jnp.log(
-        mean_abs_noise / bucket_abs_noise(a, prec=prec, axis=None)
-    )
-    rel_std_noise = jnp.log(
-        mean_std_noise / expected_std_noise(a, prec=prec, axis=None)
-    )
-    rel_abs_noise_scaled = rel_abs_noise * jnp.sqrt(sample_size)
-    rel_std_noise_scaled = rel_std_noise * jnp.sqrt(sample_size)
-
-    if do_print:
-      # print(f"max_a={max_a}")
-      # print(f"sa={sa}")
-      print(name)
-      print(qa.shape, a.shape)
-      if qa.size < 10:
-        print("a", a)
-        print("qa", qa)
-      # print(f"bucket_abs_noise={bucket_abs_noise}")
-      print(f"mean_abs_noise={mean_abs_noise}")
-      # print(f"noise_test={noise_test}")
-      print(
-          "rel_abs_noise *"
-          f" jnp.sqrt(sample_size)={rel_abs_noise * jnp.sqrt(sample_size)}"
-      )
-      print(f"mean_std_noise={mean_std_noise}")
-      print(
-          "expected_std_noise(a, prec=prec,"
-          f" axis=None)={expected_std_noise(a, prec=prec, axis=None)}"
-      )
-      print(f"rel_std_noise={rel_std_noise}")
-      print(
-          f"sample_size={sample_size}; {rel_abs_noise_scaled};"
-          f" {rel_std_noise_scaled}"
-      )
-      print()
-
-    # TODO(lew): This bound is too lax. We need to investigate or improve.
-    assert -4.0 < rel_abs_noise < 4.0  # standard sufficient test
-    assert -4.0 < rel_std_noise < 4.0  # standard sufficient test
-    # TODO(lew): Why did I have to comment out these tests?
-    # more sensitive tests:
-    # assert -4.0 < rel_abs_noise_scaled < 4.0, rel_abs_noise_scaled
-    # assert -4.0 < rel_std_noise_scaled < 4.0, rel_std_noise_scaled
-
-  compare("fake_quant", qa_fq)
-  compare("aqt fake_quant", qa_aqt_fq)
-  # compare("dot_general", qa_aqt_dg)
-
-
-# The main test strategyis :
+# The main test strategy is :
 # - Test that FQ is sensible (improve fq_noise_test)
+#   - Quantization noise (rounding error) is of proper value
+#   - Cliping is correct
+#   - Stochastic noise is added correctly.
 # - Test that we really use int8/int4/bool in XLA/HLO
 # - Test of fq vs dot_general equivalence in po2
 # - Test that it all applies to gradients
+#
+#
 # TODO(lew): Tests are a bit incomplete. What we need:
 # On top of that we shell test:
 #  - Gradinent is 1 in the range, 0 outside the abs-max range.
@@ -190,16 +79,25 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     t = np.random.normal(size=6).reshape((2, 3))
     np.testing.assert_array_equal(t, t)
 
-  def test_noise_levels(self):
-    for prec in [1, 2, 4, 8]:
-      for maxval in [0.1, 1000.0]:
-        for sample_size in [1, 2, 100]:
-          for _ in range(20):
-            fq_noise_test(
-                prec=prec,
-                maxval=maxval,
-                sample_size=sample_size,
-            )
+  def test_fq_noise(self):
+    for preserve_zero in [True, False]:
+      for prec in [1, 2, 4, 8]:
+        for v in [0.1, 1000.0]:
+          for seed in range(10):
+            key = jax.random.PRNGKey(seed)
+            cfg = aqtr.make_tensor_config(prec, (0,))
+            cfg.preserve_zero = preserve_zero
+            sample_size = 10000
+            shape = (sample_size,)
+            cfg.calib_shared_axes = (0,)
+            a = jax.random.uniform(key, shape, minval=-v, maxval=v)
+            qa = aqtr.make_fake_quant(cfg)(a)
+            bucket_noise = qa - a  #  ~ U(-bucket_size/2, bucket_size/2)
+            bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
+            bucket_size = (v * 2) / bucket_count
+            noise = bucket_noise / bucket_size + 0.5  # ~U(0, 1)
+            pvalue = scipy.stats.kstest(noise, "uniform").pvalue
+            assert pvalue > 0.01
 
   @parameterized.parameters([
       dict(bits=1),
@@ -310,13 +208,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def lax_dg_248(lhs, rhs):
       def dg_mul(delta):
+
         def dg(
             lhs,
             rhs,
             dimension_numbers,
             precision=None,
             preferred_element_type=None,
+            key=None,
         ):
+          del key
           return (
               jax.lax.dot_general(
                   lhs, rhs, dimension_numbers, precision, preferred_element_type

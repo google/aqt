@@ -17,7 +17,7 @@
 
 import copy
 import dataclasses
-from typing import Optional
+from typing import Optional, Callable
 import jax
 from jax import lax
 import jax.numpy as jnp
@@ -38,6 +38,9 @@ class TensorConfig:
   preserve_max_val: bool
   clip: bool
   round: bool
+  noise_fn: Optional[
+      Callable[[tuple[int, ...], jax.random.KeyArray], jnp.ndarray]
+  ]
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
 
@@ -58,6 +61,7 @@ def make_tensor_config(bits, preserve_zero=None) -> TensorConfig | None:
       preserve_max_val=False,
       clip=True,
       round=True,
+      noise_fn=None,
       po2_scale=False,
   )
 
@@ -156,6 +160,10 @@ def make_config_conv_general_dilated(
 # Also reducing eps is not good enough for po2 case.
 
 
+def _random_split(key: Optional[jax.random.KeyArray]):
+  return (None, None) if key is None else jax.random.split(key)
+
+
 def _get_max_value_representation(config: TensorConfig):
   """Largest quantization tensor value is mapped onto 'int' value returned by this function."""
   assert config.bits <= 22, 'Too many bits, float32 has less precision.'
@@ -210,6 +218,7 @@ def _round(x, round_to_halves=False):
   if round_to_halves:
     return jnp.floor(x) + 0.5
   else:
+    # TODO(lew): use RTNE round
     return jnp.floor(x + 0.5)
 
 
@@ -217,7 +226,7 @@ def _make_clip_and_round(config: TensorConfig):
   """Function make_clip_and_round."""
   clip_bound = _get_clip_bound(config)
 
-  def fwd(x):
+  def fwd(x, key):
     if config is None:
       return x
     if config.clip:
@@ -231,32 +240,40 @@ def _make_clip_and_round(config: TensorConfig):
         eps = 0.0
       fwd_clip_bound = clip_bound - eps
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
+    if config.noise_fn:
+      assert key is not None, (
+          'noise_fn is set, requestic stochastic rounding, but key key was not'
+          ' passed.'
+      )
+      x = x + config.noise_fn(x.shape, key)
     if config.round:
       x = _round(x, round_to_halves=not config.preserve_zero)
     return x
 
-  def vjp_fwd(x):
+  def vjp_fwd(x, key):
     res = (x,)
-    return fwd(x), res
+    return fwd(x, key), res
 
-  def vjp_bwd(res, grad):
+  def vjp_bwd(bad_key, res, grad):
+    del bad_key
     (x,) = res
     # This is gradient of clip. For boundary values we will have full graindent.
     ret = (x <= clip_bound) * (x >= -clip_bound) * grad
     return (ret,)
 
-  vjp = jax.custom_vjp(fwd)
+  vjp = jax.custom_vjp(fwd, nondiff_argnums=(1,))
   vjp.defvjp(vjp_fwd, vjp_bwd)
   return vjp
 
 
 def make_fake_quant(config: Optional[TensorConfig]):
-  def fake_quant(x):
+
+  def fake_quant(x, key=None):
     if not config:
       return x
     scale = _fresh_scale(x, config)
     x = x * scale
-    x = _make_clip_and_round(config)(x)
+    x = _make_clip_and_round(config)(x, key)
     x = x / scale
     return x
 
@@ -276,23 +293,25 @@ def make_dot_general(config: Optional[DotGeneralConfig], use_fake_quant=False):
       dimension_numbers,
       precision=None,
       preferred_element_type=None,
+      key=None,
   ):
     # All axes can be partitioned into:
     # - contraction axes (ca)
     # - batch axes (ba)
     # - remaining axes (ra).
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+    key_lhs, key_rhs = _random_split(key)
     if config.lhs:
       config.lhs.calib_shared_axes = config.lhs.calib_shared_axes or lhs_ca
       lhs_scale = _fresh_scale(lhs, config.lhs)
       lhs = lhs * lhs_scale
-      lhs = _make_clip_and_round(config.lhs)(lhs)
+      lhs = _make_clip_and_round(config.lhs)(lhs, key_lhs)
 
     if config.rhs:
       config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
-      rhs = _make_clip_and_round(config.rhs)(rhs)
+      rhs = _make_clip_and_round(config.rhs)(rhs, key_rhs)
 
     if config.use_hardware_int8:
       lhs = lhs.astype(jnp.int8)
@@ -379,8 +398,11 @@ def dot_general_with_gradient(
 ):
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
-  def vjp_fwd(lhs, rhs, dimension_numbers, precision, preferred_element_type):
-    res = (lhs, rhs)
+  def vjp_fwd(
+      lhs, rhs, dimension_numbers, precision, preferred_element_type, key=None
+  ):
+    key_fwd, key_bwd = _random_split(key)
+    res = (lhs, rhs, key_bwd)
     return (
         fwd_dot_general(
             lhs,
@@ -388,17 +410,22 @@ def dot_general_with_gradient(
             dimension_numbers,
             precision,
             preferred_element_type=preferred_element_type,
+            key=key_fwd,
         ),
         res,
     )
 
-  def vjp_bwd(fwd_dims, precision, preferred_element_type, res, g):
+  def vjp_bwd(fwd_dims, precision, preferred_element_type, bad_key, res, g):
+    # bad_key is the key that was captured in vjp_fwd.
+    # It was already used there and we should not use it here again.
+    # If we need a key, we should use one passed into res parameter.
+    del bad_key
     def ranges_like(*xs, start=0):
       for x in xs:
         yield tuple(range(start, start + len(x)))
         start += len(x)
 
-    def grad_dot_general(y, dot_general, y_is_lhs):
+    def grad_dot_general(y, dot_general, y_is_lhs, key):
       (x_ca, y_ca), (x_ba, y_ba) = fwd_dims
       if y_is_lhs:
         (y_ca, x_ca) = (x_ca, y_ca)
@@ -410,20 +437,20 @@ def dot_general_with_gradient(
         g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
       else:
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
-      out = dot_general(
-          g, y, ((g_ca, y_ra), (g_ba, y_ba)), precision, preferred_element_type
-      )
+      dims = ((g_ca, y_ra), (g_ba, y_ba))
+      out = dot_general(g, y, dims, precision, preferred_element_type, key=key)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(x_ba + x_ra + x_ca_sorted_by_y))
       return jax.lax.transpose(out, out_axes)
 
-    (lhs, rhs) = res
-    dlhs = grad_dot_general(rhs, dlhs_dot_general, False)
-    drhs = grad_dot_general(lhs, drhs_dot_general, True)
+    (lhs, rhs, key_bwd) = res
+    key1, key2 = _random_split(key_bwd)
+    dlhs = grad_dot_general(rhs, dlhs_dot_general, False, key1)
+    drhs = grad_dot_general(lhs, drhs_dot_general, True, key2)
     return dlhs, drhs
 
-  vjp = jax.custom_vjp(fwd_dot_general, nondiff_argnums=(2, 3, 4))
+  vjp = jax.custom_vjp(fwd_dot_general, nondiff_argnums=(2, 3, 4, 5))
   vjp.defvjp(vjp_fwd, vjp_bwd)
   return vjp
 
@@ -471,13 +498,13 @@ However if there is any other use, we will drop that assumption."""
       assert config.lhs.calib_shared_axes == list(range(1, rank))
       lhs_scale = _fresh_scale(lhs, config.lhs)
       lhs = lhs * lhs_scale
-      lhs = _make_clip_and_round(config.lhs)(lhs)
+      lhs = _make_clip_and_round(config.lhs)(lhs, None)
 
     if config.rhs:
       assert config.rhs.calib_shared_axes == list(range(0, rank - 1))
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
-      rhs = _make_clip_and_round(config.rhs)(rhs)
+      rhs = _make_clip_and_round(config.rhs)(rhs, None)
 
     out = lax.conv_general_dilated(
         lhs=lhs,
