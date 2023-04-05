@@ -19,90 +19,221 @@ import typing
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from aqt.jax_legacy.jax import sparsity
+
 from aqt.jax_legacy.jax.flax import struct as flax_struct
+import aqt.jax_legacy.jax.sparse_context as SparseContext
 from aqt.jax_legacy.jax.sparsity import SparseHParams
 from aqt.jax_legacy.jax.sparsity import Sparsity
+
 from flax import linen as nn
+
 import jax
 from jax import numpy as jnp
 from jax import random
+
 import numpy as np
 
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (
+    flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+)
 
 
 class SparsityTest(parameterized.TestCase):
 
-  def init_model(self, update_mask, apply_mask, unstruct_sparsity,
-                 structure_decay=False,
-                 num_update_sparsity=0,
-                 mask_decay_weight=0.0,
-                 prune_rate=(2, 4),
-                 sparse_ste=False):
+  def init_model(
+      self,
+      update_mask,
+      apply_mask,
+      sparsity_type,
+      structure_decay=False,
+      num_update_sparsity=0,
+      mask_decay_weight=0.0,
+      prune_rate=(2, 4),
+      sparse_ste=False,
+  ):
     rng = random.PRNGKey(0)
     self.inputs = jnp.array([[3, 4, 6], [1, 2, 1]])
-    if unstruct_sparsity:
-      sparsity_hparams = SparseHParams(
-          type='UNSTRUCTURED', prune_rate=0.2, structure_decay=structure_decay,
-          mask_decay_weight=mask_decay_weight,
-          sparse_ste=sparse_ste)
-    else:
+    if sparsity_type == 0:
       sparsity_hparams = SparseHParams(
           type='STRUCTURED_NM',
           prune_rate=prune_rate,
           structure_decay=structure_decay,
           mask_decay_weight=mask_decay_weight,
-          sparse_ste=sparse_ste)
+          sparse_ste=sparse_ste,
+      )
+    elif sparsity_type == 1:
+      sparsity_hparams = SparseHParams(
+          type='UNSTRUCTURED',
+          prune_rate=prune_rate,
+          structure_decay=structure_decay,
+          mask_decay_weight=mask_decay_weight,
+          sparse_ste=sparse_ste,
+      )
+    elif sparsity_type == 2:
+      sparsity_hparams = SparseHParams(
+          type='STRUCTURED_NMC',
+          prune_rate=prune_rate,
+          structure_decay=structure_decay,
+          mask_decay_weight=mask_decay_weight,
+          sparse_ste=sparse_ste,
+      )
+    else:
+      assert False
+
     sparsity_module = Sparsity(sparsity_hparams=sparsity_hparams)
     init_mask = sparsity_module.init(
-        rng, self.inputs, update_mask=update_mask, apply_mask=apply_mask,
-        num_update_sparsity=num_update_sparsity)
+        rng,
+        self.inputs,
+        update_mask=update_mask,
+        apply_mask=apply_mask,
+        num_update_sparsity=num_update_sparsity,
+    )
     return sparsity_module, init_mask
 
-  @parameterized.named_parameters(('unstruct', True), ('struct', False))
-  def test_init(self, unstruct_sparsity):
-    _, init_state = self.init_model(False, False, unstruct_sparsity)
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='structured_nm',
+          sparsity_type=0,
+          prune_rate=(2, 4),
+      ),
+      dict(
+          testcase_name='unstructured',
+          sparsity_type=1,
+          prune_rate=0.1,
+      ),
+      dict(
+          testcase_name='structured_nmc',
+          sparsity_type=2,
+          prune_rate=(2, 2, 2),
+      ),
+  )
+  def test_init(self, sparsity_type, prune_rate):
+    update_mask = SparseContext.DynamicContext(update_mask=False)
+    _, init_state = self.init_model(
+        apply_mask=False,
+        prune_rate=prune_rate,
+        update_mask=update_mask,
+        sparsity_type=sparsity_type,
+    )
     init_state_mask = init_state['sparsity']['mask']
-    np.testing.assert_array_equal(init_state_mask,
-                                  [[True, True, True], [True, True, True]])
+    np.testing.assert_array_equal(init_state_mask, [[0, 0, 0], [0, 0, 0]])
+
+  def test_structured_nm_with_no_pruning(self):
+    update_mask = SparseContext.DynamicContext(update_mask=False)
+    model, init_state = self.init_model(
+        update_mask=update_mask,
+        apply_mask=False,
+        sparsity_type=0,
+        structure_decay=False,
+        prune_rate=(4, 4),
+    )
+    np.testing.assert_array_equal(
+        init_state['sparsity']['mask'], jnp.array([[0, 0, 0], [0, 0, 0]])
+    )
+    # We need inputs that are divisible by four.
+    inputs = jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    update_mask = SparseContext.DynamicContext(update_mask=True)
+    model_out, state_0 = model.apply(
+        init_state,
+        inputs,
+        update_mask=update_mask,
+        apply_mask=True,
+        mutable='sparsity',
+    )
+    np.testing.assert_array_equal(
+        model_out, jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    )
+    np.testing.assert_array_equal(
+        state_0['sparsity']['mask'], jnp.array([[1, 1, 1, 1], [1, 1, 1, 1]])
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='structured_nmc_2_2_2',
+          inputs=[[3, 4, 6, 1], [1, 2, 1, 4]],
+          outputs=[[3, 4, 6, 0], [0, 0, 0, 4]],
+          mask=[[1, 1, 1, 0], [0, 0, 0, 1]],
+          prunt_rate=(2, 2, 2),
+      ),
+      dict(
+          testcase_name='structured_nmc_2_2_4',
+          inputs=[[3, 4, 6, 1], [1, 2, 1, 5], [-1, 2, 6, -4], [0, 2, -7, -2]],
+          outputs=[[0, 0, 6, 0], [0, 0, 0, 5], [0, 0, 6, 0], [0, 0, -7, 0]],
+          mask=[[0, 0, 1, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]],
+          prunt_rate=(2, 2, 4),
+      ),
+      dict(
+          testcase_name='structured_nmc_1_4_2',
+          inputs=[[3, 4, 6, 1], [1, 2, 1, 5], [-1, 2, 6, -4], [0, 2, -7, -2]],
+          outputs=[[0, 4, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, -7, 0]],
+          mask=[[0, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 0]],
+          prunt_rate=(1, 4, 2),
+      ),
+  )
+  def test_structured_nmc(self, inputs, outputs, mask, prunt_rate):
+    update_mask = SparseContext.DynamicContext(update_mask=False)
+    model, init_state = self.init_model(
+        update_mask=update_mask,
+        apply_mask=False,
+        sparsity_type=2,
+        structure_decay=False,
+        prune_rate=prunt_rate,
+    )
+    # We need inputs that are divisible by four.
+    jin = jnp.array(inputs)
+    update_mask = SparseContext.DynamicContext(update_mask=True)
+    model_out, state_0 = model.apply(
+        init_state,
+        jin,
+        update_mask=update_mask,
+        apply_mask=True,
+        mutable='sparsity',
+    )
+    np.testing.assert_array_equal(model_out, jnp.array(outputs))
+    np.testing.assert_array_equal(state_0['sparsity']['mask'], jnp.array(mask))
 
   @parameterized.named_parameters(
       dict(
           testcase_name='initial_structure_decay',
           num_update_sparsity=0,
           out=[[3, 4, 6, 8], [1, 2, 1, 4]],
-          mask=[[True, True, True, True], [True, True, True, True]]),
+          mask=[[1, 1, 1, 1], [1, 1, 1, 1]],
+      ),
       dict(
           testcase_name='first_iteration_structure_decay',
           num_update_sparsity=1,
           out=[[0, 4, 6, 8], [0, 2, 1, 4]],
-          mask=[[False, True, True, True], [False, True, True, True]]),
+          mask=[[0, 1, 1, 1], [0, 1, 1, 1]],
+      ),
       dict(
           testcase_name='second_iteration_structure_decay',
           num_update_sparsity=2,
           out=[[0, 0, 0, 8], [0, 0, 0, 4]],
-          mask=[[False, False, False, True], [False, False, False, True]]),
+          mask=[[0, 0, 0, 1], [0, 0, 0, 1]],
+      ),
       dict(
           testcase_name='third_iteration_structure_decay',
           num_update_sparsity=3,
           out=[[0, 0, 0, 8], [0, 0, 0, 4]],
-          mask=[[False, False, False, True], [False, False, False, True]]),
+          mask=[[0, 0, 0, 1], [0, 0, 0, 1]],
+      ),
   )
   def test_structure_decay(self, num_update_sparsity, out, mask):
+    update_mask = SparseContext.DynamicContext(update_mask=False)
     model, init_state = self.init_model(
-        update_mask=False,
+        update_mask=update_mask,
         apply_mask=False,
-        unstruct_sparsity=False,
+        sparsity_type=0,
         structure_decay=True,
         prune_rate=(4, 4))
     # We need inputs that are divisible by four.
     inputs = jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    update_mask = SparseContext.DynamicContext(update_mask=True)
     model_out, state_0 = model.apply(
         init_state,
         inputs,
-        update_mask=True,
+        update_mask=update_mask,
         apply_mask=True,
         num_update_sparsity=num_update_sparsity,
         mutable='sparsity')
@@ -114,159 +245,71 @@ class SparsityTest(parameterized.TestCase):
           testcase_name='initial_mask_decay',
           num_update_sparsity=0,
           out=[[3, 4, 6, 8], [1, 2, 1, 4]],
-          mask=[[False, False, True, True], [False, True, False, True]]),
+          mask=[[0, 0, 1, 1], [0, 1, 0, 1]]),
       dict(
           testcase_name='first_iteration_mask_decay',
           num_update_sparsity=1,
           out=[[0.9 * 3, 0.9 * 4, 6, 8], [0.9 * 1, 2, 0.9 * 1, 4]],
-          mask=[[False, False, True, True], [False, True, False, True]]),
+          mask=[[0, 0, 1, 1], [0, 1, 0, 1]]),
       dict(
           testcase_name='second_iteration_mask_decay',
           num_update_sparsity=2,
           out=[[0.8 * 3, 0.8 * 4, 6, 8], [0.8 * 1, 2, 0.8 * 1, 4]],
-          mask=[[False, False, True, True], [False, True, False, True]]),
+          mask=[[0, 0, 1, 1], [0, 1, 0, 1]]),
       dict(
           testcase_name='third_iteration_mask_decay',
           num_update_sparsity=3,
           out=[[0.7 * 3, 0.7 * 4, 6, 8], [0.7 * 1, 2, 0.7 * 1, 4]],
-          mask=[[False, False, True, True], [False, True, False, True]]),
+          mask=[[0, 0, 1, 1], [0, 1, 0, 1]]),
       dict(
           testcase_name='ninth_iteration_mask_decay',
           num_update_sparsity=9,
           out=[[0.1 * 3, 0.1 * 4, 6, 8], [0.1 * 1, 2, 0.1 * 1, 4]],
-          mask=[[False, False, True, True], [False, True, False, True]]),
+          mask=[[0, 0, 1, 1], [0, 1, 0, 1]]),
       dict(
           testcase_name='tenth_iteration_mask_decay',
           num_update_sparsity=10,
           out=[[0.0 * 3, 0.0 * 4, 6, 8], [0.0 * 1, 2, 0.0 * 1, 4]],
-          mask=[[False, False, True, True], [False, True, False, True]]),
+          mask=[[0, 0, 1, 1], [0, 1, 0, 1]]),
   )
   def test_mask_decay(self, num_update_sparsity, out, mask):
+    update_mask = SparseContext.DynamicContext(update_mask=False)
     model, init_state = self.init_model(
-        update_mask=False,
+        update_mask=update_mask,
         apply_mask=False,
-        unstruct_sparsity=False,
+        sparsity_type=0,
         structure_decay=False,
         mask_decay_weight=0.1,
         prune_rate=(2, 4))
     # We need inputs that are divisible by four.
-    inputs = jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    inputs = jnp.array([[3., 4., 6., 8.], [1., 2., 1., 4.]])
+    update_mask = SparseContext.DynamicContext(update_mask=True)
     model_out, state_0 = model.apply(
         init_state,
         inputs,
-        update_mask=True,
+        update_mask=update_mask,
         apply_mask=True,
         num_update_sparsity=num_update_sparsity,
         mutable='sparsity')
     np.testing.assert_allclose(model_out, out)
     np.testing.assert_array_equal(state_0['sparsity']['mask'], mask)
 
-  # TODO(ayazdan): Add a more general test for other forms of sparsity.
-  def test_sorting_network_sparse_2_4(self):
-    key = random.PRNGKey(0)
-    inputs = random.normal(key, (2, 5, 16))
-    print(inputs)
-    # n = 4
-    # k = 2
-    m = 4
-    n = 2
-    alpha = 1.0
-    # JAX Top-K Implementation.
-    xs = jnp.stack(
-        jnp.split(inputs, int(jnp.shape(inputs)[-1] / m), axis=-1), axis=0)
-    topk = jax.lax.top_k(xs, k=n)
-    mask = jax.numpy.sum(
-        jax.nn.one_hot(topk[1],
-                       jnp.shape(xs)[-1]), axis=len(jnp.shape(inputs)))
-    topk_filter = jnp.where(
-        jnp.equal(mask, 0.), jnp.full(list(jnp.shape(mask)), alpha - 1), mask)
-    filtered = jnp.multiply(xs, topk_filter)
-    ys = jnp.concatenate(
-        jnp.moveaxis(filtered, 0, 0), axis=len(jnp.shape(inputs)) - 1)
-    print(ys)
-    ys_hat = sparsity.prune_2_4(inputs)
-    print(ys_hat)
-    np.testing.assert_array_equal(ys, ys_hat)
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='row_wise_pruning',
-          order='R',
-          exp_output=[[0, 0, 3, 4, 0, 0, 7, 8],
-                      [0, 0, 11, 12, 0, 0, 15, 16],
-                      [0, 0, 19, 20, 0, 0, 23, 24],
-                      [0, 0, 27, 28, 0, 0, 31, 32]]),
-      dict(
-          testcase_name='column_wise_pruning',
-          order='C',
-          exp_output=[[0, 0, 0, 0, 0, 0, 0, 0],
-                      [0, 0, 0, 0, 0, 0, 0, 0],
-                      [17, 18, 19, 20, 21, 22, 23, 24],
-                      [25, 26, 27, 28, 29, 30, 31, 32]]))
-  def test_column_row_pruning(self, order, exp_output):
-    inputs = jnp.reshape(jnp.arange(1, 33), (4, 8))
-    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, order=order)
-    np.testing.assert_array_equal(output, exp_output)
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='column_wise_pruning',
-          order='C',
-          exp_output=[[[0, 0, 0, 0],
-                       [0, 0, 0, 0],
-                       [9, 10, 11, 12],
-                       [13, 14, 15, 16]],
-                      [[0, 0, 0, 0],
-                       [0, 0, 0, 0],
-                       [25, 26, 27, 28],
-                       [29, 30, 31, 32]],
-                      [[0, 0, 0, 0],
-                       [0, 0, 0, 0],
-                       [41, 42, 43, 44],
-                       [45, 46, 47, 48]],
-                      [[0, 0, 0, 0],
-                       [0, 0, 0, 0],
-                       [57, 58, 59, 60],
-                       [61, 62, 63, 64]]]))
-  def test_3d_column_pruning(self, order, exp_output):
-    inputs = jnp.reshape(jnp.arange(1, 65), (4, 4, 4))
-    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, order=order)
-    np.testing.assert_array_equal(output, exp_output)
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='offset_zero',
-          offset=0,
-          exp_output=[[0, 0, 3, 14, 0, 16, 0, 18, 0, 20],
-                      [0, 12, 13, 0, 15, 0, 17, 0, 19, 0]]),
-      dict(
-          testcase_name='offset_positive',
-          offset=5,
-          exp_output=[[0, 0, 0, 14, 0, 16, 0, 18, 0, 20],
-                      [11, 12, 13, 0, 15, 0, 17, 0, 19, 0]]))
-  def test_n_m_row_wise_sparsity_with_offset(self, offset, exp_output):
-    inputs = jnp.array([[1, 2, 3, 14, 5, 16, 7, 18, 9, 20],
-                        [11, 12, 13, 4, 15, 6, 17, 8, 19, 10]])
-
-    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, offset=offset)
-    np.testing.assert_array_equal(output, exp_output)
-
   @parameterized.named_parameters(
       dict(
           testcase_name='update_mask_apply_mask',
-          update_mask=True,
+          update_mask=SparseContext.DynamicContext(update_mask=True),
           apply_mask=True),
       dict(
           testcase_name='no_update_mask_apply_mask',
-          update_mask=False,
+          update_mask=SparseContext.DynamicContext(update_mask=False),
           apply_mask=True),
       dict(
           testcase_name='update_mask_no_apply_mask',
-          update_mask=True,
+          update_mask=SparseContext.DynamicContext(update_mask=True),
           apply_mask=False),
       dict(
           testcase_name='no_update_mask_no_apply_mask',
-          update_mask=False,
+          update_mask=SparseContext.DynamicContext(update_mask=False),
           apply_mask=False),
   )
   def test_sr_ste_fwd_pass(self, update_mask, apply_mask):
@@ -278,34 +321,40 @@ class SparsityTest(parameterized.TestCase):
         structure_decay=False,
         mask_decay_weight=0.0,
     )
-    inputs = jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    inputs = jnp.array([[3., 4., 6., 8.], [1., 2., 1., 4.]])
     sparsity_module = Sparsity(sparsity_hparams=sparsity_hparams)
     init_state = sparsity_module.init(
         rng,
         inputs,
-        update_mask=False,
+        update_mask=SparseContext.DynamicContext(update_mask=False),
         apply_mask=True,
         num_update_sparsity=0.0)
     # We need inputs that are divisible by four.
-    inputs = jnp.array([[3, 4, 6, 8], [1, 2, 1, 4]])
+    inputs = jnp.array([[3., 4., 6., 8.], [1., 2., 1., 4.]])
     out, state_0 = sparsity_module.apply(
         init_state,
         inputs,
         update_mask=update_mask,
         apply_mask=apply_mask,
-        mutable='sparsity')
+        mutable='sparsity',
+    )
     state_0_mask = state_0['sparsity']['mask']
-    if not apply_mask or not update_mask:
+    if not apply_mask:
       np.testing.assert_array_equal(out, inputs)
-    else:
+    elif apply_mask and not update_mask.update_mask:
+      np.testing.assert_array_equal(
+          out, jnp.array([[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
+      )
+    elif apply_mask and update_mask.update_mask:
       np.testing.assert_array_equal(out, [[0, 0, 6, 8], [0, 2, 0, 4]])
-    if update_mask:
+
+    if update_mask.update_mask:
       np.testing.assert_array_equal(
           state_0_mask,
-          [[False, False, True, True], [False, True, False, True]])
+          [[0, 0, 1, 1], [0, 1, 0, 1]])
     else:
       np.testing.assert_array_equal(
-          state_0_mask, [[True, True, True, True], [True, True, True, True]])
+          state_0_mask, [[0, 0, 0, 0], [0, 0, 0, 0]])
 
     inputs2 = jnp.array([[2., 3., 1., 1.], [2., -6., 1., 5.]])
     out, state = sparsity_module.apply(
@@ -313,21 +362,23 @@ class SparsityTest(parameterized.TestCase):
         inputs2,
         update_mask=update_mask,
         apply_mask=apply_mask,
-        mutable='sparsity')
+        mutable='sparsity',
+    )
     state_mask = state['sparsity']['mask']
-    if not apply_mask or not update_mask:
+    if not apply_mask:
       np.testing.assert_array_equal(out, inputs2)
-    else:
-      np.testing.assert_array_equal(out, [[2., 3., 0., 0.], [0., -6., 0., 5.]])
-    if update_mask:
+    elif apply_mask and not update_mask.update_mask:
       np.testing.assert_array_equal(
-          state_mask, [[True, True, False, False], [False, True, False, True]])
+          out, jnp.array([[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
+      )
+    elif apply_mask and update_mask.update_mask:
+      np.testing.assert_array_equal(out, [[2, 3, 0, 0], [0, -6, 0, 5]])
+    if update_mask.update_mask:
+      np.testing.assert_array_equal(state_mask, [[1, 1, 0, 0], [0, 1, 0, 1]])
     else:
-      np.testing.assert_array_equal(
-          state_mask, [[True, True, True, True], [True, True, True, True]])
+      np.testing.assert_array_equal(state_mask, [[0, 0, 0, 0], [0, 0, 0, 0]])
 
   def test_sr_ste_bwd_pass(self):
-
     class SingleLayer(nn.Module):
 
       @dataclass
@@ -340,16 +391,18 @@ class SparsityTest(parameterized.TestCase):
       def __call__(
           self,
           inputs: jnp.ndarray,
-          update_mask: bool,
-          apply_mask: bool
+          update_mask: SparseContext.DynamicContext,
+          apply_mask: bool,
       ) -> jnp.ndarray:
         kernel = self.param('kernel', nn.initializers.ones, (1, 4))
         kernel = Sparsity(
-            sparsity_hparams=self.hparams.sparsity, name='weight_sparsity')(
-                kernel,
-                update_mask=update_mask,
-                apply_mask=apply_mask,
-                num_update_sparsity=0)
+            sparsity_hparams=self.hparams.sparsity, name='weight_sparsity'
+        )(
+            kernel,
+            update_mask=update_mask,
+            apply_mask=apply_mask,
+            num_update_sparsity=0,
+        )
         return jnp.multiply(inputs, kernel)
 
     rng = random.PRNGKey(0)
@@ -361,20 +414,23 @@ class SparsityTest(parameterized.TestCase):
             sparse_ste=True,
             structure_decay=False,
             mask_decay_weight=0.0,
-        ))
+        )
+    )
 
-    inputs = jnp.array([[2., 3., -5., 6.]])
+    inputs = jnp.array([[2.0, 3.0, -5.0, 6.0]])
 
     def loss_fn(params, state):
       del state
       model = SingleLayer(**layer_kwargs)
-      y, updated_state = model.apply({
-          'params': params,
-      },
-                                     inputs,
-                                     update_mask=True,
-                                     apply_mask=True,
-                                     mutable=True)
+      y, updated_state = model.apply(
+          {
+              'params': params,
+          },
+          inputs,
+          update_mask=SparseContext.DynamicContext(update_mask=True),
+          apply_mask=True,
+          mutable=True,
+      )
       total_loss = jnp.sum(y)
       return total_loss, updated_state
 
@@ -385,7 +441,11 @@ class SparsityTest(parameterized.TestCase):
 
     module = SingleLayer(**layer_kwargs)
     variables = module.init(
-        rng, jnp.zeros(inputs.shape), update_mask=False, apply_mask=False)
+        rng,
+        jnp.zeros(inputs.shape),
+        update_mask=SparseContext.DynamicContext(update_mask=False),
+        apply_mask=False,
+    )
     state, params = variables.pop('params')
     del variables
     for _ in range(10):
@@ -393,237 +453,116 @@ class SparsityTest(parameterized.TestCase):
       # ste_weight = 0.0002 and added to corresponding gradients.
       # In this simple example, gradients are simply the inputs to the network.
       (_, state), grads = jax.value_and_grad(
-          loss_fn, has_aux=True, allow_int=True)(params, state)
+          loss_fn, has_aux=True, allow_int=True
+      )(params, state)
       np.testing.assert_allclose(
-          grads['kernel'], inputs + 0.0002 * jnp.multiply(
-              ~state['sparsity']['weight_sparsity']['mask'], params['kernel']))
+          grads['kernel'],
+          inputs
+          + 0.0002
+          * jnp.multiply(
+              ~(state['sparsity']['weight_sparsity']['mask'].astype(bool)),
+              params['kernel'],
+          ),
+      )
       params = update_params(params, grads)
-
-
-# TODO(shivaniagrawal): Add tests for struct sparsity as well.
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='update_mask_apply_mask',
-          update_mask=True,
-          apply_mask=True,
-      ),
-      dict(
-          testcase_name='no_update_mask_apply_mask',
-          update_mask=False,
-          apply_mask=True),
-      dict(
-          testcase_name='update_mask_no_apply_mask',
-          update_mask=True,
-          apply_mask=False),
-      dict(
-          testcase_name='no_update_mask_no_apply_mask',
-          update_mask=False,
-          apply_mask=False),
-  )
-  def test_mask(self, update_mask, apply_mask):
-    model, init_state = self.init_model(
-        update_mask, False, unstruct_sparsity=True)
-    out, state_0 = model.apply(
-        init_state,
-        self.inputs,
-        update_mask=update_mask,
-        apply_mask=apply_mask,
-        mutable='sparsity')
-
-    state_0_mask = state_0['sparsity']['mask']
-    if not apply_mask or not update_mask:
-      np.testing.assert_array_equal(out, self.inputs)
-    else:
-      np.testing.assert_array_equal(out, [[3, 4, 6], [0, 2, 1]])
-    if update_mask:
-      np.testing.assert_array_equal(state_0_mask,
-                                    [[True, True, True], [False, True, True]])
-    else:
-      np.testing.assert_array_equal(state_0_mask,
-                                    [[True, True, True], [True, True, True]])
-
-    inputs2 = jnp.array([[2, 3, 1], [5, 4, 2]])
-    out, state = model.apply(
-        state_0,
-        inputs2,
-        update_mask=update_mask,
-        apply_mask=apply_mask,
-        mutable='sparsity')
-    state_mask = state['sparsity']['mask']
-    if not apply_mask or not update_mask:
-      np.testing.assert_array_equal(out, inputs2)
-    else:
-      np.testing.assert_array_equal(out, [[2, 3, 0], [5, 4, 2]])
-    if update_mask:
-      np.testing.assert_array_equal(state_mask,
-                                    [[True, True, False], [True, True, True]])
-    else:
-      np.testing.assert_array_equal(state_mask,
-                                    [[True, True, True], [True, True, True]])
 
 
 class PruningParamsTest(parameterized.TestCase):
 
   @parameterized.parameters(
       dict(sparse_type='STRUCTURED_NM', prune_rate=0.1),
-      dict(sparse_type='UNSTRUCTURED', prune_rate=(4, 1)))
+      dict(sparse_type='UNSTRUCTURED', prune_rate=(4, 1)),
+  )
   def test_invalid_params(self, sparse_type, prune_rate):
     with self.assertRaisesRegex(
-        AssertionError, 'prune rate should be either None for no pruning'):
-      sparsity.SparseHParams(type=sparse_type, prune_rate=prune_rate)
+        AssertionError, 'prune rate should be either None for no pruning'
+    ):
+      SparseHParams(type=sparse_type, prune_rate=prune_rate)
 
   @parameterized.parameters(
       dict(
-          sparse_type='STRUCTURED_NM',
-          prune_rate=(4, 1),
-          mask_decay_weight=-0.1),
-      dict(sparse_type='UNSTRUCTURED', prune_rate=0.2, mask_decay_weight=-0.1))
-  def test_invalid_mask_decay_weight(self, sparse_type, prune_rate,
-                                     mask_decay_weight):
-    with self.assertRaisesRegex(AssertionError,
-                                '.* `mask_decay_weight` must be positive.'):
-      sparsity.SparseHParams(
-          type=sparse_type,
-          prune_rate=prune_rate,
-          mask_decay_weight=mask_decay_weight)
-
-  @parameterized.parameters(
-      dict(
-          sparse_type='STRUCTURED_NM',
-          prune_rate=(4, 1),
-          sparse_ste=True,
-          mask_decay_weight=0.1),
-      dict(
-          sparse_type='UNSTRUCTURED',
-          prune_rate=0.2,
-          sparse_ste=True,
-          mask_decay_weight=0.1))
-  def test_invalid_sparse_ste_with_non_zero_mask_decay_weight(
-      self, sparse_type, prune_rate, sparse_ste, mask_decay_weight):
-    with self.assertRaisesRegex(ValueError,
-                                'SR-STE only works with non-decaying mask.'):
-      sparsity.SparseHParams(
-          type=sparse_type,
-          prune_rate=prune_rate,
-          sparse_ste=sparse_ste,
-          mask_decay_weight=mask_decay_weight)
-
-  @parameterized.parameters(
-      dict(
-          sparse_type='STRUCTURED_NM',
-          prune_rate=(4, 1),
-          sparse_ste=True,
-          structure_decay=True),
-      dict(
-          sparse_type='UNSTRUCTURED',
-          prune_rate=0.2,
-          sparse_ste=True,
-          structure_decay=True))
-  def test_invalid_sparse_ste_with_structure_decay(self, sparse_type,
-                                                   prune_rate, sparse_ste,
-                                                   structure_decay):
+          sparse_type='STRUCTURED_NM', prune_rate=(4, 1), mask_decay_weight=-0.1
+      ),
+      dict(sparse_type='UNSTRUCTURED', prune_rate=0.2, mask_decay_weight=-0.1),
+  )
+  def test_invalid_mask_decay_weight(
+      self, sparse_type, prune_rate, mask_decay_weight
+  ):
     with self.assertRaisesRegex(
-        ValueError,
-        'SR-STE only works with non-decaying sparse structure.'):
-      sparsity.SparseHParams(
+        AssertionError, '.* `mask_decay_weight` must be positive.'
+    ):
+      SparseHParams(
           type=sparse_type,
           prune_rate=prune_rate,
-          sparse_ste=sparse_ste,
-          structure_decay=structure_decay)
-
-  @parameterized.parameters(
-      dict(sparse_type='UNSTRUCTURED', prune_rate=0.2, sparse_ste=True))
-  def test_invalid_sparse_ste_with_unstructured_sparsity(
-      self, sparse_type, prune_rate, sparse_ste):
-    with self.assertRaisesRegex(ValueError,
-                                'SR-STE only works with structured sparsity.'):
-      sparsity.SparseHParams(
-          type=sparse_type,
-          prune_rate=prune_rate,
-          sparse_ste=sparse_ste)
+          mask_decay_weight=mask_decay_weight,
+      )
 
   @parameterized.parameters(
       dict(
           sparse_type='STRUCTURED_NM',
           prune_rate=(4, 1),
-          error_msg='must be lower than prune_rate'),
+          sparse_ste=True,
+          mask_decay_weight=0.1,
+      ),
       dict(
           sparse_type='UNSTRUCTURED',
-          prune_rate=2.5,
-          error_msg='sparsity ratio can not be > 1, provided prune_rate'))
-  def test_invalid_prune_rate(self, sparse_type, prune_rate, error_msg):
-    sparsity_hparams = sparsity.SparseHParams(
-        type=sparse_type, prune_rate=prune_rate)
+          prune_rate=0.2,
+          sparse_ste=True,
+          mask_decay_weight=0.1,
+      ),
+  )
+  def test_invalid_sparse_ste_with_non_zero_mask_decay_weight(
+      self, sparse_type, prune_rate, sparse_ste, mask_decay_weight
+  ):
+    with self.assertRaisesRegex(
+        ValueError, 'SR-STE only works with non-decaying mask.'
+    ):
+      SparseHParams(
+          type=sparse_type,
+          prune_rate=prune_rate,
+          sparse_ste=sparse_ste,
+          mask_decay_weight=mask_decay_weight,
+      )
 
-    inputs = jnp.arange(12)
-    with self.assertRaisesRegex(AssertionError, error_msg):
-      sparsity.get_sparsity_mask(inputs, sparsity_hparams)
+  @parameterized.parameters(
+      dict(
+          sparse_type='STRUCTURED_NM',
+          prune_rate=(4, 1),
+          sparse_ste=True,
+          structure_decay=True,
+      ),
+      dict(
+          sparse_type='UNSTRUCTURED',
+          prune_rate=0.2,
+          sparse_ste=True,
+          structure_decay=True,
+      ),
+  )
+  def test_invalid_sparse_ste_with_structure_decay(
+      self, sparse_type, prune_rate, sparse_ste, structure_decay
+  ):
+    with self.assertRaisesRegex(
+        ValueError, 'SR-STE only works with non-decaying sparse structure.'
+    ):
+      SparseHParams(
+          type=sparse_type,
+          prune_rate=prune_rate,
+          sparse_ste=sparse_ste,
+          structure_decay=structure_decay,
+      )
 
-
-class PruningFunctionalityTest(parameterized.TestCase):
-
-  def test_pruning_mask(self):
-    # Total number of parameters = 20
-    inputs = jnp.array(np.random.rand(10, 2))
-    mask = sparsity.get_pruning_unstruct_mask(inputs, prune_rate=0.1)
-    self.assertEqual(jnp.sum(mask), 18)
-
-  def test_smallest_largest_magnitude_mask(self):
-    # Total number of parameters = 20
-    inputs = jnp.array(np.arange(20))
-    mask = sparsity.get_pruning_unstruct_mask(
-        inputs, smallest=True, prune_rate=0.1)
-    self.assertFalse(mask[0])
-    self.assertFalse(mask[1])
-
-    mask = sparsity.get_pruning_unstruct_mask(
-        inputs, smallest=False, prune_rate=0.1)
-    self.assertFalse(mask[-1])
-    self.assertFalse(mask[-2], 0)
-
-  def test_prune_inputs_unstruct(self):
-    # Total number of parameters = 20
-    inputs = jnp.array(np.random.rand(10, 2))
-    prune_input = sparsity.prune_inputs_unstruct(inputs)
-    self.assertEqual(jnp.sum(prune_input == 0), 2)
-
-  def test_smallest_largest_magnitude_prune_unstruct(self):
-    # Total number of parameters = 20
-    inputs = jnp.array(np.arange(20))
-    prune_input = sparsity.prune_inputs_unstruct(inputs, prune_rate=0.1)
-    self.assertEqual(prune_input[0], 0)
-    self.assertEqual(prune_input[1], 0)
-
-    prune_input = sparsity.prune_inputs_unstruct(
-        inputs, prune_rate=0.1, smallest=False)
-    self.assertEqual(prune_input[-1], 0)
-    self.assertEqual(prune_input[-2], 0)
-
-  def test_prune_inputs_n_m(self):
-    inputs = jnp.array(np.random.rand(10, 2, 4))
-    out = sparsity.prune_inputs_n_m(inputs, n=1, m=4)
-    self.assertEqual(out.shape[0], inputs.shape[0])
-    self.assertEqual(out.shape[1], inputs.shape[1])
-    self.assertEqual(out.shape[2], inputs.shape[2])
-    # Only 20 non-zero elements must exist after pruning.
-    self.assertEqual(out[out != 0].shape[0], 20)
-    self.assertEqual(
-        list(np.argmax(inputs, axis=2).flatten()),
-        list(np.argmax(out != 0, axis=2).flatten()))
-
-  def test_order_not_valid(self):
-    inputs = jnp.array(np.random.rand(10, 2, 4))
-    with self.assertRaises(ValueError):
-      _ = sparsity.prune_inputs_n_m(inputs, n=1, m=4, order='X')
-
-  def test_n_m_pruning_mask(self):
-    inputs = jnp.array(np.random.rand(10, 2, 4))
-    mask = sparsity.get_pruning_n_m_mask(inputs, n=1, m=4)
-    self.assertEqual(
-        list(np.argmax(inputs, axis=2).flatten()),
-        list(np.argmax(mask == 1, axis=2).flatten()))
-
+  @parameterized.parameters(
+      dict(sparse_type='UNSTRUCTURED', prune_rate=0.2, sparse_ste=True)
+  )
+  def test_invalid_sparse_ste_with_unstructured_sparsity(
+      self, sparse_type, prune_rate, sparse_ste
+  ):
+    with self.assertRaisesRegex(
+        ValueError, 'SR-STE only works with structured sparsity.'
+    ):
+      SparseHParams(
+          type=sparse_type, prune_rate=prune_rate, sparse_ste=sparse_ste
+      )
 
 if __name__ == '__main__':
   absltest.main()
