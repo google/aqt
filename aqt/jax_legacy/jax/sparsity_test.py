@@ -23,6 +23,7 @@ from aqt.jax_legacy.jax import sparsity
 from aqt.jax_legacy.jax.flax import struct as flax_struct
 from aqt.jax_legacy.jax.sparsity import SparseHParams
 from aqt.jax_legacy.jax.sparsity import Sparsity
+import flax
 from flax import linen as nn
 import jax
 from jax import numpy as jnp
@@ -30,65 +31,85 @@ from jax import random
 import numpy as np
 
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (
+    flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+)
 
 
 class SparsityTest(parameterized.TestCase):
 
-  def init_model(self, update_mask, apply_mask, unstruct_sparsity,
-                 structure_decay=False,
-                 num_update_sparsity=0,
-                 mask_decay_weight=0.0,
-                 prune_rate=(2, 4),
-                 sparse_ste=False):
+  def init_model(
+      self,
+      update_mask,
+      apply_mask,
+      unstruct_sparsity,
+      structure_decay=False,
+      num_update_sparsity=0,
+      mask_decay_weight=0.0,
+      prune_rate=(2, 4),
+      sparse_ste=False,
+  ):
     rng = random.PRNGKey(0)
     self.inputs = jnp.array([[3, 4, 6], [1, 2, 1]])
     if unstruct_sparsity:
       sparsity_hparams = SparseHParams(
-          type='UNSTRUCTURED', prune_rate=0.2, structure_decay=structure_decay,
+          type='UNSTRUCTURED',
+          prune_rate=0.2,
+          structure_decay=structure_decay,
           mask_decay_weight=mask_decay_weight,
-          sparse_ste=sparse_ste)
+          sparse_ste=sparse_ste,
+      )
     else:
       sparsity_hparams = SparseHParams(
           type='STRUCTURED_NM',
           prune_rate=prune_rate,
           structure_decay=structure_decay,
           mask_decay_weight=mask_decay_weight,
-          sparse_ste=sparse_ste)
+          sparse_ste=sparse_ste,
+      )
     sparsity_module = Sparsity(sparsity_hparams=sparsity_hparams)
     init_mask = sparsity_module.init(
-        rng, self.inputs, update_mask=update_mask, apply_mask=apply_mask,
-        num_update_sparsity=num_update_sparsity)
+        rng,
+        self.inputs,
+        update_mask=update_mask,
+        apply_mask=apply_mask,
+        num_update_sparsity=num_update_sparsity,
+    )
     return sparsity_module, init_mask
 
   @parameterized.named_parameters(('unstruct', True), ('struct', False))
   def test_init(self, unstruct_sparsity):
     _, init_state = self.init_model(False, False, unstruct_sparsity)
     init_state_mask = init_state['sparsity']['mask']
-    np.testing.assert_array_equal(init_state_mask,
-                                  [[True, True, True], [True, True, True]])
+    np.testing.assert_array_equal(
+        init_state_mask, [[True, True, True], [True, True, True]]
+    )
 
   @parameterized.named_parameters(
       dict(
           testcase_name='initial_structure_decay',
           num_update_sparsity=0,
           out=[[3, 4, 6, 8], [1, 2, 1, 4]],
-          mask=[[True, True, True, True], [True, True, True, True]]),
+          mask=[[True, True, True, True], [True, True, True, True]],
+      ),
       dict(
           testcase_name='first_iteration_structure_decay',
           num_update_sparsity=1,
           out=[[0, 4, 6, 8], [0, 2, 1, 4]],
-          mask=[[False, True, True, True], [False, True, True, True]]),
+          mask=[[False, True, True, True], [False, True, True, True]],
+      ),
       dict(
           testcase_name='second_iteration_structure_decay',
           num_update_sparsity=2,
           out=[[0, 0, 0, 8], [0, 0, 0, 4]],
-          mask=[[False, False, False, True], [False, False, False, True]]),
+          mask=[[False, False, False, True], [False, False, False, True]],
+      ),
       dict(
           testcase_name='third_iteration_structure_decay',
           num_update_sparsity=3,
           out=[[0, 0, 0, 8], [0, 0, 0, 4]],
-          mask=[[False, False, False, True], [False, False, False, True]]),
+          mask=[[False, False, False, True], [False, False, False, True]],
+      ),
   )
   def test_structure_decay(self, num_update_sparsity, out, mask):
     model, init_state = self.init_model(
@@ -386,7 +407,7 @@ class SparsityTest(parameterized.TestCase):
     module = SingleLayer(**layer_kwargs)
     variables = module.init(
         rng, jnp.zeros(inputs.shape), update_mask=False, apply_mask=False)
-    state, params = variables.pop('params')
+    state, params = flax.core.pop(variables, 'params')
     del variables
     for _ in range(10):
       # At each iteration, the pruned weights are multiplied with
