@@ -35,7 +35,6 @@ from aqt.jax_legacy.jax.quantization import QuantType
 import flax
 from flax import linen as nn
 from flax import traverse_util
-from flax.core import frozen_dict
 import jax
 from jax import config
 from jax import dtypes
@@ -102,7 +101,7 @@ def param_dtypes_shapes_axes(params: Mapping[str, Any],
   """
   params = filter_out_metadata(params)
   params_axes = filter_out_metadata(params_axes)
-  params = frozen_dict.unfreeze(params)  # pytype: disable=wrong-arg-types
+  params = flax.core.unfreeze(params)  # pytype: disable=wrong-arg-types
 
   def remove_axes_suffix(ks):
     if not ks[-1].endswith('_axes'):
@@ -110,7 +109,7 @@ def param_dtypes_shapes_axes(params: Mapping[str, Any],
           f'Param axes name should end with `_axes`, found {ks[-1]}')
     return tuple(ks[:-1]) + (ks[-1][:-len('_axes')],)
 
-  params_axes = frozen_dict.unfreeze(params_axes)  # pytype: disable=wrong-arg-types
+  params_axes = flax.core.unfreeze(params_axes)  # pytype: disable=wrong-arg-types
   flatten_axes = {
       remove_axes_suffix(ks): v
       for ks, v in traverse_util.flatten_dict(params_axes).items()
@@ -260,7 +259,7 @@ class ConvAqtTest(parameterized.TestCase):
     # manually set one value in each output dim of weights to be exactly maxval
     full_range_integer_weights = (
         full_range_integer_weights.at[0, 0, :].set(maxval))
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = full_range_integer_weights
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs)
@@ -307,7 +306,7 @@ class ConvAqtTest(parameterized.TestCase):
 
     # (batch_size, spatial_dim, spatial_dim, num_features)
     float_scale = jax.random.uniform(self.rng_key, (1, 1, 1, num_features))
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = full_range_integer_weights * float_scale
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs)
@@ -365,7 +364,7 @@ class ConvAqtTest(parameterized.TestCase):
     weights = random.uniform(
         self.rng_key, shape=kernel_size + (input_dim, num_features))
     weight_scale = weight_scale[jnp.newaxis, jnp.newaxis, jnp.newaxis, :]
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = weights
     outputs_without_scaling = model.apply(flax.core.freeze(state), inputs)
     state['params']['kernel'] = jnp.multiply(weights, weight_scale)
@@ -383,7 +382,7 @@ class ConvAqtTest(parameterized.TestCase):
         inputs, num_features, kernel_size, weight_prec=1)
     weights = random.uniform(
         self.rng_key, shape=kernel_size + (input_dim, num_features))
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = weights
     outputs = model.apply(flax.core.freeze(state), inputs)
     onp.testing.assert_array_equal(outputs, onp.zeros(
@@ -669,7 +668,7 @@ class DenseAqtTest(parameterized.TestCase):
 
     # manually set one value in each output dim of weights to be exactly maxval
     full_range_integer_weights = full_range_integer_weights.at[0, :].set(maxval)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = full_range_integer_weights
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs, padding_mask=None)
@@ -709,7 +708,7 @@ class DenseAqtTest(parameterized.TestCase):
     full_range_integer_weights = full_range_integer_weights.at[0, :].set(maxval)
 
     float_scale = jax.random.uniform(self.rng_key, (1, num_features))
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = full_range_integer_weights * float_scale
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs, padding_mask=None)
@@ -747,7 +746,7 @@ class DenseAqtTest(parameterized.TestCase):
     float_weights = jnp.linspace(-1 / 3, 1 / 3, num=12).reshape((3, 4))
 
     exp_output_without_quant = jnp.matmul(inputs, float_weights)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = float_weights
     state = flax.core.freeze(state)
     outputs_with_quant = model.apply(state, inputs, padding_mask=None)
@@ -792,11 +791,11 @@ class DenseAqtTest(parameterized.TestCase):
         inputs, num_features=4, weight_prec=weight_prec)
     weights = random.uniform(self.rng_key, shape=(3, 4))
     weight_scale = weight_scale[jnp.newaxis, :]
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = weights
     state = flax.core.freeze(state)
     outputs_without_scaling = model.apply(state, inputs, padding_mask=None)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = jnp.multiply(weights, weight_scale)
     state = flax.core.freeze(state)
     outputs_with_scaling = model.apply(state, inputs, padding_mask=None)
@@ -810,7 +809,7 @@ class DenseAqtTest(parameterized.TestCase):
         inputs, num_features=4, weight_prec=1)
     weights = random.uniform(
         self.rng_key, shape=state['params']['kernel'].shape)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = weights
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs, padding_mask=None)
@@ -1481,7 +1480,7 @@ class DenseGeneralAqtTest(parameterized.TestCase):
 
     # manually set one value in each output dim of weights to be exactly maxval
     full_range_integer_weights = full_range_integer_weights.at[0, :].set(maxval)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = full_range_integer_weights
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs)
@@ -1514,7 +1513,7 @@ class DenseGeneralAqtTest(parameterized.TestCase):
     float_weights = jnp.linspace(-1 / 3, 1 / 3, num=12).reshape((3, 4))
 
     exp_output_without_quant = jnp.matmul(inputs, float_weights)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = float_weights
     state = flax.core.freeze(state)
     outputs_with_quant = model.apply(state, inputs)
@@ -1562,7 +1561,7 @@ class DenseGeneralAqtTest(parameterized.TestCase):
     full_range_integer_weights = full_range_integer_weights.at[0, :].set(maxval)
 
     float_scale = jax.random.uniform(self.rng_key, (1, num_features))
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = full_range_integer_weights * float_scale
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs)
@@ -1589,7 +1588,7 @@ class DenseGeneralAqtTest(parameterized.TestCase):
     float_weights = jnp.linspace(-1 / 3, 1 / 3, num=12).reshape((3, 4))
 
     exp_output_without_quant = jnp.matmul(inputs, float_weights)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = float_weights
     state = flax.core.freeze(state)
     outputs_with_quant = model.apply(state, inputs)
@@ -1623,11 +1622,11 @@ class DenseGeneralAqtTest(parameterized.TestCase):
         inputs, num_features=4, axis=(1,), weight_prec=weight_prec)
     weights = random.uniform(self.rng_key, shape=(3, 4))
     weight_scale = weight_scale[jnp.newaxis, :]
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = weights
     state = flax.core.freeze(state)
     outputs_without_scaling = model.apply(state, inputs)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = jnp.multiply(weights, weight_scale)
     state = flax.core.freeze(state)
     outputs_with_scaling = model.apply(state, inputs)
@@ -1641,7 +1640,7 @@ class DenseGeneralAqtTest(parameterized.TestCase):
         inputs, num_features=4, axis=(1,), weight_prec=1)
     weights = random.uniform(
         self.rng_key, shape=state['params']['kernel'].shape)
-    state = state.unfreeze()
+    state = flax.core.unfreeze(state)
     state['params']['kernel'] = weights
     state = flax.core.freeze(state)
     outputs = model.apply(state, inputs)
