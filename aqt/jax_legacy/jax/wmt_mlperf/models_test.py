@@ -862,7 +862,7 @@ class ModelsTest(parameterized.TestCase):
     inputs = onp.array([[1, 0]])
     initial_state = module.init(key, inputs=inputs, targets=targets)
     # Change the embedding of the padding token.
-    initial_state = initial_state.unfreeze()
+    initial_state = flax.core.unfreeze(initial_state)
     initial_state['params']['shared_embedding']['embedding'] = initial_state[
         'params']['shared_embedding']['embedding'].at[0, :].set(10.0)
     module.train = True
