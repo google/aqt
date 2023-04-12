@@ -175,7 +175,7 @@ def create_model(key, input_shape, target_shape,
       jnp.zeros(input_shape, jnp.float32),
       jnp.zeros(target_shape, jnp.float32),
   )
-  init_state, params = variables.pop('params')  # pytype: disable=attribute-error
+  init_state, params = flax.core.pop(variables, 'params')  # pytype: disable=attribute-error
   return params, init_state
 
 
@@ -360,7 +360,7 @@ def train_step(optimizer,
         targets_segmentation=targets_segmentation,
         mutable=True,
         rngs={'dropout': dropout_rng})
-    new_state, _ = new_variables.pop('params')
+    new_state, _ = flax.core.pop(new_variables, 'params')
     loss, weight_sum = compute_weighted_cross_entropy(logits, targets, weights)
     mean_loss = loss / weight_sum
     total_loss = mean_loss
