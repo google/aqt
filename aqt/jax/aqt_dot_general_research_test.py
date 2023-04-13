@@ -64,12 +64,12 @@ def test_eq(name, a, b):
   # TODO(lew): use library function.
   mean_err = jnp.mean(jnp.abs(a - b))
   if mean_err != 0.0:
-    print(name)
-    print(mean_err)
+    print("mean_err =", mean_err)
     print(a.shape)
     print(a[:3, :3])
     print(b.shape)
     print(b[:3, :3])
+    print("fail: not equal; case: ", name)
     assert False
 
 
@@ -85,11 +85,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         for v in [0.1, 1000.0]:
           for seed in range(10):
             key = jax.random.PRNGKey(seed)
-            cfg = aqtr.make_tensor_config(prec, (0,))
+            cfg = aqtr.make_tensor_config(prec)
             cfg.preserve_zero = preserve_zero
+            cfg.calib_shared_axes = (0,)
             sample_size = 10000
             shape = (sample_size,)
-            cfg.calib_shared_axes = (0,)
             a = jax.random.uniform(key, shape, minval=-v, maxval=v)
             qa = aqtr.make_fake_quant(cfg)(a)
             bucket_noise = qa - a  #  ~ U(-bucket_size/2, bucket_size/2)
@@ -158,6 +158,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_maxval=20.0,
       gra_maxval=30.0,
       dims=(((1,), (0,)), ((), ())),  # classical matmul
+      # lhs_shape=(1, 2),
+      # rhs_shape=(2, 3),
+      # gra_shape=(1, 3),  # has to be the shape of the output
       lhs_shape=(10, 20),
       rhs_shape=(20, 30),
       gra_shape=(10, 30),  # has to be the shape of the output
@@ -165,15 +168,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
     # have the same numerics when scales are power of two (po2).
     # We are passing dims to config so that we can reuse it in fake_quant.
-    config = aqtr.make_dot_general_config(lhs_bits, rhs_bits)
-    if config.lhs:
-      # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      config.lhs.po2_scale = True
-      # Needed if we want to reuse config in the fake_quant.
-      config.lhs.calib_shared_axes = dims[0][0]
-    if config.rhs:
-      config.rhs.po2_scale = True
-      config.rhs.calib_shared_axes = dims[0][1]
+    config = aqtr.make_dot_general_raw_config(lhs_bits, rhs_bits)
+    # Power-of-2 scales allow FQ and AQT to be exactly the same.
+    config.lhs.po2_scale = True
+    # Needed if we want to reuse config in the fake_quant.
+    config.lhs.calib_shared_axes = dims[0][0]
+    config.rhs.po2_scale = True
+    config.rhs.calib_shared_axes = dims[0][1]
 
     # test dot_general
     lhs = rand_unif(lhs_shape, lhs_maxval)
@@ -183,7 +184,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     def check_eq(dg1, dg2, lr_mult=1.0, gl_mult=1.0, gr_mult=1.0):
       """Tests whether dg1 and dg2 are identical or proportional."""
       def app(dg):
+        lrf = dg(lhs, rhs)
         lr, backprop = jax.vjp(dg, lhs, rhs)
+        test_eq("lrf", lrf, lr)
         gl, gr = backprop(gra)
         return lr, gl, gr
 
@@ -193,11 +196,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       test_eq("gl", gl1 * gl_mult, gl2)  # backward pass
       test_eq("gr", gr1 * gr_mult, gr2)  # backward pass
 
-    def aqt_dg(use_fake_quant):
-      dg = aqtr.make_dot_general(config, use_fake_quant)
+    def aqt_dg_full():
+      config_full = aqtr.make_dot_general_config()
+      config_full.fwd = config
+      dg = aqtr.make_dot_general(config_full)
       return lambda lhs, rhs: dg(lhs, rhs, dims)
 
+    def aqt_dg(use_fake_quant):
+      dg = aqtr._make_dot_general_raw(config, use_fake_quant)
+      return lambda lhs, rhs: dg(lhs, rhs, dims)[0]
+
     check_eq(aqt_dg(False), aqt_dg(True))
+    check_eq(aqt_dg(False), aqt_dg_full())
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -217,30 +227,34 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             preferred_element_type=None,
             key=None,
         ):
-          del key
-          return (
-              jax.lax.dot_general(
-                  lhs, rhs, dimension_numbers, precision, preferred_element_type
-              )
-              * delta
+          ret = jax.lax.dot_general(
+              lhs, rhs, dimension_numbers, precision, preferred_element_type
           )
+          ret *= delta
+
+          def res(v):
+            return aqtr.TensorRes(value=v, qvalue=v, qvalue_scale=1.0)
+
+          res = aqtr.DotGeneralRes(key_bwd=key, lhs=res(lhs), rhs=res(rhs))
+          return ret, res
 
         return dg
 
       m1 = dg_mul(2.0)
       m2 = dg_mul(4.0)
       m3 = dg_mul(8.0)
-      return aqtr.dot_general_with_gradient(m1, m2, m3)(lhs, rhs, dims)
+      return aqtr._dot_general_raw_attach_gradient(m1, m2, m3)(lhs, rhs, dims)
 
     check_eq(lax_dg, lax_dg_248, lr_mult=2.0, gl_mult=4.0, gr_mult=8.0)
 
   def test_hardware_int8(self):
     def dg(lhs, rhs):
-      config = aqtr.make_dot_general_config(8, 8)
+      config = aqtr.make_dot_general_raw_config(8, 8)
       config.use_hardware_int8 = True
-      return aqtr.make_dot_general(config)(
+      ret, _ = aqtr._make_dot_general_raw(config)(
           lhs, rhs, dimension_numbers=(((1,), (0,)), ((), ()))
       )
+      return ret
 
     lhs = rand_unif((10, 20), 1.0)
     rhs = rand_unif((20, 30), 1.0)
