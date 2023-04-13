@@ -139,8 +139,7 @@ def int8_matmul(
       return grads, [None] * len(variables)
     return grads
 
-  @tf.custom_gradient
-  def fwd(arg_lhs, arg_rhs):
+  def fwd_no_grad(arg_lhs, arg_rhs):
     # Wrap a custom-gradient op around the cast to propagate gradients,
     # since casting stops the gradient.
     int_lhs = tf.cast(arg_lhs, tf.int8)
@@ -156,9 +155,17 @@ def int8_matmul(
         transpose_a=transpose_a,
         transpose_b=transpose_b)
     mm = tf.cast(imm, tf.float32)
-    return mm, grad_fn
+    return mm
 
-  return fwd(lhs, rhs)
+  fwd = tf.custom_gradient(lambda l, r: (fwd_no_grad(l, r), grad_fn))
+
+  # If not training, do not install the custom gradient since it would cause
+  # both sets of weights (float + int8) to be pulled into the graph, making it
+  # difficult to prune away the unused set of weights for serving.
+  if train:
+    return fwd(lhs, rhs)
+  else:
+    return fwd_no_grad(lhs, rhs)
 
 
 def _matmul_case(
@@ -472,7 +479,13 @@ def matmul(
 
     return out, bwd
 
-  return qmatmul(lhs, rhs)
+  # If not training, do not install the custom gradient since it would cause
+  # both sets of weights (float + int8) to be pulled into the graph, making it
+  # difficult to prune away the unused set of weights for serving.
+  if train:
+    return qmatmul(lhs, rhs)
+  else:
+    return fwd(lhs, rhs)
 
 
 class Matmul:
