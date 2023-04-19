@@ -630,12 +630,13 @@ class Matmul:
           'If grad is given, then grad_quantizer must be defined.')
       quantizers.append((self.grad_name, self.grad_quantizer, grad))
     for prefix, quantizer, argument in quantizers:
-      clipped_proportion = tf.cast(argument > quantizer.clip_range(),
+      clipped_proportion = tf.cast(tf.abs(argument) > quantizer.clip_range(),
                                    tf.float32)
       prefix = f'{self.name}/{prefix}'
       d[f'{prefix}/clipped_proportion'] = tf.math.reduce_mean(
           clipped_proportion)
       d[f'{prefix}/clip'] = quantizer.clip_range()
+      d[f'{prefix}/event_count'] = quantizer._last_update
       for name, var in quantizer.calibration_variables().items():
         d[f'{prefix}/{name}'] = var
     return d
