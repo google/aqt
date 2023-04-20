@@ -46,26 +46,27 @@ class TensorConfig:
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
 
+  @classmethod
+  def make(cls, bits: Optional[int]) -> 'TensorConfig':
+    pz = False if bits == 1 else True
 
-def make_tensor_config(bits: Optional[int]) -> TensorConfig:
-  pz = False if bits == 1 else True
-
-  return TensorConfig(
-      bits=bits,
-      calib_shared_axes=None,
-      preserve_zero=pz,
-      bound=None,
-      bound_stop_grad=True,
-      preserve_max_val=False,
-      clip=True,
-      round=True,
-      noise_fn=None,
-      po2_scale=False,
-  )
+    return TensorConfig(
+        bits=bits,
+        calib_shared_axes=None,
+        preserve_zero=pz,
+        bound=None,
+        bound_stop_grad=True,
+        preserve_max_val=False,
+        clip=True,
+        round=True,
+        noise_fn=None,
+        po2_scale=False,
+    )
 
 
 @dataclasses.dataclass
 class DotGeneralRawConfig:
+  """Configuration of quantization of one dot_general without gradient."""
   lhs: TensorConfig
   rhs: TensorConfig
   use_hardware_int8: bool
@@ -74,18 +75,15 @@ class DotGeneralRawConfig:
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
   use_fwd_quant: bool
 
-
-def make_dot_general_raw_config(
-    lhs_bits=None,
-    rhs_bits=None,
-) -> DotGeneralRawConfig:
-  """Create quantization configs for input matrices to a matmul."""
-  return DotGeneralRawConfig(
-      lhs=make_tensor_config(lhs_bits),
-      rhs=make_tensor_config(rhs_bits),
-      use_hardware_int8=False,
-      use_fwd_quant=True,
-  )
+  @classmethod
+  def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRawConfig':
+    """Create quantization configs for input matrices to a matmul."""
+    return DotGeneralRawConfig(
+        lhs=TensorConfig.make(lhs_bits),
+        rhs=TensorConfig.make(rhs_bits),
+        use_hardware_int8=False,
+        use_fwd_quant=True,
+    )
 
 
 @dataclasses.dataclass
@@ -94,17 +92,14 @@ class DotGeneralConfig:
   dlhs: DotGeneralRawConfig
   drhs: DotGeneralRawConfig
 
-
-def make_dot_general_config(
-    lhs_bits=None,
-    rhs_bits=None,
-) -> DotGeneralConfig:
-  """Create quantization configs for input matrices to a matmul."""
-  return DotGeneralConfig(
-      fwd=make_dot_general_raw_config(lhs_bits, rhs_bits),
-      dlhs=make_dot_general_raw_config(),
-      drhs=make_dot_general_raw_config(),
-  )
+  @classmethod
+  def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralConfig':
+    """Create quantization configs for input matrices to a matmul."""
+    return DotGeneralConfig(
+        fwd=DotGeneralRawConfig.make(lhs_bits, rhs_bits),
+        dlhs=DotGeneralRawConfig.make(),
+        drhs=DotGeneralRawConfig.make(),
+    )
 
 
 def make_config_conv_general_dilated(
@@ -112,7 +107,7 @@ def make_config_conv_general_dilated(
     lhs_bits=None,
     rhs_bits=None,
 ) -> DotGeneralRawConfig:
-  config = make_dot_general_raw_config(lhs_bits, rhs_bits)
+  config = DotGeneralRawConfig.make(lhs_bits, rhs_bits)
   # Hardcoding flax assumptions.
   if config.lhs:
     config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
@@ -357,6 +352,8 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       rhs = rhs.astype(jnp.int8)
       preferred_element_type = jnp.int32
 
+    # if lhs.dtype != rhs.dtype:
+
     out = lax.dot_general(
         lhs,
         rhs,
@@ -537,7 +534,7 @@ def _dot_general_raw_attach_gradient(
 def make_dot_general(config: Optional[DotGeneralConfig]):
   """Makes quantized lax.dot_general replacement with attached gradients."""
   if config is None:
-    config = make_dot_general_config()
+    config = DotGeneralConfig.make()
 
   return _dot_general_raw_attach_gradient(
       fwd_dot_general_raw=_make_dot_general_raw(config.fwd),
@@ -553,7 +550,7 @@ def make_conv_general_dilated(config: DotGeneralRawConfig):
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific config.
   config = copy.deepcopy(config)
   if config is None:
-    config = make_dot_general_raw_config()
+    config = DotGeneralRawConfig.make()
 
   def my_conv_general_dilated(
       lhs,
