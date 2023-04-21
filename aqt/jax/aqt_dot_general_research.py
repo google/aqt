@@ -176,8 +176,19 @@ def make_config_conv_general_dilated(
 # Also reducing eps is not good enough for po2 case.
 
 
-def _random_split(key: Optional[jax.random.KeyArray]):
-  return (None, None) if key is None else jax.random.split(key)
+@flax.struct.dataclass
+class Context:
+  key: Optional[jax.random.KeyArray]
+  # train_step: int = 0
+
+
+def _context_split(context: Context) -> tuple[Context, Context]:
+  context1, context2 = Context(key=None), Context(key=None)
+  if context.key is not None:
+    key1, key2 = jax.random.split(context.key)
+    context1.key = key1
+    context2.key = key2
+  return (context1, context2)
 
 
 def _get_max_value_representation(config: TensorConfig):
@@ -244,7 +255,7 @@ def _make_clip_and_round(config: TensorConfig):
   """Function make_clip_and_round."""
   clip_bound = _get_clip_bound(config)
 
-  def fwd(x, key):
+  def fwd(x, context):
     if config is None:
       return x
     if config.clip:
@@ -259,21 +270,21 @@ def _make_clip_and_round(config: TensorConfig):
       fwd_clip_bound = clip_bound - eps
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
     if config.noise_fn:
-      assert key is not None, (
+      assert context.key is not None, (
           'noise_fn is set, requestic stochastic rounding, but key key was not'
           ' passed.'
       )
-      x = x + config.noise_fn(x.shape, key)
+      x = x + config.noise_fn(x.shape, context.key)
     if config.round:
       x = _round(x, round_to_halves=not config.preserve_zero)
     return x
 
-  def vjp_fwd(x, key):
+  def vjp_fwd(x, context):
     res = (x,)
-    return fwd(x, key), res
+    return fwd(x, context), res
 
-  def vjp_bwd(fwd_key, res, grad):
-    del fwd_key
+  def vjp_bwd(fwd_context, res, grad):
+    del fwd_context
     (x,) = res
     # This is gradient of clip. For boundary values we will have full graindent.
     ret = (x <= clip_bound) * (x >= -clip_bound) * grad
@@ -285,12 +296,12 @@ def _make_clip_and_round(config: TensorConfig):
 
 
 def make_fake_quant(config: TensorConfig):
-  def fake_quant(x, key=None):
+  def fake_quant(x, context):
     if config.bits is None:
       return x
     scale = _fresh_scale(x, config)
     x = x * scale
-    x = _make_clip_and_round(config)(x, key)
+    x = _make_clip_and_round(config)(x, context)
     x = x / scale
     return x
 
@@ -306,7 +317,7 @@ class TensorRes:
 
 @flax.struct.dataclass
 class DotGeneralRes:
-  key_bwd: Optional[jax.random.KeyArray]
+  context_bwd: Context
   lhs: TensorRes
   rhs: TensorRes
 
@@ -320,9 +331,9 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       lhs,
       rhs,
       dimension_numbers,
+      context,
       precision=None,
       preferred_element_type=None,
-      key=None,
   ):
     orig_lhs = lhs
     orig_rhs = rhs
@@ -332,20 +343,21 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
     # - remaining axes (ra).
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
-    key, key_bwd = _random_split(key)
-    key_lhs, key_rhs = _random_split(key)
+    context, context_bwd = _context_split(context)
+    context_lhs, context_rhs = _context_split(context)
+    del context
 
     if config.lhs.bits is not None:
       config.lhs.calib_shared_axes = config.lhs.calib_shared_axes or lhs_ca
       lhs_scale = _fresh_scale(lhs, config.lhs)
       lhs = lhs * lhs_scale
-      lhs = _make_clip_and_round(config.lhs)(lhs, key_lhs)
+      lhs = _make_clip_and_round(config.lhs)(lhs, context_lhs)
 
     if config.rhs.bits is not None:
       config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
-      rhs = _make_clip_and_round(config.rhs)(rhs, key_rhs)
+      rhs = _make_clip_and_round(config.rhs)(rhs, context_rhs)
 
     if config.use_hardware_int8:
       lhs = lhs.astype(jnp.int8)
@@ -403,16 +415,16 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       rhs_scale_t = 1.0
     rhs_res = TensorRes(value=orig_rhs, qvalue=rhs, qvalue_scale=rhs_scale_t)
 
-    res = DotGeneralRes(key_bwd=key_bwd, lhs=lhs_res, rhs=rhs_res)
+    res = DotGeneralRes(context_bwd=context_bwd, lhs=lhs_res, rhs=rhs_res)
     return out, res
 
   def fq_dot_general(
       lhs,
       rhs,
       dimension_numbers,
+      context,
       precision=None,
       preferred_element_type=None,
-      key=None,
   ):
     msg = (
         'use_fake_quant mode is used in tests and it is exactly equal when'
@@ -420,8 +432,12 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
     )
     assert config.lhs.po2_scale, msg
     assert config.rhs.po2_scale, msg
-    lhs_fq = make_fake_quant(config.lhs)(lhs)
-    rhs_fq = make_fake_quant(config.rhs)(rhs)
+
+    context, context_bwd = _context_split(context)
+    context_lhs, context_rhs = _context_split(context)
+    del context
+    lhs_fq = make_fake_quant(config.lhs)(lhs, context_lhs)
+    rhs_fq = make_fake_quant(config.rhs)(rhs, context_rhs)
     ret = jax.lax.dot_general(
         lhs_fq,
         rhs_fq,
@@ -430,7 +446,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
         preferred_element_type=preferred_element_type,
     )
     res = DotGeneralRes(
-        key_bwd=key,
+        context_bwd=context_bwd,
         lhs=TensorRes(value=lhs, qvalue=lhs_fq, qvalue_scale=1.0),
         rhs=TensorRes(value=rhs, qvalue=rhs_fq, qvalue_scale=1.0),
     )
@@ -453,23 +469,23 @@ def _dot_general_raw_attach_gradient(
 
   def vjp_bwd(
       fwd_dims,
+      fwd_context,
       precision,
       preferred_element_type,
-      fwd_key,
       res: DotGeneralRes,
       g,
   ):
-    # fwd_key is the key that was captured in vjp_fwd.
+    # fwd_context contains the key that was captured in vjp_fwd.
     # It was already used there and we should not use it here again.
     # If we need a key, we should use one passed into res parameter.
-    del fwd_key
+    del fwd_context
     def ranges_like(*xs, start=0):
       for x in xs:
         yield tuple(range(start, start + len(x)))
         start += len(x)
 
     def grad_dot_general(
-        y_res: TensorRes, dot_general, y_is_lhs, key, use_fwd_quant
+        y_res: TensorRes, dot_general, y_is_lhs, context, use_fwd_quant
     ):
       y_ndim = y_res.value.ndim
 
@@ -492,19 +508,19 @@ def _dot_general_raw_attach_gradient(
         gv = g
         yv = y_res.value
       out, _ = dot_general(
-          gv, yv, dims, precision, preferred_element_type, key=key
+          gv, yv, dims, context, precision, preferred_element_type,
       )
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(x_ba + x_ra + x_ca_sorted_by_y))
       return jax.lax.transpose(out, out_axes)
 
-    key1, key2 = _random_split(res.key_bwd)
+    context1, context2 = _context_split(res.context_bwd)
     dlhs = grad_dot_general(
-        res.rhs, dlhs_dot_general_raw, False, key1, dlhs_use_fwd_quant
+        res.rhs, dlhs_dot_general_raw, False, context1, dlhs_use_fwd_quant
     )
     drhs = grad_dot_general(
-        res.lhs, drhs_dot_general_raw, True, key2, drhs_use_fwd_quant
+        res.lhs, drhs_dot_general_raw, True, context2, drhs_use_fwd_quant
     )
     return dlhs, drhs
 
@@ -512,17 +528,17 @@ def _dot_general_raw_attach_gradient(
       lhs,
       rhs,
       dimension_numbers,
+      context,
       precision=None,
       preferred_element_type=None,
-      key=None,
   ):
     ret, _ = fwd_dot_general_raw(
         lhs,
         rhs,
         dimension_numbers,
+        context,
         precision,
         preferred_element_type,
-        key,
     )
     return ret
 
@@ -536,13 +552,32 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
   if config is None:
     config = DotGeneralConfig.make()
 
-  return _dot_general_raw_attach_gradient(
+  dg = _dot_general_raw_attach_gradient(
       fwd_dot_general_raw=_make_dot_general_raw(config.fwd),
       dlhs_dot_general_raw=_make_dot_general_raw(config.dlhs),
       drhs_dot_general_raw=_make_dot_general_raw(config.drhs),
       dlhs_use_fwd_quant=(config.dlhs.use_fwd_quant if config.dlhs else True),
       drhs_use_fwd_quant=(config.drhs.use_fwd_quant if config.drhs else True),
   )
+
+  def ret_dg(
+      lhs,
+      rhs,
+      dimension_numbers,
+      context=Context(key=None),
+      precision=None,
+      preferred_element_type=None,
+  ):
+    return dg(
+        lhs=lhs,
+        rhs=rhs,
+        dimension_numbers=dimension_numbers,
+        context=context,
+        precision=precision,
+        preferred_element_type=preferred_element_type,
+    )
+
+  return ret_dg
 
 
 def make_conv_general_dilated(config: DotGeneralRawConfig):

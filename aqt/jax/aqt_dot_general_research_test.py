@@ -108,7 +108,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             sample_size = 10000
             shape = (sample_size,)
             a = jax.random.uniform(key, shape, minval=-v, maxval=v)
-            qa = aqtr.make_fake_quant(cfg)(a)
+            qa = aqtr.make_fake_quant(cfg)(a, aqtr.Context(key=None))
             bucket_noise = qa - a  #  ~ U(-bucket_size/2, bucket_size/2)
             bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
             bucket_size = (v * 2) / bucket_count
@@ -130,7 +130,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     config.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
     grad = jnp.ones(shape) * 12345.0
-    x_fq, backprop = jax.vjp(aqtr.make_fake_quant(config), x)
+    x_fq, backprop = jax.vjp(
+        aqtr.make_fake_quant(config), x, aqtr.Context(key=None)
+    )
     gx_fq = backprop(grad)
     # print(f"x     =\n{x}")
     # print(f"x_fq  =\n{x_fq}")
@@ -203,11 +205,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def aqt_dg_full():
       dg = aqtr.make_dot_general(config)
-      return lambda lhs, rhs: dg(lhs, rhs, dims)
+      return lambda lhs, rhs: dg(lhs, rhs, dims, aqtr.Context(key=None))
 
     def aqt_dg(use_fake_quant):
       dg = aqtr._make_dot_general_raw(raw_config, use_fake_quant)
-      return lambda lhs, rhs: dg(lhs, rhs, dims)[0]
+      return lambda lhs, rhs: dg(lhs, rhs, dims, aqtr.Context(key=None))[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -223,9 +225,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             lhs,
             rhs,
             dimension_numbers,
+            context,
             precision=None,
             preferred_element_type=None,
-            key=None,
         ):
           ret = jax.lax.dot_general(
               lhs, rhs, dimension_numbers, precision, preferred_element_type
@@ -235,7 +237,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           def res(v):
             return aqtr.TensorRes(value=v, qvalue=v, qvalue_scale=1.0)
 
-          res = aqtr.DotGeneralRes(key_bwd=key, lhs=res(lhs), rhs=res(rhs))
+          res = aqtr.DotGeneralRes(
+              context_bwd=context, lhs=res(lhs), rhs=res(rhs)
+          )
           return ret, res
 
         return dg
@@ -243,7 +247,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       m1 = dg_mul(2.0)
       m2 = dg_mul(4.0)
       m3 = dg_mul(8.0)
-      return aqtr._dot_general_raw_attach_gradient(m1, m2, m3)(lhs, rhs, dims)
+      return aqtr._dot_general_raw_attach_gradient(m1, m2, m3)(
+          lhs, rhs, dims, aqtr.Context(key=None)
+      )
 
     check_eq(aqt_dg(False), aqt_dg(True), lhs, rhs, gra)
     check_eq(aqt_dg(False), aqt_dg_full(), lhs, rhs, gra)
@@ -256,7 +262,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       config = aqtr.DotGeneralRawConfig.make(8, 8)
       config.use_hardware_int8 = True
       ret, _ = aqtr._make_dot_general_raw(config)(
-          lhs, rhs, dimension_numbers=(((1,), (0,)), ((), ()))
+          lhs,
+          rhs,
+          dimension_numbers=(((1,), (0,)), ((), ())),
+          context=aqtr.Context(key=None),
       )
       return ret
 
@@ -305,8 +314,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs)
-    rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs)
+    lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs, aqtr.Context(key=None))
+    rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs, aqtr.Context(key=None))
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
