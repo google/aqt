@@ -254,7 +254,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_hardware_int8(self):
     def dg(lhs, rhs):
       config = aqtr.DotGeneralRawConfig.make(8, 8)
-      config.use_hardware_int8 = True
+      config.in_dtype = jnp.int8
+      config.out_dtype = jnp.int32
       ret, _ = aqtr._make_dot_general_raw(config)(
           lhs, rhs, dimension_numbers=(((1,), (0,)), ((), ()))
       )

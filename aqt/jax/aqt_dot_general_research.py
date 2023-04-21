@@ -25,12 +25,19 @@ from jax import lax
 import jax.numpy as jnp
 import numpy as onp
 
+# TODO(lew): We want to handle two additional cases:
+# - use_fwd_quant with say just weights being int8 and passed to bwd
+# - use_fwd_quant but we want to use classic quantization.
+
 
 @dataclasses.dataclass
 class TensorConfig:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
   bits: Optional[int]
+  # We cast to `quatized_dtype` after rounding. Should be consistent with `bits`
+  # This is the type of the tensor we store if we use_fwd_quant
+  fwd_quant_dtype: onp.dtype
   calib_shared_axes: Optional[list[int]]
   preserve_zero: bool
   bound: Optional[float]
@@ -49,9 +56,11 @@ class TensorConfig:
   @classmethod
   def make(cls, bits: Optional[int]) -> 'TensorConfig':
     pz = False if bits == 1 else True
-
+    use_int8 = bits is not None and bits <= 8
+    use_int8 = False
     return TensorConfig(
         bits=bits,
+        fwd_quant_dtype=jnp.int8 if use_int8 else jnp.float32,
         calib_shared_axes=None,
         preserve_zero=pz,
         bound=None,
@@ -69,7 +78,10 @@ class DotGeneralRawConfig:
   """Configuration of quantization of one dot_general without gradient."""
   lhs: TensorConfig
   rhs: TensorConfig
-  use_hardware_int8: bool
+  # Most often should be the same as lhs.quantized_dtype
+  # WARNING: These types have to be consistent with logic in lhs and rhs.
+  in_dtype: onp.dtype
+  out_dtype: onp.dtype
   # use_fwd_quant is observed when this dot_general is used in gradient.
   # use_fwd_quant is ignored in forward pass.
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
@@ -81,7 +93,8 @@ class DotGeneralRawConfig:
     return DotGeneralRawConfig(
         lhs=TensorConfig.make(lhs_bits),
         rhs=TensorConfig.make(rhs_bits),
-        use_hardware_int8=False,
+        in_dtype=jnp.float32,
+        out_dtype=jnp.float32,
         use_fwd_quant=True,
     )
 
@@ -242,11 +255,10 @@ def _round(x, round_to_halves=False):
 
 def _make_clip_and_round(config: TensorConfig):
   """Function make_clip_and_round."""
+  assert config is not None
   clip_bound = _get_clip_bound(config)
 
   def fwd(x, key):
-    if config is None:
-      return x
     if config.clip:
       # We use eps = 0.5 to make sure that after clipping we, `x` is wholly in
       # the buckets. This does not affect us, because there is _round following.
@@ -324,6 +336,10 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       preferred_element_type=None,
       key=None,
   ):
+    msg = f'Precision {precision} requested together with quantization.'
+    assert precision == jax.lax.Precision.DEFAULT or precision is None, msg
+    assert preferred_element_type is None
+
     orig_lhs = lhs
     orig_rhs = rhs
     # All axes can be partitioned into:
@@ -340,27 +356,23 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       lhs_scale = _fresh_scale(lhs, config.lhs)
       lhs = lhs * lhs_scale
       lhs = _make_clip_and_round(config.lhs)(lhs, key_lhs)
+    qlhs = lhs.astype(config.lhs.fwd_quant_dtype)
 
     if config.rhs.bits is not None:
       config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
       rhs_scale = _fresh_scale(rhs, config.rhs)
       rhs = rhs * rhs_scale
       rhs = _make_clip_and_round(config.rhs)(rhs, key_rhs)
-
-    if config.use_hardware_int8:
-      lhs = lhs.astype(jnp.int8)
-      rhs = rhs.astype(jnp.int8)
-      preferred_element_type = jnp.int32
-
-    # if lhs.dtype != rhs.dtype:
+    qrhs = rhs.astype(config.rhs.fwd_quant_dtype)
 
     out = lax.dot_general(
-        lhs,
-        rhs,
+        qlhs.astype(config.in_dtype),
+        qrhs.astype(config.in_dtype),
         dimension_numbers=dimension_numbers,
         precision=precision,
-        preferred_element_type=preferred_element_type,
+        preferred_element_type=config.out_dtype,
     )
+
     # The axis order in out is as follows: batch, lhs_ra, rhs_ra
     # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
     # - contraction axes ca disappear from the output
@@ -389,7 +401,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       out = out * lhs_scale_t
     else:
       lhs_scale_t = 1.0
-    lhs_res = TensorRes(value=orig_lhs, qvalue=lhs, qvalue_scale=lhs_scale_t)
+    lhs_res = TensorRes(value=orig_lhs, qvalue=qlhs, qvalue_scale=lhs_scale_t)
 
     if config.rhs.bits is not None:
       rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
@@ -401,7 +413,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       out = out * rhs_scale_t
     else:
       rhs_scale_t = 1.0
-    rhs_res = TensorRes(value=orig_rhs, qvalue=rhs, qvalue_scale=rhs_scale_t)
+    rhs_res = TensorRes(value=orig_rhs, qvalue=qrhs, qvalue_scale=rhs_scale_t)
 
     res = DotGeneralRes(key_bwd=key_bwd, lhs=lhs_res, rhs=rhs_res)
     return out, res
