@@ -25,6 +25,10 @@ from jax import lax
 import jax.numpy as jnp
 import numpy as onp
 
+# TODO(lew): We want to handle two additional cases:
+# - use_fwd_quant with say just weights being int8 and passed to bwd
+# - use_fwd_quant but we want to use classic quantization.
+
 
 @dataclasses.dataclass
 class TensorConfig:
@@ -69,7 +73,8 @@ class DotGeneralRawConfig:
   """Configuration of quantization of one dot_general without gradient."""
   lhs: TensorConfig
   rhs: TensorConfig
-  use_hardware_int8: bool
+  in_dtype: onp.dtype | None
+  preferred_element_type: onp.dtype
   # use_fwd_quant is observed when this dot_general is used in gradient.
   # use_fwd_quant is ignored in forward pass.
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
@@ -81,7 +86,8 @@ class DotGeneralRawConfig:
     return DotGeneralRawConfig(
         lhs=TensorConfig.make(lhs_bits),
         rhs=TensorConfig.make(rhs_bits),
-        use_hardware_int8=False,
+        in_dtype=None,
+        preferred_element_type=jnp.float32,
         use_fwd_quant=True,
     )
 
@@ -253,11 +259,10 @@ def _round(x, round_to_halves=False):
 
 def _make_clip_and_round(config: TensorConfig):
   """Function make_clip_and_round."""
+  assert config is not None
   clip_bound = _get_clip_bound(config)
 
   def fwd(x, context):
-    if config is None:
-      return x
     if config.clip:
       # We use eps = 0.5 to make sure that after clipping we, `x` is wholly in
       # the buckets. This does not affect us, because there is _round following.
@@ -332,11 +337,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       rhs,
       dimension_numbers,
       context,
-      precision=None,
-      preferred_element_type=None,
   ):
-    orig_lhs = lhs
-    orig_rhs = rhs
     # All axes can be partitioned into:
     # - contraction axes (ca)
     # - batch axes (ba)
@@ -347,31 +348,25 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
     context_lhs, context_rhs = _context_split(context)
     del context
 
+    qlhs = lhs
     if config.lhs.bits is not None:
       config.lhs.calib_shared_axes = config.lhs.calib_shared_axes or lhs_ca
-      lhs_scale = _fresh_scale(lhs, config.lhs)
-      lhs = lhs * lhs_scale
-      lhs = _make_clip_and_round(config.lhs)(lhs, context_lhs)
+      lhs_scale = _fresh_scale(qlhs, config.lhs)
+      qlhs = qlhs * lhs_scale
+      qlhs = _make_clip_and_round(config.lhs)(qlhs, context_lhs)
 
+    qrhs = rhs
     if config.rhs.bits is not None:
       config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
-      rhs_scale = _fresh_scale(rhs, config.rhs)
-      rhs = rhs * rhs_scale
-      rhs = _make_clip_and_round(config.rhs)(rhs, context_rhs)
-
-    if config.use_hardware_int8:
-      lhs = lhs.astype(jnp.int8)
-      rhs = rhs.astype(jnp.int8)
-      preferred_element_type = jnp.int32
-
-    # if lhs.dtype != rhs.dtype:
+      rhs_scale = _fresh_scale(qrhs, config.rhs)
+      qrhs = qrhs * rhs_scale
+      qrhs = _make_clip_and_round(config.rhs)(qrhs, context_rhs)
 
     out = lax.dot_general(
-        lhs,
-        rhs,
+        qlhs.astype(config.in_dtype),
+        qrhs.astype(config.in_dtype),
         dimension_numbers=dimension_numbers,
-        precision=precision,
-        preferred_element_type=preferred_element_type,
+        preferred_element_type=config.preferred_element_type,
     )
     # The axis order in out is as follows: batch, lhs_ra, rhs_ra
     # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
@@ -391,29 +386,29 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       return x
 
     if config.lhs.bits is not None:
-      lhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba)
+      qlhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba)
       # inserting dummy axes for rhs_ra
-      assert len(lhs_scale_t.shape) == len(lhs.shape) - len(lhs_ca)
-      start = len(lhs_scale_t.shape)
+      assert len(qlhs_scale_t.shape) == len(lhs.shape) - len(lhs_ca)
+      start = len(qlhs_scale_t.shape)
       end = len(rhs.shape) - len(rhs_ca) - len(rhs_ba) + start
       lhs_dummy_axes = range(start, end)
-      lhs_scale_t = 1.0 / jnp.expand_dims(lhs_scale_t, axis=lhs_dummy_axes)
-      out = out * lhs_scale_t
+      qlhs_scale_t = 1.0 / jnp.expand_dims(qlhs_scale_t, axis=lhs_dummy_axes)
+      out = out * qlhs_scale_t
     else:
-      lhs_scale_t = 1.0
-    lhs_res = TensorRes(value=orig_lhs, qvalue=lhs, qvalue_scale=lhs_scale_t)
+      qlhs_scale_t = 1.0
+    lhs_res = TensorRes(value=lhs, qvalue=qlhs, qvalue_scale=qlhs_scale_t)
 
     if config.rhs.bits is not None:
-      rhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
+      qrhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
       start = len(rhs_ba)
       end = len(lhs.shape) - len(lhs_ca) - len(lhs_ba) + start
       rhs_dummy_axes = range(start, end)
-      rhs_scale_t = jnp.expand_dims(rhs_scale_t, axis=rhs_dummy_axes)
-      rhs_scale_t = 1.0 / rhs_scale_t
-      out = out * rhs_scale_t
+      qrhs_scale_t = jnp.expand_dims(qrhs_scale_t, axis=rhs_dummy_axes)
+      qrhs_scale_t = 1.0 / qrhs_scale_t
+      out = out * qrhs_scale_t
     else:
-      rhs_scale_t = 1.0
-    rhs_res = TensorRes(value=orig_rhs, qvalue=rhs, qvalue_scale=rhs_scale_t)
+      qrhs_scale_t = 1.0
+    rhs_res = TensorRes(value=rhs, qvalue=qrhs, qvalue_scale=qrhs_scale_t)
 
     res = DotGeneralRes(context_bwd=context_bwd, lhs=lhs_res, rhs=rhs_res)
     return out, res
@@ -423,8 +418,6 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       rhs,
       dimension_numbers,
       context,
-      precision=None,
-      preferred_element_type=None,
   ):
     msg = (
         'use_fake_quant mode is used in tests and it is exactly equal when'
@@ -442,8 +435,6 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
         lhs_fq,
         rhs_fq,
         dimension_numbers,
-        precision,
-        preferred_element_type=preferred_element_type,
     )
     res = DotGeneralRes(
         context_bwd=context_bwd,
@@ -470,8 +461,6 @@ def _dot_general_raw_attach_gradient(
   def vjp_bwd(
       fwd_dims,
       fwd_context,
-      precision,
-      preferred_element_type,
       res: DotGeneralRes,
       g,
   ):
@@ -501,15 +490,14 @@ def _dot_general_raw_attach_gradient(
       else:
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
+
       if use_fwd_quant:
         gv = g * y_res.qvalue_scale
         yv = y_res.qvalue
       else:
         gv = g
         yv = y_res.value
-      out, _ = dot_general(
-          gv, yv, dims, context, precision, preferred_element_type,
-      )
+      out, _ = dot_general(gv, yv, dims, context)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(x_ba + x_ra + x_ca_sorted_by_y))
@@ -529,20 +517,16 @@ def _dot_general_raw_attach_gradient(
       rhs,
       dimension_numbers,
       context,
-      precision=None,
-      preferred_element_type=None,
   ):
     ret, _ = fwd_dot_general_raw(
         lhs,
         rhs,
         dimension_numbers,
         context,
-        precision,
-        preferred_element_type,
     )
     return ret
 
-  vjp = jax.custom_vjp(fwd_dot_general_raw_no_res, nondiff_argnums=(2, 3, 4, 5))
+  vjp = jax.custom_vjp(fwd_dot_general_raw_no_res, nondiff_argnums=(2, 3))
   vjp.defvjp(fwd_dot_general_raw, vjp_bwd)
   return vjp
 
@@ -550,7 +534,7 @@ def _dot_general_raw_attach_gradient(
 def make_dot_general(config: Optional[DotGeneralConfig]):
   """Makes quantized lax.dot_general replacement with attached gradients."""
   if config is None:
-    config = DotGeneralConfig.make()
+    return jax.lax.dot_general
 
   dg = _dot_general_raw_attach_gradient(
       fwd_dot_general_raw=_make_dot_general_raw(config.fwd),
@@ -568,14 +552,24 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
       precision=None,
       preferred_element_type=None,
   ):
-    return dg(
+    assert (
+        precision is None
+    ), f'Precision {precision} requested together with quantization.'
+    assert preferred_element_type is None, (
+        f'Preferred_element_typerecision {preferred_element_type} requested'
+        ' together with quantization.'
+    )
+    assert lhs.dtype == rhs.dtype, (
+        'The only reason we need that, is because we need to determine return'
+        ' type.'
+    )
+    out = dg(
         lhs=lhs,
         rhs=rhs,
         dimension_numbers=dimension_numbers,
         context=context,
-        precision=precision,
-        preferred_element_type=preferred_element_type,
     )
+    return out.astype(lhs.dtype)
 
   return ret_dg
 

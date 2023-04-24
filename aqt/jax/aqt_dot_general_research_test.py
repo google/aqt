@@ -227,11 +227,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             dimension_numbers,
             context,
             precision=None,
-            preferred_element_type=None,
         ):
-          ret = jax.lax.dot_general(
-              lhs, rhs, dimension_numbers, precision, preferred_element_type
-          )
+          ret = jax.lax.dot_general(lhs, rhs, dimension_numbers, precision)
           ret *= delta
 
           def res(v):
@@ -260,12 +257,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_hardware_int8(self):
     def dg(lhs, rhs):
       config = aqtr.DotGeneralRawConfig.make(8, 8)
-      config.use_hardware_int8 = True
+      # config.use_hardware_int8 = True
+      config.in_dtype = jnp.int8
+      config.preferred_element_type = jnp.int32
       ret, _ = aqtr._make_dot_general_raw(config)(
           lhs,
           rhs,
-          dimension_numbers=(((1,), (0,)), ((), ())),
-          context=aqtr.Context(key=None),
+          (((1,), (0,)), ((), ())),
+          aqtr.Context(key=None),
       )
       return ret
 
