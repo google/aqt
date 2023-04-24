@@ -15,7 +15,7 @@
 """Tests for dot_general."""
 from absl.testing import absltest
 from absl.testing import parameterized
-import aqt.jax.aqt_dot_general_research as aqtr
+import aqt.jax.v2.aqt_dot_general as aqt
 
 import flax.linen.linear as fl
 import jax
@@ -102,13 +102,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         for v in [0.1, 1000.0]:
           for seed in range(10):
             key = jax.random.PRNGKey(seed)
-            cfg = aqtr.TensorConfig.make(prec)
+            cfg = aqt.TensorConfig.make(prec)
             cfg.preserve_zero = preserve_zero
             cfg.calib_shared_axes = (0,)
             sample_size = 10000
             shape = (sample_size,)
             a = jax.random.uniform(key, shape, minval=-v, maxval=v)
-            qa = aqtr.make_fake_quant(cfg)(a, aqtr.Context(key=None))
+            qa = aqt.make_fake_quant(cfg)(a, aqt.Context(key=None))
             bucket_noise = qa - a  #  ~ U(-bucket_size/2, bucket_size/2)
             bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
             bucket_size = (v * 2) / bucket_count
@@ -125,13 +125,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       maxval=10.0,
       shape=(20, 1),
   ):
-    config = aqtr.TensorConfig.make(bits)
+    config = aqt.TensorConfig.make(bits)
     config.po2_scale = True
     config.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
     grad = jnp.ones(shape) * 12345.0
     x_fq, backprop = jax.vjp(
-        aqtr.make_fake_quant(config), x, aqtr.Context(key=None)
+        aqt.make_fake_quant(config), x, aqt.Context(key=None)
     )
     gx_fq = backprop(grad)
     # print(f"x     =\n{x}")
@@ -187,7 +187,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
     # have the same numerics when scales are power of two (po2).
     # We are passing dims to config so that we can reuse it in fake_quant.
-    raw_config = aqtr.DotGeneralRawConfig.make(lhs_bits, rhs_bits)
+    raw_config = aqt.DotGeneralRawConfig.make(lhs_bits, rhs_bits)
     # Power-of-2 scales allow FQ and AQT to be exactly the same.
     raw_config.lhs.po2_scale = True
     # Needed if we want to reuse config in the fake_quant.
@@ -195,7 +195,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     raw_config.rhs.po2_scale = True
     raw_config.rhs.calib_shared_axes = dims[0][1]
 
-    config = aqtr.DotGeneralConfig.make()
+    config = aqt.DotGeneralConfig.make()
     config.fwd = raw_config
 
     # test dot_general
@@ -204,12 +204,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     gra = rand_unif(gra_shape, gra_maxval)
 
     def aqt_dg_full():
-      dg = aqtr.make_dot_general(config)
-      return lambda lhs, rhs: dg(lhs, rhs, dims, aqtr.Context(key=None))
+      dg = aqt.make_dot_general(config)
+      return lambda lhs, rhs: dg(lhs, rhs, dims, aqt.Context(key=None))
 
     def aqt_dg(use_fake_quant):
-      dg = aqtr._make_dot_general_raw(raw_config, use_fake_quant)
-      return lambda lhs, rhs: dg(lhs, rhs, dims, aqtr.Context(key=None))[0]
+      dg = aqt._make_dot_general_raw(raw_config, use_fake_quant)
+      return lambda lhs, rhs: dg(lhs, rhs, dims, aqt.Context(key=None))[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -232,9 +232,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           ret *= delta
 
           def res(v):
-            return aqtr.TensorRes(value=v, qvalue=v, qvalue_scale=1.0)
+            return aqt.TensorRes(value=v, qvalue=v, qvalue_scale=1.0)
 
-          res = aqtr.DotGeneralRes(
+          res = aqt.DotGeneralRes(
               context_bwd=context, lhs=res(lhs), rhs=res(rhs)
           )
           return ret, res
@@ -244,8 +244,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       m1 = dg_mul(2.0)
       m2 = dg_mul(4.0)
       m3 = dg_mul(8.0)
-      return aqtr._dot_general_raw_attach_gradient(m1, m2, m3)(
-          lhs, rhs, dims, aqtr.Context(key=None)
+      return aqt._dot_general_raw_attach_gradient(m1, m2, m3)(
+          lhs, rhs, dims, aqt.Context(key=None)
       )
 
     check_eq(aqt_dg(False), aqt_dg(True), lhs, rhs, gra)
@@ -256,15 +256,15 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   def test_hardware_int8(self):
     def dg(lhs, rhs):
-      config = aqtr.DotGeneralRawConfig.make(8, 8)
+      config = aqt.DotGeneralRawConfig.make(8, 8)
       # config.use_hardware_int8 = True
       config.in_dtype = jnp.int8
       config.preferred_element_type = jnp.int32
-      ret, _ = aqtr._make_dot_general_raw(config)(
+      ret, _ = aqt._make_dot_general_raw(config)(
           lhs,
           rhs,
           (((1,), (0,)), ((), ())),
-          aqtr.Context(key=None),
+          aqt.Context(key=None),
       )
       return ret
 
@@ -292,7 +292,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       lhs_maxval=10.0,
       rhs_maxval=20.0,
   ):
-    config = aqtr.make_config_conv_general_dilated(2, lhs_bits, rhs_bits)
+    config = aqt.make_config_conv_general_dilated(2, lhs_bits, rhs_bits)
 
     if config.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
@@ -307,14 +307,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval)
 
     lax_conv = jax.lax.conv_general_dilated
-    aqt_conv = aqtr.make_conv_general_dilated(config)
+    aqt_conv = aqt.make_conv_general_dilated(config)
     kwargs = {
         "window_strides": (1, 1),
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqtr.make_fake_quant(config.lhs)(lhs, aqtr.Context(key=None))
-    rhs_fq = aqtr.make_fake_quant(config.rhs)(rhs, aqtr.Context(key=None))
+    lhs_fq = aqt.make_fake_quant(config.lhs)(lhs, aqt.Context(key=None))
+    rhs_fq = aqt.make_fake_quant(config.rhs)(rhs, aqt.Context(key=None))
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
