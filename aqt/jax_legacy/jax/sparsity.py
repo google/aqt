@@ -29,7 +29,9 @@ from jax import lax
 import jax.numpy as jnp
 
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (
+    flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+)
 
 
 # TODO(ayazdan): Create abstract class for sparsity configurations.
@@ -273,15 +275,23 @@ class Sparsity(nn.Module):
       return inputs
 
 
-def apply_sparsity(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,
-                   n_sparsity: int, m_sparsity: int):
+def apply_sparsity(
+    inputs: jnp.ndarray,
+    sparsity_hparams: SparseHParams,
+    n_sparsity: int,
+    m_sparsity: int,
+) -> jnp.ndarray:
   """Returns sparsified inputs based on sparsity hparams."""
   mask = get_sparsity_mask(inputs, sparsity_hparams, n_sparsity, m_sparsity)
   return jnp.where(mask.value, inputs, jnp.zeros(inputs.shape, inputs.dtype))  # pytype: disable=attribute-error  # jax-ndarray
 
 
-def get_sparsity_mask(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,
-                      n_sparsity: int = 0, m_sparsity: int = 0):
+def get_sparsity_mask(
+    inputs: jnp.ndarray,
+    sparsity_hparams: SparseHParams,
+    n_sparsity: int = 0,
+    m_sparsity: int = 0,
+) -> jnp.ndarray:
   """Returns sparsified inputs based on sparsity hparams."""
   if sparsity_hparams is None or sparsity_hparams.prune_rate is None:
     return jnp.ones(inputs.shape, dtype=bool)
@@ -289,8 +299,10 @@ def get_sparsity_mask(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,
   if sparsity_hparams.type == 'STRUCTURED_NM':
     assert isinstance(
         prune_rate, Tuple), 'prune rate must be tuple for structured sparsity.'
-    assert prune_rate[0] <= prune_rate[
-        1], f'prune_rate[0] must be lower than prune_rate[1] for N:M ({prune_rate[0]}:{prune_rate[1]}) sparsity.'
+    assert prune_rate[0] <= prune_rate[1], (
+        'prune_rate[0] must be lower than prune_rate[1] for N:M'
+        f' ({prune_rate[0]}:{prune_rate[1]}) sparsity.'
+    )
     return get_pruning_n_m_mask(
         inputs,
         n=n_sparsity,
@@ -299,9 +311,9 @@ def get_sparsity_mask(inputs: jnp.ndarray, sparsity_hparams: SparseHParams,
         absolute=sparsity_hparams.absolute,
         smallest=sparsity_hparams.smallest)
   elif sparsity_hparams.type == 'UNSTRUCTURED':
-    assert isinstance(
-        prune_rate, float
-    ) and prune_rate < 1, f'sparsity ratio can not be > 1, provided prune_rate {prune_rate}.'
+    assert (
+        isinstance(prune_rate, float) and prune_rate < 1
+    ), f'sparsity ratio can not be > 1, provided prune_rate {prune_rate}.'
     return get_pruning_unstruct_mask(
         inputs, prune_rate=prune_rate, smallest=sparsity_hparams.smallest)
   else:
