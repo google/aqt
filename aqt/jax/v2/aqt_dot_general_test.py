@@ -205,11 +205,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def aqt_dg_full():
       dg = aqt.make_dot_general(config)
-      return lambda lhs, rhs: dg(lhs, rhs, dims, aqt.Context(key=None))
+      return lambda lhs, rhs: dg(lhs, rhs, dims, context=aqt.Context(key=None))
 
     def aqt_dg(use_fake_quant):
-      dg = aqt._make_dot_general_raw(raw_config, use_fake_quant)
-      return lambda lhs, rhs: dg(lhs, rhs, dims, aqt.Context(key=None))[0]
+      dg_raw = aqt._make_dot_general_raw(raw_config, use_fake_quant)
+      context = aqt.Context(key=None)
+      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -226,9 +227,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             rhs,
             dimension_numbers,
             context,
-            precision=None,
         ):
-          ret = jax.lax.dot_general(lhs, rhs, dimension_numbers, precision)
+          ret = jax.lax.dot_general(lhs, rhs, dimension_numbers)
           ret *= delta
 
           def res(v):
@@ -245,9 +245,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       m2 = dg_mul(4.0)
       m3 = dg_mul(8.0)
       return aqt._dot_general_raw_attach_gradient(m1, m2, m3)(
-          lhs, rhs, dims, aqt.Context(key=None)
+          lhs, rhs, dims, context=aqt.Context(key=None)
       )
-
     check_eq(aqt_dg(False), aqt_dg(True), lhs, rhs, gra)
     check_eq(aqt_dg(False), aqt_dg_full(), lhs, rhs, gra)
     check_eq(

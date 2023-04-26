@@ -458,6 +458,21 @@ def _dot_general_raw_attach_gradient(
 ):
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
+  def vjp_fwd(
+      lhs,
+      rhs,
+      dimension_numbers,
+      context,
+  ):
+    # Ignore the DotGeneralRes.
+    ret, _ = fwd_dot_general_raw(
+        lhs,
+        rhs,
+        dimension_numbers,
+        context,
+    )
+    return ret
+
   def vjp_bwd(
       fwd_dims,
       fwd_context,
@@ -512,21 +527,7 @@ def _dot_general_raw_attach_gradient(
     )
     return dlhs, drhs
 
-  def fwd_dot_general_raw_no_res(
-      lhs,
-      rhs,
-      dimension_numbers,
-      context,
-  ):
-    ret, _ = fwd_dot_general_raw(
-        lhs,
-        rhs,
-        dimension_numbers,
-        context,
-    )
-    return ret
-
-  vjp = jax.custom_vjp(fwd_dot_general_raw_no_res, nondiff_argnums=(2, 3))
+  vjp = jax.custom_vjp(vjp_fwd, nondiff_argnums=(2, 3))
   vjp.defvjp(fwd_dot_general_raw, vjp_bwd)
   return vjp
 
@@ -534,7 +535,22 @@ def _dot_general_raw_attach_gradient(
 def make_dot_general(config: Optional[DotGeneralConfig]):
   """Makes quantized lax.dot_general replacement with attached gradients."""
   if config is None:
-    return jax.lax.dot_general
+
+    def ret_lax_dg(
+        lhs,
+        rhs,
+        dimension_numbers,
+        precision=None,
+        preferred_element_type=None,
+        *,
+        context=Context(key=None),
+    ):
+      del context
+      return jax.lax.dot_general(
+          lhs, rhs, dimension_numbers, precision, preferred_element_type
+      )
+
+    return ret_lax_dg
 
   dg = _dot_general_raw_attach_gradient(
       fwd_dot_general_raw=_make_dot_general_raw(config.fwd),
@@ -548,9 +564,10 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
       lhs,
       rhs,
       dimension_numbers,
-      context=Context(key=None),
       precision=None,
       preferred_element_type=None,
+      *,
+      context=Context(key=None),
   ):
     assert (
         precision is None
