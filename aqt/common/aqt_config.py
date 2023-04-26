@@ -138,7 +138,7 @@ class StatsConfig(_BaseConfig):
 
   tpu_cross_replica_sum: bool = True
 
-  def validate(self, data_shape: List[Optional[int]]):
+  def validate(self, data_shape: List[Optional[int]]):  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
     """Validates this StatsConfig for the provided data shape.
 
     Args:
@@ -304,7 +304,7 @@ class AqtScheduleConfig(_BaseConfig):
     else:
       return FloatConfig
 
-  def validate(self, data_shape: List[Optional[int]]):
+  def validate(self, data_shape: List[Optional[int]]):  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
     """Validates this AqtScheduleConfig for the provided data shape."""
     # The output value of quantization_mode is unused.
     if not self.allow_int_small_float:

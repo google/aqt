@@ -836,7 +836,7 @@ class SelfAttentionAqt(MultiHeadDotProductAttentionAqt):
   """Self-attention."""
 
   @nn.compact
-  def __call__(
+  def __call__(  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
       self,
       inputs_q: jnp.ndarray,
       *,
