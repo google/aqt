@@ -235,7 +235,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             return aqt.TensorRes(value=v, qvalue=v, qvalue_scale=1.0)
 
           res = aqt.DotGeneralRes(
-              context_bwd=context, lhs=res(lhs), rhs=res(rhs)
+              context_bwd=context,
+              lhs=res(lhs),
+              rhs=res(rhs),
+              fwd_dg_dims=dimension_numbers,
           )
           return ret, res
 
@@ -252,6 +255,15 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     check_eq(
         lax_dg, lax_dg_248, lhs, rhs, gra, lr_mult=2.0, gl_mult=4.0, gr_mult=8.0
     )
+
+  def test_dynamic_context(self):
+    @jax.jit
+    def f(lhs, rhs, context):
+      config = aqt.DotGeneralConfig.make()
+      dg = aqt.make_dot_general(config)
+      return dg(lhs, rhs, (((), ()), ((), ())), context=context)
+
+    f(3, 4, aqt.Context(key=jax.random.PRNGKey(4)))  # xkcd.com/221
 
   def test_hardware_int8(self):
     def dg(lhs, rhs):

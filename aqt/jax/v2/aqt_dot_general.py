@@ -189,12 +189,10 @@ class Context:
 
 
 def _context_split(context: Context) -> tuple[Context, Context]:
-  context1, context2 = Context(key=None), Context(key=None)
   if context.key is not None:
     key1, key2 = jax.random.split(context.key)
-    context1.key = key1
-    context2.key = key2
-  return (context1, context2)
+    return Context(key=key1), Context(key=key2)
+  return Context(key=None), Context(key=None)
 
 
 def _get_max_value_representation(config: TensorConfig):
@@ -288,14 +286,13 @@ def _make_clip_and_round(config: TensorConfig):
     res = (x,)
     return fwd(x, context), res
 
-  def vjp_bwd(fwd_context, res, grad):
-    del fwd_context
+  def vjp_bwd(res, grad):
     (x,) = res
     # This is gradient of clip. For boundary values we will have full graindent.
     ret = (x <= clip_bound) * (x >= -clip_bound) * grad
-    return (ret,)
+    return (ret, None)
 
-  vjp = jax.custom_vjp(fwd, nondiff_argnums=(1,))
+  vjp = jax.custom_vjp(fwd)
   vjp.defvjp(vjp_fwd, vjp_bwd)
   return vjp
 
@@ -325,6 +322,7 @@ class DotGeneralRes:
   context_bwd: Context
   lhs: TensorRes
   rhs: TensorRes
+  fwd_dg_dims: lax.DotDimensionNumbers
 
 
 # TODO(lew): Gradient of this function is costly. Optimize.
@@ -410,7 +408,12 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
       qrhs_scale_t = 1.0
     rhs_res = TensorRes(value=rhs, qvalue=qrhs, qvalue_scale=qrhs_scale_t)
 
-    res = DotGeneralRes(context_bwd=context_bwd, lhs=lhs_res, rhs=rhs_res)
+    res = DotGeneralRes(
+        context_bwd=context_bwd,
+        lhs=lhs_res,
+        rhs=rhs_res,
+        fwd_dg_dims=dimension_numbers,
+    )
     return out, res
 
   def fq_dot_general(
@@ -440,6 +443,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
         context_bwd=context_bwd,
         lhs=TensorRes(value=lhs, qvalue=lhs_fq, qvalue_scale=1.0),
         rhs=TensorRes(value=rhs, qvalue=rhs_fq, qvalue_scale=1.0),
+        fwd_dg_dims=dimension_numbers,
     )
     return ret, res
 
@@ -474,15 +478,12 @@ def _dot_general_raw_attach_gradient(
     return ret
 
   def vjp_bwd(
-      fwd_dims,
-      fwd_context,
       res: DotGeneralRes,
       g,
   ):
     # fwd_context contains the key that was captured in vjp_fwd.
     # It was already used there and we should not use it here again.
     # If we need a key, we should use one passed into res parameter.
-    del fwd_context
     def ranges_like(*xs, start=0):
       for x in xs:
         yield tuple(range(start, start + len(x)))
@@ -493,13 +494,13 @@ def _dot_general_raw_attach_gradient(
     ):
       y_ndim = y_res.value.ndim
 
-      (x_ca, y_ca), (x_ba, y_ba) = fwd_dims
+      (x_ca, y_ca), (x_ba, y_ba) = res.fwd_dg_dims
       if y_is_lhs:
         (y_ca, x_ca) = (x_ca, y_ca)
         (y_ba, x_ba) = (x_ba, y_ba)
       g_ndim = g.ndim - y_ndim + len(x_ba) + 2 * len(x_ca)
-      x_ra = tuple(i for i in range(g_ndim) if i not in set(x_ca + x_ba))
-      y_ra = tuple(i for i in range(y_ndim) if i not in set(y_ca + y_ba))
+      x_ra = tuple(i for i in range(g_ndim) if i not in x_ca and i not in x_ba)
+      y_ra = tuple(i for i in range(y_ndim) if i not in y_ca and i not in y_ba)
       if y_is_lhs:
         g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
       else:
@@ -515,7 +516,7 @@ def _dot_general_raw_attach_gradient(
       out, _ = dot_general(gv, yv, dims, context)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
-      out_axes = tuple(onp.argsort(x_ba + x_ra + x_ca_sorted_by_y))
+      out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
       return jax.lax.transpose(out, out_axes)
 
     context1, context2 = _context_split(res.context_bwd)
@@ -525,9 +526,9 @@ def _dot_general_raw_attach_gradient(
     drhs = grad_dot_general(
         res.lhs, drhs_dot_general_raw, True, context2, drhs_use_fwd_quant
     )
-    return dlhs, drhs
+    return (dlhs, drhs, None, None)
 
-  vjp = jax.custom_vjp(vjp_fwd, nondiff_argnums=(2, 3))
+  vjp = jax.custom_vjp(vjp_fwd)
   vjp.defvjp(fwd_dot_general_raw, vjp_bwd)
   return vjp
 
