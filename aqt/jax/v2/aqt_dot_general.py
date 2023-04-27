@@ -322,7 +322,6 @@ class DotGeneralRes:
   context_bwd: Context
   lhs: TensorRes
   rhs: TensorRes
-  fwd_dg_dims: lax.DotDimensionNumbers
 
 
 # TODO(lew): Gradient of this function is costly. Optimize.
@@ -412,7 +411,6 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
         context_bwd=context_bwd,
         lhs=lhs_res,
         rhs=rhs_res,
-        fwd_dg_dims=dimension_numbers,
     )
     return out, res
 
@@ -443,7 +441,6 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
         context_bwd=context_bwd,
         lhs=TensorRes(value=lhs, qvalue=lhs_fq, qvalue_scale=1.0),
         rhs=TensorRes(value=rhs, qvalue=rhs_fq, qvalue_scale=1.0),
-        fwd_dg_dims=dimension_numbers,
     )
     return ret, res
 
@@ -478,6 +475,7 @@ def _dot_general_raw_attach_gradient(
     return ret
 
   def vjp_bwd(
+      fwd_dimension_numbers,
       res: DotGeneralRes,
       g,
   ):
@@ -494,7 +492,7 @@ def _dot_general_raw_attach_gradient(
     ):
       y_ndim = y_res.value.ndim
 
-      (x_ca, y_ca), (x_ba, y_ba) = res.fwd_dg_dims
+      (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
       if y_is_lhs:
         (y_ca, x_ca) = (x_ca, y_ca)
         (y_ba, x_ba) = (x_ba, y_ba)
@@ -526,9 +524,9 @@ def _dot_general_raw_attach_gradient(
     drhs = grad_dot_general(
         res.lhs, drhs_dot_general_raw, True, context2, drhs_use_fwd_quant
     )
-    return (dlhs, drhs, None, None)
+    return (dlhs, drhs, None)
 
-  vjp = jax.custom_vjp(vjp_fwd)
+  vjp = jax.custom_vjp(vjp_fwd, nondiff_argnums=(2,))
   vjp.defvjp(fwd_dot_general_raw, vjp_bwd)
   return vjp
 

@@ -238,7 +238,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
               context_bwd=context,
               lhs=res(lhs),
               rhs=res(rhs),
-              fwd_dg_dims=dimension_numbers,
           )
           return ret, res
 
@@ -261,9 +260,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     def f(lhs, rhs, context):
       config = aqt.DotGeneralConfig.make()
       dg = aqt.make_dot_general(config)
-      return dg(lhs, rhs, (((), ()), ((), ())), context=context)
+      return dg(lhs, rhs, (((0,), (0,)), ((), ())), context=context)
 
-    f(3, 4, aqt.Context(key=jax.random.PRNGKey(4)))  # xkcd.com/221
+    lhs, rhs = jnp.array([3.0, 4.0]), jnp.array([4.0, 5.0])
+    context = aqt.Context(key=jax.random.PRNGKey(4))  # xkcd.com/221
+    jax.value_and_grad(f)(lhs, rhs, context)
 
   def test_hardware_int8(self):
     def dg(lhs, rhs):
