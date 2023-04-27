@@ -79,6 +79,7 @@ class DotGeneralRawConfig:
   # use_fwd_quant is ignored in forward pass.
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
   use_fwd_quant: bool
+  use_fake_quant: bool
 
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRawConfig':
@@ -89,6 +90,7 @@ class DotGeneralRawConfig:
         in_dtype=None,
         preferred_element_type=jnp.float32,
         use_fwd_quant=True,
+        use_fake_quant=False,
     )
 
 
@@ -325,7 +327,7 @@ class DotGeneralRes:
 
 
 # TODO(lew): Gradient of this function is costly. Optimize.
-def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
+def _make_dot_general_raw(config: DotGeneralRawConfig):
   """Makes quantized lax.dot_general replacement."""
   config = copy.deepcopy(config)
 
@@ -444,7 +446,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig, use_fake_quant=False):
     )
     return ret, res
 
-  if use_fake_quant:
+  if config.use_fake_quant:
     return fq_dot_general
   else:
     return my_dot_general

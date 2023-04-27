@@ -73,7 +73,17 @@ def test_eq(name, a, b):
     assert False
 
 
-def check_eq(dg1, dg2, lhs, rhs, gra, lr_mult=1.0, gl_mult=1.0, gr_mult=1.0):
+def check_eq(
+    dg1,
+    dg2,
+    lhs,
+    rhs,
+    gra,
+    lr_mult=1.0,
+    gl_mult=1.0,
+    gr_mult=1.0,
+    test_gradient=True,
+):
   """Tests whether dg1 and dg2 are identical or proportional."""
 
   def app(dg):
@@ -86,8 +96,9 @@ def check_eq(dg1, dg2, lhs, rhs, gra, lr_mult=1.0, gl_mult=1.0, gr_mult=1.0):
   lr1, gl1, gr1 = app(dg1)
   lr2, gl2, gr2 = app(dg2)
   test_eq("lr", lr1 * lr_mult, lr2)  # forward pass
-  test_eq("gl", gl1 * gl_mult, gl2)  # backward pass
-  test_eq("gr", gr1 * gr_mult, gr2)  # backward pass
+  if test_gradient:
+    test_eq("gl", gl1 * gl_mult, gl2)  # backward pass
+    test_eq("gr", gr1 * gr_mult, gr2)  # backward pass
 
 
 class AqtDotGeneralResearchTest(parameterized.TestCase):
@@ -184,31 +195,38 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_shape=(20, 30),
       gra_shape=(10, 30),  # has to be the shape of the output
   ):
-    # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
-    # have the same numerics when scales are power of two (po2).
-    # We are passing dims to config so that we can reuse it in fake_quant.
-    raw_config = aqt.DotGeneralRawConfig.make(lhs_bits, rhs_bits)
-    # Power-of-2 scales allow FQ and AQT to be exactly the same.
-    raw_config.lhs.po2_scale = True
-    # Needed if we want to reuse config in the fake_quant.
-    raw_config.lhs.calib_shared_axes = dims[0][0]
-    raw_config.rhs.po2_scale = True
-    raw_config.rhs.calib_shared_axes = dims[0][1]
 
-    config = aqt.DotGeneralConfig.make()
-    config.fwd = raw_config
+    def make_raw_config(use_fake_quant=False):
+      # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
+      # have the same numerics when scales are power of two (po2).
+      # We are passing dims to config so that we can reuse it in fake_quant.
+      raw_config = aqt.DotGeneralRawConfig.make(lhs_bits, rhs_bits)
+      # Power-of-2 scales allow FQ and AQT to be exactly the same.
+      raw_config.lhs.po2_scale = True
+      # Needed if we want to reuse config in the fake_quant.
+      raw_config.lhs.calib_shared_axes = dims[0][0]
+      raw_config.rhs.po2_scale = True
+      raw_config.rhs.calib_shared_axes = dims[0][1]
+      raw_config.use_fake_quant = use_fake_quant
+      return raw_config
 
     # test dot_general
     lhs = rand_unif(lhs_shape, lhs_maxval)
     rhs = rand_unif(rhs_shape, rhs_maxval)
     gra = rand_unif(gra_shape, gra_maxval)
 
-    def aqt_dg_full():
+    def aqt_dg_full(use_fake_quant):
+      config = aqt.DotGeneralConfig.make()
+      config.fwd = make_raw_config(use_fake_quant)
+      # TODO(lew): Add unit tests that actually quantize bwd, and do this:
+      # config.dlhs.use_fake_quant = use_fake_quant
+      # config.drhs.use_fake_quant = use_fake_quant
       dg = aqt.make_dot_general(config)
       return lambda lhs, rhs: dg(lhs, rhs, dims, context=aqt.Context(key=None))
 
-    def aqt_dg(use_fake_quant):
-      dg_raw = aqt._make_dot_general_raw(raw_config, use_fake_quant)
+    def aqt_dg_raw(use_fake_quant):
+      cfg = make_raw_config(use_fake_quant=use_fake_quant)
+      dg_raw = aqt._make_dot_general_raw(cfg)
       context = aqt.Context(key=None)
       return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
 
@@ -249,8 +267,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return aqt._dot_general_raw_attach_gradient(m1, m2, m3)(
           lhs, rhs, dims, context=aqt.Context(key=None)
       )
-    check_eq(aqt_dg(False), aqt_dg(True), lhs, rhs, gra)
-    check_eq(aqt_dg(False), aqt_dg_full(), lhs, rhs, gra)
+    check_eq(aqt_dg_raw(False), aqt_dg_raw(True), lhs, rhs, gra)
+    check_eq(aqt_dg_full(False), aqt_dg_full(True), lhs, rhs, gra)
+    check_eq(aqt_dg_raw(False), aqt_dg_full(False), lhs, rhs, gra)
     check_eq(
         lax_dg, lax_dg_248, lhs, rhs, gra, lr_mult=2.0, gl_mult=4.0, gr_mult=8.0
     )
