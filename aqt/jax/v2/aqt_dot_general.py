@@ -16,9 +16,7 @@
 # pylint: disable=g-explicit-bool-comparison
 
 import copy
-import dataclasses
-from typing import Optional, Callable
-
+from aqt.jax.v2 import config
 import flax.struct
 import jax
 from jax import lax
@@ -30,163 +28,9 @@ import numpy as onp
 # - use_fwd_quant but we want to use classic quantization.
 
 
-@dataclasses.dataclass
-class TensorConfig:
-  """Configuration of quantization of one tensor or one side of tensor op."""
-
-  bits: Optional[int]
-  calib_shared_axes: Optional[list[int]]
-  preserve_zero: bool
-  bound: Optional[float]
-  bound_stop_grad: bool
-  # false = map max val on the end of the last bucket
-  # true = map max val on the middle of the last
-  preserve_max_val: bool
-  clip: bool
-  round: bool
-  noise_fn: Optional[
-      Callable[[tuple[int, ...], jax.random.KeyArray], jnp.ndarray]
-  ]
-  # Round up the calibration to power of 2 (po2).
-  po2_scale: bool
-
-  @classmethod
-  def make(cls, bits: Optional[int]) -> 'TensorConfig':
-    pz = False if bits == 1 else True
-
-    return TensorConfig(
-        bits=bits,
-        calib_shared_axes=None,
-        preserve_zero=pz,
-        bound=None,
-        bound_stop_grad=True,
-        preserve_max_val=False,
-        clip=True,
-        round=True,
-        noise_fn=None,
-        po2_scale=False,
-    )
-
-
-@dataclasses.dataclass
-class DotGeneralRawConfig:
-  """Configuration of quantization of one dot_general without gradient."""
-  lhs: TensorConfig
-  rhs: TensorConfig
-  in_dtype: onp.dtype | None
-  preferred_element_type: onp.dtype
-  # use_fwd_quant is observed when this dot_general is used in gradient.
-  # use_fwd_quant is ignored in forward pass.
-  # Whether the gradient should be taken at unquantized wgt/act or quantized.
-  use_fwd_quant: bool
-  use_fake_quant: bool
-
-  @classmethod
-  def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRawConfig':
-    """Create quantization configs for input matrices to a matmul."""
-    return DotGeneralRawConfig(
-        lhs=TensorConfig.make(lhs_bits),
-        rhs=TensorConfig.make(rhs_bits),
-        in_dtype=None,
-        preferred_element_type=jnp.float32,
-        use_fwd_quant=True,
-        use_fake_quant=False,
-    )
-
-
-@dataclasses.dataclass
-class DotGeneralConfig:
-  fwd: DotGeneralRawConfig
-  dlhs: DotGeneralRawConfig
-  drhs: DotGeneralRawConfig
-
-  @classmethod
-  def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralConfig':
-    """Create quantization configs for input matrices to a matmul."""
-    return DotGeneralConfig(
-        fwd=DotGeneralRawConfig.make(lhs_bits, rhs_bits),
-        dlhs=DotGeneralRawConfig.make(),
-        drhs=DotGeneralRawConfig.make(),
-    )
-
-
-def make_config_conv_general_dilated(
-    spatial_dimensions=2,
-    lhs_bits=None,
-    rhs_bits=None,
-) -> DotGeneralRawConfig:
-  config = DotGeneralRawConfig.make(lhs_bits, rhs_bits)
-  # Hardcoding flax assumptions.
-  if config.lhs:
-    config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
-  if config.rhs:
-    config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
-  return config
-
-
-# The arithmetic of scaling, clipping and rounding can be confusing.
-# Here I add some documentation to hopefully clarify it.
-# Bucket is an interval of rounding after the scaling is applied.
-# Facts:
-#  - Bucket size is always 1.0.
-#  - Middle of the bucket = righ of the bucket - 0.5
-#  - If not preserve_zero then
-#    - bucket ends align with integers.
-#    - bucket center align with integers+0.5 .
-#  - If preserve_zero then
-#    - bucket ends align with intigers+0.5.
-#    - bucket center align with integers.
-#  - We have two types of rounding, both mostly unbiased:
-#    - round_int0(x) = floor(x+0.5) # rounding to integer
-#    - round_int5(x) = floor(x)+0.5 # rounding to integer+0.5
-#  - Center of the bucket is presereved by rounding in all cases.
-
-# Let's explore 6 options:
-# preserve_zero = False - rounding to x.5. i.e 0.5, 1.5, etc are preserved
-#   prec=2
-#   buckets: [-2, -1] [-1, 0] [0, 1] [1, 2]
-#   bucket centers: -1.5 -0.5 0.5 1.5
-#     preserve_max_val = False
-#     we map largest value to 2.0 (mapping to the end of largest bucket)
-#     preserve_max_val = True
-#     we map largest value to 1.5
-#   prec=1
-#   bucket centers: -0.5 0.5
-#   buckets: [-1, 0] [0, 1]
-#     preserve_max_val = False
-#     we map largest value to 1.0
-#     preserve_max_val = True
-#     we map largest value to 0.5
-# preserve_zero = True - rounding to x.0 i.e 0.0, 1.0, 2.0, etc are preserved
-#   prec=2
-#   buckets: [-1.5, -0.5] [-0.5, 0.5] [0.5, 1.5]
-#   bucket centers: -1, 0, 1
-#     preserve_max_val = False
-#     we map largest value to 1.5 (mapping to the end of largest bucket)
-#     preserve_max_val = True
-#     we map largest value to 1.0
-
-# Summary in the table.
-# preserve_zero, preserve_max_val, max_val_mapped_to, clipping_formula
-## True , False , 2^(n-1) - 0.5, round_int0(clip(x, 2^(n-1) - 0.5 - eps))
-# True , True  , 2^(n-1) - 1.0, round_int0(clip(x, 2^(n-1) - 0.5 - eps))
-# False, False , 2^(n-1)      , round_int5(clip(x, 2^(n-1) - 0.0 - eps))
-# False, True  , 2^(n-1) - 0.5, round_int5(clip(x, 2^(n-1) - 0.0 - eps))
-#
-# Clipping is there only to round all the buckets beyond prec to the biggest
-# bucket. (we will have a separate method for gradients)
-#
-# We need eps>0.0 so that the fwd pass of round_int0(x) = floor(x+0.5) does not
-# have an edge condition on -(2^(n-1) - 0.5). That would add additional bucket.
-# eps can be anywhere in (0, 1.0) for correctness (sharp inequalities).
-# We choose eps=0.5
-# However this messes with the gradient.
-# Also reducing eps is not good enough for po2 case.
-
-
 @flax.struct.dataclass
 class Context:
-  key: Optional[jax.random.KeyArray]
+  key: jax.random.KeyArray | None
   # train_step: int = 0
 
 
@@ -197,51 +41,51 @@ def _context_split(context: Context) -> tuple[Context, Context]:
   return Context(key=None), Context(key=None)
 
 
-def _get_max_value_representation(config: TensorConfig):
+def _get_max_value_representation(cfg: config.Tensor):
   """Largest quantization tensor value is mapped onto 'int' value returned by this function."""
-  assert config.bits is not None
-  assert config.bits <= 22, 'Too many bits, float32 has less precision.'
-  clip_bound = 2.0 ** (config.bits - 1)
-  if config.preserve_zero:
+  assert cfg.bits is not None
+  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
+  clip_bound = 2.0 ** (cfg.bits - 1)
+  if cfg.preserve_zero:
     clip_bound -= 0.5
-  if config.preserve_max_val:
+  if cfg.preserve_max_val:
     clip_bound -= 0.5
   return clip_bound
 
 
-def _get_clip_bound(config: TensorConfig):
+def _get_clip_bound(cfg: config.Tensor):
   """Returns the clip bound when using integer values."""
-  assert config.bits is not None
-  assert config.bits <= 22, 'Too many bits, float32 has less precision.'
-  clip_bound = 2.0 ** (config.bits - 1)
-  if config.preserve_zero:
+  assert cfg.bits is not None
+  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
+  clip_bound = 2.0 ** (cfg.bits - 1)
+  if cfg.preserve_zero:
     clip_bound -= 0.5
   return clip_bound
 
 
-def _fresh_scale(x, config: TensorConfig) -> jnp.ndarray:
+def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   """Calibration scale."""
-  if config is None:
+  if cfg is None:
     return jnp.ones((1,) * len(x.shape), dtype=x.dtype)
 
   # We have 2 sources for contraction axes:
-  assert config.calib_shared_axes
+  assert cfg.calib_shared_axes
 
   # x_bound is the input range that gets mapped to the integer clip_bound
-  # For dynamic quant x_bound = max(x); for static quant x_bound = config.bound
-  if config.bound is None:
-    x_bound = jnp.max(jnp.abs(x), axis=config.calib_shared_axes, keepdims=True)
+  # For dynamic quant x_bound = max(x); for static quant x_bound = cfg.bound
+  if cfg.bound is None:
+    x_bound = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
   else:
-    assert config.bound > 0, 'Static quantization bound should be positive.'
-    x_bound = jnp.asarray(config.bound)
+    assert cfg.bound > 0, 'Static quantization bound should be positive.'
+    x_bound = jnp.asarray(cfg.bound)
   x_bound = jnp.where(x_bound == 0.0, 1.0, x_bound)
-  if config.bound_stop_grad:
+  if cfg.bound_stop_grad:
     x_bound = lax.stop_gradient(x_bound)
 
   # This is the value that the x_bound is mapped to.
-  x_bound_repr = _get_max_value_representation(config)
+  x_bound_repr = _get_max_value_representation(cfg)
   new_scale = x_bound_repr / x_bound
-  if config.po2_scale:
+  if cfg.po2_scale:
     # With floor the bigges value (we are using jnp.max) is in the range of
     # clipping and therefore have a correct gradinet.
     new_scale = 2 ** jnp.floor(jnp.log2(new_scale))
@@ -257,16 +101,16 @@ def _round(x, round_to_halves=False):
     return jnp.floor(x + 0.5)
 
 
-def _make_clip_and_round(config: TensorConfig):
+def _make_clip_and_round(cfg: config.Tensor):
   """Function make_clip_and_round."""
-  assert config is not None
-  clip_bound = _get_clip_bound(config)
+  assert cfg is not None
+  clip_bound = _get_clip_bound(cfg)
 
   def fwd(x, context):
-    if config.clip:
+    if cfg.clip:
       # We use eps = 0.5 to make sure that after clipping we, `x` is wholly in
       # the buckets. This does not affect us, because there is _round following.
-      if config.round:
+      if cfg.round:
         eps = 0.5
       else:
         # If we are not rounding, we don't care about the largest value possible
@@ -274,14 +118,14 @@ def _make_clip_and_round(config: TensorConfig):
         eps = 0.0
       fwd_clip_bound = clip_bound - eps
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
-    if config.noise_fn:
+    if cfg.noise_fn:
       assert context.key is not None, (
           'noise_fn is set, requestic stochastic rounding, but key key was not'
           ' passed.'
       )
-      x = x + config.noise_fn(x.shape, context.key)
-    if config.round:
-      x = _round(x, round_to_halves=not config.preserve_zero)
+      x = x + cfg.noise_fn(x.shape, context.key)
+    if cfg.round:
+      x = _round(x, round_to_halves=not cfg.preserve_zero)
     return x
 
   def vjp_fwd(x, context):
@@ -299,13 +143,13 @@ def _make_clip_and_round(config: TensorConfig):
   return vjp
 
 
-def make_fake_quant(config: TensorConfig):
+def make_fake_quant(cfg: config.Tensor):
   def fake_quant(x, context):
-    if config.bits is None:
+    if cfg.bits is None:
       return x
-    scale = _fresh_scale(x, config)
+    scale = _fresh_scale(x, cfg)
     x = x * scale
-    x = _make_clip_and_round(config)(x, context)
+    x = _make_clip_and_round(cfg)(x, context)
     x = x / scale
     return x
 
@@ -327,9 +171,9 @@ class DotGeneralRes:
 
 
 # TODO(lew): Gradient of this function is costly. Optimize.
-def _make_dot_general_raw(config: DotGeneralRawConfig):
+def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
-  config = copy.deepcopy(config)
+  cfg = copy.deepcopy(cfg)
 
   def my_dot_general(
       lhs,
@@ -348,24 +192,24 @@ def _make_dot_general_raw(config: DotGeneralRawConfig):
     del context
 
     qlhs = lhs
-    if config.lhs.bits is not None:
-      config.lhs.calib_shared_axes = config.lhs.calib_shared_axes or lhs_ca
-      lhs_scale = _fresh_scale(qlhs, config.lhs)
+    if cfg.lhs.bits is not None:
+      cfg.lhs.calib_shared_axes = cfg.lhs.calib_shared_axes or lhs_ca
+      lhs_scale = _fresh_scale(qlhs, cfg.lhs)
       qlhs = qlhs * lhs_scale
-      qlhs = _make_clip_and_round(config.lhs)(qlhs, context_lhs)
+      qlhs = _make_clip_and_round(cfg.lhs)(qlhs, context_lhs)
 
     qrhs = rhs
-    if config.rhs.bits is not None:
-      config.rhs.calib_shared_axes = config.rhs.calib_shared_axes or rhs_ca
-      rhs_scale = _fresh_scale(qrhs, config.rhs)
+    if cfg.rhs.bits is not None:
+      cfg.rhs.calib_shared_axes = cfg.rhs.calib_shared_axes or rhs_ca
+      rhs_scale = _fresh_scale(qrhs, cfg.rhs)
       qrhs = qrhs * rhs_scale
-      qrhs = _make_clip_and_round(config.rhs)(qrhs, context_rhs)
+      qrhs = _make_clip_and_round(cfg.rhs)(qrhs, context_rhs)
 
     out = lax.dot_general(
-        qlhs.astype(config.in_dtype),
-        qrhs.astype(config.in_dtype),
+        qlhs.astype(cfg.in_dtype),
+        qrhs.astype(cfg.in_dtype),
         dimension_numbers=dimension_numbers,
-        preferred_element_type=config.preferred_element_type,
+        preferred_element_type=cfg.preferred_element_type,
     )
     # The axis order in out is as follows: batch, lhs_ra, rhs_ra
     # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
@@ -384,7 +228,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig):
       x = x.reshape(shape_ba + shape_ra)
       return x
 
-    if config.lhs.bits is not None:
+    if cfg.lhs.bits is not None:
       qlhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba)
       # inserting dummy axes for rhs_ra
       assert len(qlhs_scale_t.shape) == len(lhs.shape) - len(lhs_ca)
@@ -397,7 +241,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig):
       qlhs_scale_t = 1.0
     lhs_res = TensorRes(value=lhs, qvalue=qlhs, qvalue_scale=qlhs_scale_t)
 
-    if config.rhs.bits is not None:
+    if cfg.rhs.bits is not None:
       qrhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
       start = len(rhs_ba)
       end = len(lhs.shape) - len(lhs_ca) - len(lhs_ba) + start
@@ -426,14 +270,14 @@ def _make_dot_general_raw(config: DotGeneralRawConfig):
         'use_fake_quant mode is used in tests and it is exactly equal when'
         ' po2_scale == True; Did you forget to set it?'
     )
-    assert config.lhs.po2_scale, msg
-    assert config.rhs.po2_scale, msg
+    assert cfg.lhs.po2_scale, msg
+    assert cfg.rhs.po2_scale, msg
 
     context, context_bwd = _context_split(context)
     context_lhs, context_rhs = _context_split(context)
     del context
-    lhs_fq = make_fake_quant(config.lhs)(lhs, context_lhs)
-    rhs_fq = make_fake_quant(config.rhs)(rhs, context_rhs)
+    lhs_fq = make_fake_quant(cfg.lhs)(lhs, context_lhs)
+    rhs_fq = make_fake_quant(cfg.rhs)(rhs, context_rhs)
     ret = jax.lax.dot_general(
         lhs_fq,
         rhs_fq,
@@ -446,7 +290,7 @@ def _make_dot_general_raw(config: DotGeneralRawConfig):
     )
     return ret, res
 
-  if config.use_fake_quant:
+  if cfg.use_fake_quant:
     return fq_dot_general
   else:
     return my_dot_general
@@ -533,10 +377,9 @@ def _dot_general_raw_attach_gradient(
   return vjp
 
 
-def make_dot_general(config: Optional[DotGeneralConfig]):
+def make_dot_general(cfg: config.DotGeneral | None):
   """Makes quantized lax.dot_general replacement with attached gradients."""
-  if config is None:
-
+  if cfg is None:
     def ret_lax_dg(
         lhs,
         rhs,
@@ -554,11 +397,11 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
     return ret_lax_dg
 
   dg = _dot_general_raw_attach_gradient(
-      fwd_dot_general_raw=_make_dot_general_raw(config.fwd),
-      dlhs_dot_general_raw=_make_dot_general_raw(config.dlhs),
-      drhs_dot_general_raw=_make_dot_general_raw(config.drhs),
-      dlhs_use_fwd_quant=(config.dlhs.use_fwd_quant if config.dlhs else True),
-      drhs_use_fwd_quant=(config.drhs.use_fwd_quant if config.drhs else True),
+      fwd_dot_general_raw=_make_dot_general_raw(cfg.fwd),
+      dlhs_dot_general_raw=_make_dot_general_raw(cfg.dlhs),
+      drhs_dot_general_raw=_make_dot_general_raw(cfg.drhs),
+      dlhs_use_fwd_quant=(cfg.dlhs.use_fwd_quant if cfg.dlhs else True),
+      drhs_use_fwd_quant=(cfg.drhs.use_fwd_quant if cfg.drhs else True),
   )
 
   def ret_dg(
@@ -592,12 +435,12 @@ def make_dot_general(config: Optional[DotGeneralConfig]):
   return ret_dg
 
 
-def make_conv_general_dilated(config: DotGeneralRawConfig):
+def make_conv_general_dilated(cfg: config.DotGeneralRaw):
   """Makes quantized lax.make_conv_general_dilated replacement."""
-  # TODO(lew): Either rename DotGeneralConfig or make a conv-specific config.
-  config = copy.deepcopy(config)
-  if config is None:
-    config = DotGeneralRawConfig.make()
+  # TODO(lew): Either rename DotGeneralConfig or make a conv-specific cfg.
+  cfg = copy.deepcopy(cfg)
+  if cfg is None:
+    cfg = config.DotGeneralRaw.make()
 
   def my_conv_general_dilated(
       lhs,
@@ -630,18 +473,18 @@ However if there is any other use, we will drop that assumption."""
     # we need to share these axes: lhs[1:] , rhs[:-1]
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
 
-    if config.lhs.bits is not None:
+    if cfg.lhs.bits is not None:
       # Flax assumptions.
-      assert config.lhs.calib_shared_axes == list(range(1, rank))
-      lhs_scale = _fresh_scale(lhs, config.lhs)
+      assert cfg.lhs.calib_shared_axes == list(range(1, rank))
+      lhs_scale = _fresh_scale(lhs, cfg.lhs)
       lhs = lhs * lhs_scale
-      lhs = _make_clip_and_round(config.lhs)(lhs, None)
+      lhs = _make_clip_and_round(cfg.lhs)(lhs, None)
 
-    if config.rhs.bits is not None:
-      assert config.rhs.calib_shared_axes == list(range(0, rank - 1))
-      rhs_scale = _fresh_scale(rhs, config.rhs)
+    if cfg.rhs.bits is not None:
+      assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
+      rhs_scale = _fresh_scale(rhs, cfg.rhs)
       rhs = rhs * rhs_scale
-      rhs = _make_clip_and_round(config.rhs)(rhs, None)
+      rhs = _make_clip_and_round(cfg.rhs)(rhs, None)
 
     out = lax.conv_general_dilated(
         lhs=lhs,
@@ -657,10 +500,10 @@ However if there is any other use, we will drop that assumption."""
         preferred_element_type=preferred_element_type,
     )
 
-    if config.lhs.bits is not None:
+    if cfg.lhs.bits is not None:
       out /= lhs_scale
 
-    if config.rhs.bits is not None:
+    if cfg.rhs.bits is not None:
       out /= rhs_scale
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales
