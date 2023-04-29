@@ -321,7 +321,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       lhs_maxval=10.0,
       rhs_maxval=20.0,
   ):
-    cfg = config.make_config_conv_general_dilated(2, lhs_bits, rhs_bits)
+    cfg = config.DotGeneralRaw.make_conv_general_dilated(2, lhs_bits, rhs_bits)
 
     if cfg.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.

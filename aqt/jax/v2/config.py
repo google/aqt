@@ -84,9 +84,26 @@ class DotGeneralRaw:
         use_fake_quant=False,
     )
 
+  @classmethod
+  def make_conv_general_dilated(
+      cls,
+      spatial_dimensions=2,
+      lhs_bits=None,
+      rhs_bits=None,
+  ) -> 'DotGeneralRaw':
+    """Create quantization config conv_general_dilated."""
+    config = cls.make(lhs_bits, rhs_bits)
+    # Hardcoding flax assumptions.
+    if config.lhs:
+      config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
+    if config.rhs:
+      config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
+    return config
+
 
 @dataclasses.dataclass
 class DotGeneral:
+  """Configuration of quantization of dot_general and its gradients."""
   fwd: DotGeneralRaw
   dlhs: DotGeneralRaw
   drhs: DotGeneralRaw
@@ -99,17 +116,3 @@ class DotGeneral:
         dlhs=DotGeneralRaw.make(),
         drhs=DotGeneralRaw.make(),
     )
-
-
-def make_config_conv_general_dilated(
-    spatial_dimensions=2,
-    lhs_bits=None,
-    rhs_bits=None,
-) -> DotGeneralRaw:
-  config = DotGeneralRaw.make(lhs_bits, rhs_bits)
-  # Hardcoding flax assumptions.
-  if config.lhs:
-    config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
-  if config.rhs:
-    config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
-  return config
