@@ -305,20 +305,24 @@ def _dot_general_raw_attach_gradient(
 ):
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
-  def vjp_fwd(
-      lhs,
-      rhs,
-      dimension_numbers,
-      context,
-  ):
-    # Ignore the DotGeneralRes.
-    ret, _ = fwd_dot_general_raw(
+  def make_fwd(return_residual):
+    def fwd(
         lhs,
         rhs,
         dimension_numbers,
         context,
-    )
-    return ret
+    ):
+      assert lhs.dtype == rhs.dtype
+      ret, res = fwd_dot_general_raw(
+          lhs,
+          rhs,
+          dimension_numbers,
+          context,
+      )
+      ret = ret.astype(lhs.dtype)
+      return (ret, res) if return_residual else ret
+
+    return fwd
 
   def vjp_bwd(
       fwd_dimension_numbers,
@@ -370,10 +374,14 @@ def _dot_general_raw_attach_gradient(
     drhs = grad_dot_general(
         res.lhs, drhs_dot_general_raw, True, context2, drhs_use_fwd_quant
     )
-    return (dlhs, drhs, None)
+    return (
+        dlhs.astype(res.lhs.value.dtype),
+        drhs.astype(res.rhs.value.dtype),
+        None,
+    )
 
-  vjp = jax.custom_vjp(vjp_fwd, nondiff_argnums=(2,))
-  vjp.defvjp(fwd_dot_general_raw, vjp_bwd)
+  vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(2,))
+  vjp.defvjp(make_fwd(True), vjp_bwd)
   return vjp
 
 
