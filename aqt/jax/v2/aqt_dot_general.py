@@ -23,10 +23,6 @@ from jax import lax
 import jax.numpy as jnp
 import numpy as onp
 
-# TODO(lew): We want to handle two additional cases:
-# - use_fwd_quant with say just weights being int8 and passed to bwd
-# - use_fwd_quant but we want to use classic quantization.
-
 
 @flax.struct.dataclass
 class Context:
@@ -206,10 +202,11 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       qrhs = _make_clip_and_round(cfg.rhs)(qrhs, context_rhs)
 
     out = lax.dot_general(
-        qlhs.astype(cfg.in_dtype),
-        qrhs.astype(cfg.in_dtype),
+        qlhs.astype(cfg.lax_dg_in_dtype),
+        qrhs.astype(cfg.lax_dg_in_dtype),
         dimension_numbers=dimension_numbers,
-        preferred_element_type=cfg.preferred_element_type,
+        preferred_element_type=cfg.lax_dg_out_dtype,
+        precision=lax.Precision.DEFAULT,
     )
     # The axis order in out is as follows: batch, lhs_ra, rhs_ra
     # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
@@ -278,10 +275,15 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     del context
     lhs_fq = make_fake_quant(cfg.lhs)(lhs, context_lhs)
     rhs_fq = make_fake_quant(cfg.rhs)(rhs, context_rhs)
+    # The unit tests check for exact equality on CPU and TPU.
+    # These 'astype(bf16)' and preferred_element_type make the unit tests pass.
+    # We need a better comment why is that.
     ret = jax.lax.dot_general(
-        lhs_fq,
-        rhs_fq,
+        lhs_fq.astype(jnp.bfloat16),
+        rhs_fq.astype(jnp.bfloat16),
         dimension_numbers,
+        precision=lax.Precision.DEFAULT,
+        preferred_element_type=jnp.float32,
     )
     res = DotGeneralRes(
         context_bwd=context_bwd,

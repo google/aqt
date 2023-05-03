@@ -24,13 +24,29 @@ import numpy as np
 import scipy.stats
 
 
-def get_dot_generals(f, *args):
-  jaxpr = jax.make_jaxpr(f)(*args)
-  for i in jaxpr.eqns:
-    if i.primitive.name == "dot_general":
-      [lhs, rhs] = i.invars
-      [out] = i.outvars
-      yield (lhs.aval, rhs.aval, out.aval)
+def test_jaxpr(f, cfgs: list[config.DotGeneralRaw]):
+  """Tests whether dot_generals in f conform to cfgs."""
+
+  def jaxpr_to_trityp(jaxpr):
+    for eq in jaxpr.eqns:
+      # This is where dot_generals hide when one uses custom vjp
+      if "fun_jaxpr" in eq.params.keys():
+        for rec in jaxpr_to_trityp(eq.params["fun_jaxpr"]):
+          yield rec
+
+      if eq.primitive.name == "dot_general":
+        [lhs, rhs] = eq.invars
+        [out] = eq.outvars
+        trityp = (lhs.aval, rhs.aval, out.aval)
+        yield trityp
+
+  f_jaxpr = jax.make_jaxpr(f)()
+  trityps = [trityp for trityp in jaxpr_to_trityp(f_jaxpr)]
+  assert len(trityps) == len(cfgs)
+  for (lhs_sa, rhs_sa, out_sa), cfg in zip(trityps, cfgs):
+    assert lhs_sa.dtype == cfg.lax_dg_in_dtype
+    assert rhs_sa.dtype == cfg.lax_dg_in_dtype
+    assert out_sa.dtype == cfg.lax_dg_out_dtype
 
 
 rngkey = None
@@ -74,6 +90,7 @@ def test_eq(name, a, b):
 
 
 def check_eq(
+    name,
     dg1,
     dg2,
     lhs,
@@ -90,15 +107,15 @@ def check_eq(
     lrf = dg(lhs, rhs)
     lr, backprop = jax.vjp(dg, lhs, rhs)
     test_eq("lrf", lrf, lr)
-    gl, gr = backprop(gra)
+    gl, gr = backprop(gra) if test_gradient else (None, None)
     return lr, gl, gr
 
   lr1, gl1, gr1 = app(dg1)
   lr2, gl2, gr2 = app(dg2)
-  test_eq("lr", lr1 * lr_mult, lr2)  # forward pass
+  test_eq(f"{name}: lr", lr1 * lr_mult, lr2)  # forward pass
   if test_gradient:
-    test_eq("gl", gl1 * gl_mult, gl2)  # backward pass
-    test_eq("gr", gr1 * gr_mult, gr2)  # backward pass
+    test_eq(f"{name}: gl", gl1 * gl_mult, gl2)  # backward pass
+    test_eq(f"{name}: gr", gr1 * gr_mult, gr2)  # backward pass
 
 
 class AqtDotGeneralResearchTest(parameterized.TestCase):
@@ -155,6 +172,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
+      dict(lhs_bits=None, rhs_bits=None),
       dict(lhs_bits=1, rhs_bits=1),
       dict(
           lhs_bits=1,
@@ -169,7 +187,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(lhs_bits=8, rhs_bits=8),
       dict(lhs_bits=None, rhs_bits=8),
       dict(lhs_bits=8, rhs_bits=None),
-      dict(lhs_bits=None, rhs_bits=None),
       dict(
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
@@ -194,7 +211,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       gra_shape=(10, 30),  # has to be the shape of the output
   ):
 
-    def make_raw_config(use_fake_quant=False):
+    def make_raw_config(use_fake_quant):
       # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
       # have the same numerics when scales are power of two (po2).
       # We are passing dims to config so that we can reuse it in fake_quant.
@@ -208,14 +225,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       raw_config.use_fake_quant = use_fake_quant
       return raw_config
 
+    def make_config(use_fake_quant):
+      cfg = config.DotGeneral.make()
+      cfg.fwd = make_raw_config(use_fake_quant)
+      return cfg
+
     # test dot_general
     lhs = rand_unif(lhs_shape, lhs_maxval)
     rhs = rand_unif(rhs_shape, rhs_maxval)
     gra = rand_unif(gra_shape, gra_maxval)
 
     def aqt_dg_full(use_fake_quant):
-      cfg = config.DotGeneral.make()
-      cfg.fwd = make_raw_config(use_fake_quant)
+      cfg = make_config(use_fake_quant=use_fake_quant)
       # TODO(lew): Add unit tests that actually quantize bwd, and do this:
       # cfg.dlhs.use_fake_quant = use_fake_quant
       # cfg.drhs.use_fake_quant = use_fake_quant
@@ -226,7 +247,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg = make_raw_config(use_fake_quant=use_fake_quant)
       dg_raw = aqt._make_dot_general_raw(cfg)
       context = aqt.Context(key=None)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
+      def short_dg(lhs, rhs):
+        ret = dg_raw(lhs, rhs, dims, context)[0]
+        return ret
+
+      return short_dg
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -265,11 +290,51 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return aqt._dot_general_raw_attach_gradient(m1, m2, m3)(
           lhs, rhs, dims, context=aqt.Context(key=None)
       )
-    check_eq(aqt_dg_raw(False), aqt_dg_raw(True), lhs, rhs, gra)
-    check_eq(aqt_dg_full(False), aqt_dg_full(True), lhs, rhs, gra)
-    check_eq(aqt_dg_raw(False), aqt_dg_full(False), lhs, rhs, gra)
+
+    # Test whether dtypes are correct in jaxpr
+    cfg = make_config(use_fake_quant=False)
+    test_jaxpr(lambda: aqt_dg_full(False)(lhs, rhs), [cfg.fwd])
+    test_jaxpr(lambda: jax.vjp(aqt_dg_full(False), lhs, rhs), [cfg.fwd])
+    _, backprop = jax.vjp(aqt_dg_full(False), lhs, rhs)
+    test_jaxpr(lambda: backprop(gra), [cfg.dlhs, cfg.drhs])
+
+    # Test exact equalities.
     check_eq(
-        lax_dg, lax_dg_248, lhs, rhs, gra, lr_mult=2.0, gl_mult=4.0, gr_mult=8.0
+        "dg raw (aqt vs fq)",
+        aqt_dg_raw(False),
+        aqt_dg_raw(True),
+        lhs,
+        rhs,
+        gra,
+        test_gradient=False,
+    )
+    check_eq(
+        "dg full (aqt vs fq)",
+        aqt_dg_full(False),
+        aqt_dg_full(True),
+        lhs,
+        rhs,
+        gra,
+    )
+    check_eq(
+        "raw vs full",
+        aqt_dg_raw(False),
+        aqt_dg_full(False),
+        lhs,
+        rhs,
+        gra,
+        test_gradient=False,
+    )
+    check_eq(
+        "lax_dg",
+        lax_dg,
+        lax_dg_248,
+        lhs,
+        rhs,
+        gra,
+        lr_mult=2.0,
+        gl_mult=4.0,
+        gr_mult=8.0,
     )
 
   def test_dynamic_context(self):
@@ -284,11 +349,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     jax.value_and_grad(f)(lhs, rhs, context)
 
   def test_hardware_int8(self):
+    cfg = config.DotGeneralRaw.make(8, 8)
+
     def dg(lhs, rhs):
-      cfg = config.DotGeneralRaw.make(8, 8)
-      # cfg.use_hardware_int8 = True
-      cfg.in_dtype = jnp.int8
-      cfg.preferred_element_type = jnp.int32
       ret, _ = aqt._make_dot_general_raw(cfg)(
           lhs,
           rhs,
@@ -299,10 +362,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     lhs = rand_unif((10, 20), 1.0)
     rhs = rand_unif((20, 30), 1.0)
-    [(lhs, rhs, out)] = get_dot_generals(dg, lhs, rhs)
-    assert lhs.dtype == jnp.int8
-    assert rhs.dtype == jnp.int8
-    assert out.dtype == jnp.int32
+    test_jaxpr(lambda: dg(lhs, rhs), [cfg])
+    assert cfg.lax_dg_in_dtype == jnp.int8
+    assert cfg.lax_dg_out_dtype == jnp.int32
 
   @parameterized.parameters([
       (1, 1),

@@ -64,8 +64,8 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
-  in_dtype: DType | None
-  preferred_element_type: DType
+  lax_dg_in_dtype: DType
+  lax_dg_out_dtype: DType
   # use_fwd_quant is observed when this dot_general is used in gradient.
   # use_fwd_quant is ignored in forward pass.
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
@@ -75,11 +75,25 @@ class DotGeneralRaw:
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
+    # These types match default TPU behavior. GPU would need some work.
+    # Relevant: https://github.com/google/jax/issues/14022
+    lax_dg_in_dtype = jnp.bfloat16
+    lax_dg_out_dtype = jnp.float32
+    if (
+        lhs_bits is not None
+        and rhs_bits is not None
+        and lhs_bits <= 8
+        and rhs_bits <= 8
+        and lhs_bits != 1  # we currently round to -0.5 and 0.5 for 1 bit
+        and rhs_bits != 1
+    ):
+      lax_dg_in_dtype = jnp.int8
+      lax_dg_out_dtype = jnp.int32
     return DotGeneralRaw(
         lhs=Tensor.make(lhs_bits),
         rhs=Tensor.make(rhs_bits),
-        in_dtype=None,
-        preferred_element_type=jnp.float32,
+        lax_dg_in_dtype=lax_dg_in_dtype,
+        lax_dg_out_dtype=lax_dg_out_dtype,
         use_fwd_quant=True,
         use_fake_quant=False,
     )
