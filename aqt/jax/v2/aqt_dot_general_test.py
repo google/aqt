@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for dot_general."""
+import copy
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
@@ -49,16 +50,9 @@ def test_jaxpr(f, cfgs: list[config.DotGeneralRaw]):
     assert out_sa.dtype == cfg.lax_dg_out_dtype
 
 
-rngkey = None
-
-
-def rand_unif(shape, maxval):
-  global rngkey
-  if rngkey is None:
-    rngkey = jax.random.PRNGKey(0)
-  k1, k2 = jax.random.split(rngkey)
-  rngkey = k1
-  return jax.random.uniform(key=k2, shape=shape, minval=-maxval, maxval=maxval)
+def rand_unif(shape, maxval, seed):
+  key = jax.random.PRNGKey(seed)
+  return jax.random.uniform(key=key, shape=shape, minval=-maxval, maxval=maxval)
 
 
 # The main test strategy is :
@@ -172,22 +166,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
-      dict(lhs_bits=None, rhs_bits=None),
-      dict(lhs_bits=1, rhs_bits=1),
+      *[dict(cfg=config.fully_quantized(8, False), seed=s) for s in range(10)],
+      # *[dict(cfg=config.fully_quantized(8, True), seed=s) for s in range(10)],
+      dict(cfg=config.DotGeneral.make(None, None)),
+      dict(cfg=config.DotGeneral.make(1, 1)),
+      dict(cfg=config.DotGeneral.make(1, 2)),
+      dict(cfg=config.DotGeneral.make(2, 1)),
+      dict(cfg=config.DotGeneral.make(2, 2)),
+      dict(cfg=config.DotGeneral.make(8, 8)),
+      dict(cfg=config.DotGeneral.make(None, 8)),
+      dict(cfg=config.DotGeneral.make(8, None)),
       dict(
-          lhs_bits=1,
-          rhs_bits=1,
-          lhs_shape=(3, 2),
-          rhs_shape=(2, 4),
-          gra_shape=(3, 4),
-      ),
-      dict(lhs_bits=1, rhs_bits=2),
-      dict(lhs_bits=2, rhs_bits=1),
-      dict(lhs_bits=2, rhs_bits=2),
-      dict(lhs_bits=8, rhs_bits=8),
-      dict(lhs_bits=None, rhs_bits=8),
-      dict(lhs_bits=8, rhs_bits=None),
-      dict(
+          cfg=config.DotGeneral.make(2, 2),
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -197,61 +187,72 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ])
   def test_dot_general(
       self,
-      lhs_bits=1,
-      rhs_bits=4,
+      cfg: config.DotGeneral,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
       gra_maxval=30.0,
       dims=(((1,), (0,)), ((), ())),  # classical matmul
+      # lhs_shape=(1, 1),
+      # rhs_shape=(1, 2),
+      # gra_shape=(1, 2),  # has to be the shape of the output
       # lhs_shape=(1, 2),
       # rhs_shape=(2, 3),
       # gra_shape=(1, 3),  # has to be the shape of the output
       lhs_shape=(10, 20),
       rhs_shape=(20, 30),
       gra_shape=(10, 30),  # has to be the shape of the output
+      seed=0,
   ):
+    readonly_cfg = cfg
+    del cfg
 
-    def make_raw_config(use_fake_quant):
-      # This test is ensuring that `fq_dot_general` and `aqp_dot_general`
+    def make_cfg(use_fake_quant=False, *, use_fwd_quant=None):
+      cfg = copy.deepcopy(readonly_cfg)
+      # Setting po2_scale is ensuring that fake_quant and full dot_general
       # have the same numerics when scales are power of two (po2).
       # We are passing dims to config so that we can reuse it in fake_quant.
-      raw_config = config.DotGeneralRaw.make(lhs_bits, rhs_bits)
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      raw_config.lhs.po2_scale = True
-      # Needed if we want to reuse config in the fake_quant.
-      raw_config.lhs.calib_shared_axes = dims[0][0]
-      raw_config.rhs.po2_scale = True
-      raw_config.rhs.calib_shared_axes = dims[0][1]
-      raw_config.use_fake_quant = use_fake_quant
-      return raw_config
+      cfg.fwd.lhs.po2_scale = True
+      cfg.fwd.rhs.po2_scale = True
+      cfg.dlhs.lhs.po2_scale = True
+      cfg.dlhs.rhs.po2_scale = True
+      cfg.drhs.lhs.po2_scale = True
+      cfg.drhs.rhs.po2_scale = True
+      cfg.fwd.use_fake_quant = use_fake_quant
+      cfg.dlhs.use_fake_quant = use_fake_quant
+      cfg.drhs.use_fake_quant = use_fake_quant
 
-    def make_config(use_fake_quant):
-      cfg = config.DotGeneral.make()
-      cfg.fwd = make_raw_config(use_fake_quant)
+      if use_fwd_quant is not None:
+        # If we disable all rounding, we are just testing whether the scales are
+        # correct. We don't even need to disable clipping and we are testing
+        # that the scales are not too large.
+        def disable_quant(c):
+          c.lhs.round = False
+          c.rhs.round = False
+          # c.lhs.clip = False
+          # c.rhs.clip = False
+          c.lax_dg_in_dtype = jnp.bfloat16
+          c.lax_dg_out_dtype = jnp.float32
+          c.use_fwd_quant = use_fwd_quant
+        disable_quant(cfg.fwd)
+        disable_quant(cfg.dlhs)
+        disable_quant(cfg.drhs)
       return cfg
 
     # test dot_general
-    lhs = rand_unif(lhs_shape, lhs_maxval)
-    rhs = rand_unif(rhs_shape, rhs_maxval)
-    gra = rand_unif(gra_shape, gra_maxval)
+    lhs = rand_unif(lhs_shape, lhs_maxval, seed)
+    rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1)
+    gra = rand_unif(gra_shape, gra_maxval, seed + 2)
 
-    def aqt_dg_full(use_fake_quant):
-      cfg = make_config(use_fake_quant=use_fake_quant)
-      # TODO(lew): Add unit tests that actually quantize bwd, and do this:
-      # cfg.dlhs.use_fake_quant = use_fake_quant
-      # cfg.drhs.use_fake_quant = use_fake_quant
+    def aqt_dg_full(use_fake_quant, use_fwd_quant=None):
+      cfg = make_cfg(use_fake_quant, use_fwd_quant=use_fwd_quant)
       dg = aqt.make_dot_general(cfg)
       return lambda lhs, rhs: dg(lhs, rhs, dims, context=aqt.Context(key=None))
 
     def aqt_dg_raw(use_fake_quant):
-      cfg = make_raw_config(use_fake_quant=use_fake_quant)
+      cfg = make_cfg(use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
-      context = aqt.Context(key=None)
-      def short_dg(lhs, rhs):
-        ret = dg_raw(lhs, rhs, dims, context)[0]
-        return ret
-
-      return short_dg
+      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, aqt.Context(key=None))[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -292,46 +293,47 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       )
 
     # Test whether dtypes are correct in jaxpr
-    cfg = make_config(use_fake_quant=False)
-    test_jaxpr(lambda: aqt_dg_full(False)(lhs, rhs), [cfg.fwd])
-    test_jaxpr(lambda: jax.vjp(aqt_dg_full(False), lhs, rhs), [cfg.fwd])
+    test_jaxpr(lambda: aqt_dg_full(False)(lhs, rhs), [make_cfg().fwd])
+    test_jaxpr(lambda: jax.vjp(aqt_dg_full(False), lhs, rhs), [make_cfg().fwd])
     _, backprop = jax.vjp(aqt_dg_full(False), lhs, rhs)
-    test_jaxpr(lambda: backprop(gra), [cfg.dlhs, cfg.drhs])
+    test_jaxpr(lambda: backprop(gra), [make_cfg().dlhs, make_cfg().drhs])
 
     # Test exact equalities.
-    check_eq(
-        "dg raw (aqt vs fq)",
+    def check(name, dg1, dg2, **kwargs):
+      check_eq(name, dg1, dg2, lhs, rhs, gra, **kwargs)
+
+    check(
+        "aqt vs fq (dg_raw)",
         aqt_dg_raw(False),
         aqt_dg_raw(True),
-        lhs,
-        rhs,
-        gra,
         test_gradient=False,
     )
-    check_eq(
-        "dg full (aqt vs fq)",
+    check(
+        "aqt vs fq (dg_full)",
         aqt_dg_full(False),
         aqt_dg_full(True),
-        lhs,
-        rhs,
-        gra,
     )
-    check_eq(
-        "raw vs full",
+    check(
+        "use_fwd_quant (aqt, no round or clip)",
+        aqt_dg_full(False, use_fwd_quant=False),
+        aqt_dg_full(False, use_fwd_quant=True),
+    )
+    check(
+        "dg_raw vs dg_full (aqt)",
         aqt_dg_raw(False),
         aqt_dg_full(False),
-        lhs,
-        rhs,
-        gra,
         test_gradient=False,
     )
-    check_eq(
-        "lax_dg",
+    check(
+        "dg_raw vs dg_full (fq)",
+        aqt_dg_raw(True),
+        aqt_dg_full(True),
+        test_gradient=False,
+    )
+    check(
+        "lax_dg vs lax_dg_248",
         lax_dg,
         lax_dg_248,
-        lhs,
-        rhs,
-        gra,
         lr_mult=2.0,
         gl_mult=4.0,
         gr_mult=8.0,
@@ -348,7 +350,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     context = aqt.Context(key=jax.random.PRNGKey(4))  # xkcd.com/221
     jax.value_and_grad(f)(lhs, rhs, context)
 
-  def test_hardware_int8(self):
+  def test_hardware_int8(self, seed=0):
     cfg = config.DotGeneralRaw.make(8, 8)
 
     def dg(lhs, rhs):
@@ -360,8 +362,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       )
       return ret
 
-    lhs = rand_unif((10, 20), 1.0)
-    rhs = rand_unif((20, 30), 1.0)
+    lhs = rand_unif((10, 20), 1.0, seed)
+    rhs = rand_unif((20, 30), 1.0, seed + 1)
     test_jaxpr(lambda: dg(lhs, rhs), [cfg])
     assert cfg.lax_dg_in_dtype == jnp.int8
     assert cfg.lax_dg_out_dtype == jnp.int32
@@ -382,6 +384,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_bits,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
+      seed=0,
   ):
     cfg = config.DotGeneralRaw.make_conv_general_dilated(2, lhs_bits, rhs_bits)
 
@@ -394,8 +397,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     batch_n = 10
     contr_n = 20
     feature_n = 30
-    lhs = rand_unif((batch_n, 4, 5, contr_n), lhs_maxval)
-    rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval)
+    lhs = rand_unif((batch_n, 4, 5, contr_n), lhs_maxval, seed)
+    rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval, seed + 1)
 
     lax_conv = jax.lax.conv_general_dilated
     aqt_conv = aqt.make_conv_general_dilated(cfg)

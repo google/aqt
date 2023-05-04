@@ -65,7 +65,9 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     return jnp.ones((1,) * len(x.shape), dtype=x.dtype)
 
   # We have 2 sources for contraction axes:
-  assert cfg.calib_shared_axes
+  assert (
+      cfg.calib_shared_axes is not None
+  ), 'Perhaps you are using fake_quant and forgot to set them.'
 
   # x_bound is the input range that gets mapped to the integer clip_bound
   # For dynamic quant x_bound = max(x); for static quant x_bound = cfg.bound
@@ -267,18 +269,24 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         'use_fake_quant mode is used in tests and it is exactly equal when'
         ' po2_scale == True; Did you forget to set it?'
     )
-    assert cfg.lhs.po2_scale, msg
-    assert cfg.rhs.po2_scale, msg
+    cfg_cpy = copy.deepcopy(cfg)
+    (lhs_ca, rhs_ca), _ = dimension_numbers
+    cfg_cpy.lhs.calib_shared_axes = cfg_cpy.lhs.calib_shared_axes or lhs_ca
+    cfg_cpy.rhs.calib_shared_axes = cfg_cpy.rhs.calib_shared_axes or rhs_ca
+
+    assert cfg_cpy.lhs.po2_scale, msg
+    assert cfg_cpy.rhs.po2_scale, msg
 
     context, context_bwd = _context_split(context)
     context_lhs, context_rhs = _context_split(context)
     del context
-    lhs_fq = make_fake_quant(cfg.lhs)(lhs, context_lhs)
-    rhs_fq = make_fake_quant(cfg.rhs)(rhs, context_rhs)
+
+    lhs_fq = make_fake_quant(cfg_cpy.lhs)(lhs, context_lhs)
+    rhs_fq = make_fake_quant(cfg_cpy.rhs)(rhs, context_rhs)
     # The unit tests check for exact equality on CPU and TPU.
     # These 'astype(bf16)' and preferred_element_type make the unit tests pass.
     # We need a better comment why is that.
-    ret = jax.lax.dot_general(
+    out = jax.lax.dot_general(
         lhs_fq.astype(jnp.bfloat16),
         rhs_fq.astype(jnp.bfloat16),
         dimension_numbers,
@@ -290,7 +298,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         lhs=TensorRes(value=lhs, qvalue=lhs_fq, qvalue_scale=1.0),
         rhs=TensorRes(value=rhs, qvalue=rhs_fq, qvalue_scale=1.0),
     )
-    return ret, res
+    return out, res
 
   if cfg.use_fake_quant:
     return fq_dot_general

@@ -125,8 +125,21 @@ class DotGeneral:
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
-    return DotGeneral(
+    return cls(
         fwd=DotGeneralRaw.make(lhs_bits, rhs_bits),
         dlhs=DotGeneralRaw.make(),
         drhs=DotGeneralRaw.make(),
     )
+
+
+def fully_quantized(bits=8, use_fwd_quant=True) -> DotGeneral:
+  """Fully Quantized Training."""
+  cfg = DotGeneral(
+      fwd=DotGeneralRaw.make(bits, bits),
+      dlhs=DotGeneralRaw.make(bits, bits),
+      drhs=DotGeneralRaw.make(bits, bits),
+  )
+  cfg.fwd.use_fwd_quant = use_fwd_quant
+  cfg.dlhs.use_fwd_quant = use_fwd_quant
+  cfg.drhs.use_fwd_quant = use_fwd_quant
+  return cfg
