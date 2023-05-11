@@ -19,6 +19,9 @@ import jax
 import jax.numpy as jnp
 
 DType = Any
+Context = Any  # TODO(lew): We could put Context in a separate file.
+
+ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 NoiseFn = Callable[[tuple[int, ...], jax.random.KeyArray], jnp.ndarray]
 
 
@@ -36,6 +39,7 @@ class Tensor:
   preserve_max_val: bool
   clip: bool
   round: bool
+  clip_and_round: ClipAndRoundFn | None
   noise_fn: NoiseFn | None
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
@@ -53,6 +57,7 @@ class Tensor:
         preserve_max_val=False,
         clip=True,
         round=True,
+        clip_and_round=None,
         noise_fn=None,
         po2_scale=False,
     )

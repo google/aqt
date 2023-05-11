@@ -147,7 +147,8 @@ def make_fake_quant(cfg: config.Tensor):
       return x
     scale = _fresh_scale(x, cfg)
     x = x * scale
-    x = _make_clip_and_round(cfg)(x, context)
+    clip_and_round = cfg.clip_and_round or _make_clip_and_round(cfg)
+    x = clip_and_round(x, context)
     x = x / scale
     return x
 
@@ -194,14 +195,16 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       cfg.lhs.calib_shared_axes = cfg.lhs.calib_shared_axes or lhs_ca
       lhs_scale = _fresh_scale(qlhs, cfg.lhs)
       qlhs = qlhs * lhs_scale
-      qlhs = _make_clip_and_round(cfg.lhs)(qlhs, context_lhs)
+      clip_and_round = cfg.lhs.clip_and_round or _make_clip_and_round(cfg.lhs)
+      qlhs = clip_and_round(qlhs, context_lhs)
 
     qrhs = rhs
     if cfg.rhs.bits is not None:
       cfg.rhs.calib_shared_axes = cfg.rhs.calib_shared_axes or rhs_ca
       rhs_scale = _fresh_scale(qrhs, cfg.rhs)
       qrhs = qrhs * rhs_scale
-      qrhs = _make_clip_and_round(cfg.rhs)(qrhs, context_rhs)
+      clip_and_round = cfg.rhs.clip_and_round or _make_clip_and_round(cfg.rhs)
+      qrhs = clip_and_round(qrhs, context_rhs)
 
     out = lax.dot_general(
         qlhs.astype(cfg.lax_dg_in_dtype),
@@ -496,13 +499,15 @@ However if there is any other use, we will drop that assumption."""
       assert cfg.lhs.calib_shared_axes == list(range(1, rank))
       lhs_scale = _fresh_scale(lhs, cfg.lhs)
       lhs = lhs * lhs_scale
-      lhs = _make_clip_and_round(cfg.lhs)(lhs, None)
+      clip_and_round = cfg.lhs.clip_and_round or _make_clip_and_round(cfg.lhs)
+      lhs = clip_and_round(lhs, None)
 
     if cfg.rhs.bits is not None:
       assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
       rhs_scale = _fresh_scale(rhs, cfg.rhs)
       rhs = rhs * rhs_scale
-      rhs = _make_clip_and_round(cfg.rhs)(rhs, None)
+      clip_and_round = cfg.rhs.clip_and_round or _make_clip_and_round(cfg.rhs)
+      rhs = clip_and_round(rhs, None)
 
     out = lax.conv_general_dilated(
         lhs=lhs,
