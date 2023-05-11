@@ -14,7 +14,7 @@
 """Configuration dataclasses."""
 
 import dataclasses
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 
@@ -29,10 +29,10 @@ NoiseFn = Callable[[tuple[int, ...], jax.random.KeyArray], jnp.ndarray]
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
-  bits: Optional[int]
-  calib_shared_axes: Optional[list[int]]
+  bits: int | None
+  calib_shared_axes: list[int] | None
   preserve_zero: bool
-  bound: Optional[float]
+  bound: float | None
   bound_stop_grad: bool
   # false = map max val on the end of the last bucket
   # true = map max val on the middle of the last
@@ -45,7 +45,7 @@ class Tensor:
   po2_scale: bool
 
   @classmethod
-  def make(cls, bits: Optional[int]) -> 'Tensor':
+  def make(cls, bits: int | None) -> 'Tensor':
     pz = False if bits == 1 else True
 
     return Tensor(
@@ -107,8 +107,8 @@ class DotGeneralRaw:
   def make_conv_general_dilated(
       cls,
       spatial_dimensions=2,
-      lhs_bits=None,
-      rhs_bits=None,
+      lhs_bits: int | None = None,
+      rhs_bits: int | None = None,
   ) -> 'DotGeneralRaw':
     """Create quantization config conv_general_dilated."""
     config = cls.make(lhs_bits, rhs_bits)
@@ -128,7 +128,11 @@ class DotGeneral:
   drhs: DotGeneralRaw
 
   @classmethod
-  def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneral':
+  def make(
+      cls,
+      lhs_bits: int | None = None,
+      rhs_bits: int | None = None,
+  ) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
     return cls(
         fwd=DotGeneralRaw.make(lhs_bits, rhs_bits),
@@ -137,7 +141,7 @@ class DotGeneral:
     )
 
 
-def fully_quantized(bits=8, use_fwd_quant=True) -> DotGeneral:
+def fully_quantized(bits: int = 8, use_fwd_quant: bool = True) -> DotGeneral:
   """Fully Quantized Training."""
   cfg = DotGeneral(
       fwd=DotGeneralRaw.make(bits, bits),
