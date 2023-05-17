@@ -130,7 +130,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             sample_size = 10000
             shape = (sample_size,)
             a = jax.random.uniform(key, shape, minval=-v, maxval=v)
-            qa = aqt.make_fake_quant(cfg)(a, aqt.Context(key=None))
+            context = aqt.Context(key=None, train_step=None)
+            qa = aqt.make_fake_quant(cfg)(a, context)
             bucket_noise = qa - a  #  ~ U(-bucket_size/2, bucket_size/2)
             bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
             bucket_size = (v * 2) / bucket_count
@@ -152,7 +153,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     cfg.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
     grad = jnp.ones(shape) * 12345.0
-    x_fq, backprop = jax.vjp(aqt.make_fake_quant(cfg), x, aqt.Context(key=None))
+    context = aqt.Context(key=None, train_step=None)
+    x_fq, backprop = jax.vjp(aqt.make_fake_quant(cfg), x, context)
     gx_fq = backprop(grad)
     # print(f"x     =\n{x}")
     # print(f"x_fq  =\n{x_fq}")
@@ -247,12 +249,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     def aqt_dg_full(use_fake_quant, use_fwd_quant=None):
       cfg = make_cfg(use_fake_quant, use_fwd_quant=use_fwd_quant)
       dg = aqt.make_dot_general(cfg)
-      return lambda lhs, rhs: dg(lhs, rhs, dims, context=aqt.Context(key=None))
+      context = aqt.Context(key=None, train_step=None)
+      return lambda lhs, rhs: dg(lhs, rhs, dims, context=context)
 
     def aqt_dg_raw(use_fake_quant):
       cfg = make_cfg(use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, aqt.Context(key=None))[0]
+      context = aqt.Context(key=None, train_step=None)
+      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -289,7 +293,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       m2 = dg_mul(4.0)
       m3 = dg_mul(8.0)
       return aqt._dot_general_raw_attach_gradient(m1, m2, m3)(
-          lhs, rhs, dims, context=aqt.Context(key=None)
+          lhs, rhs, dims, context=aqt.Context(key=None, train_step=None)
       )
 
     # Test whether dtypes are correct in jaxpr
@@ -347,7 +351,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return dg(lhs, rhs, (((0,), (0,)), ((), ())), context=context)
 
     lhs, rhs = jnp.array([3.0, 4.0]), jnp.array([4.0, 5.0])
-    context = aqt.Context(key=jax.random.PRNGKey(4))  # xkcd.com/221
+    context = aqt.Context(
+        key=jax.random.PRNGKey(4), train_step=None
+    )  # xkcd.com/221
     jax.value_and_grad(f)(lhs, rhs, context)
 
   def test_hardware_int8(self, seed=0):
@@ -358,7 +364,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           lhs,
           rhs,
           (((1,), (0,)), ((), ())),
-          aqt.Context(key=None),
+          aqt.Context(key=None, train_step=None),
       )
       return ret
 
@@ -407,8 +413,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqt.make_fake_quant(cfg.lhs)(lhs, aqt.Context(key=None))
-    rhs_fq = aqt.make_fake_quant(cfg.rhs)(rhs, aqt.Context(key=None))
+    lhs_fq = aqt.make_fake_quant(cfg.lhs)(
+        lhs, aqt.Context(key=None, train_step=None)
+    )
+    rhs_fq = aqt.make_fake_quant(cfg.rhs)(
+        rhs, aqt.Context(key=None, train_step=None)
+    )
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()

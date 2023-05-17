@@ -27,14 +27,16 @@ import numpy as onp
 @flax.struct.dataclass
 class Context:
   key: jax.random.KeyArray | None
-  # train_step: int = 0
+  train_step: int | None
 
 
 def _context_split(context: Context) -> tuple[Context, Context]:
+  def mk_ctx(key):
+    return Context(key=key, train_step=context.train_step)
   if context.key is not None:
     key1, key2 = jax.random.split(context.key)
-    return Context(key=key1), Context(key=key2)
-  return Context(key=None), Context(key=None)
+    return mk_ctx(key1), mk_ctx(key2)
+  return mk_ctx(None), mk_ctx(None)
 
 
 def _get_max_value_representation(cfg: config.Tensor):
@@ -408,7 +410,7 @@ def make_dot_general(cfg: config.DotGeneral | None):
         precision=None,
         preferred_element_type=None,
         *,
-        context=Context(key=None),
+        context=Context(key=None, train_step=None),
     ):
       del context
       return jax.lax.dot_general(
@@ -432,7 +434,7 @@ def make_dot_general(cfg: config.DotGeneral | None):
       precision=None,
       preferred_element_type=None,
       *,
-      context=Context(key=None),
+      context=Context(key=None, train_step=None),
   ):
     assert (
         precision is None
