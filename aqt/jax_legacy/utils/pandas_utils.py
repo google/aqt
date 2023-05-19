@@ -265,7 +265,7 @@ def apply_filter_drop_rename_operations(
     df = df.sort_values(by=by, ascending=ascending)
 
   df = df.reset_index(drop=True)
-  return df
+  return df  # pytype: disable=bad-return-type  # typed-pandas
 
 
 def boxplot_with_group_by_sorted_by_median(df: pd.DataFrame,
