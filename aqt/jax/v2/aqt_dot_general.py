@@ -97,8 +97,9 @@ def _round(x, round_to_halves=False):
   if round_to_halves:
     return jnp.floor(x) + 0.5
   else:
-    # TODO(lew): use RTNE round
     return jnp.floor(x + 0.5)
+    # TODO(lew): test this code
+    # return lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
 
 
 def _make_clip_and_round(cfg: config.Tensor):
@@ -107,6 +108,7 @@ def _make_clip_and_round(cfg: config.Tensor):
   clip_bound = _get_clip_bound(cfg)
 
   def fwd(x, context):
+    # Maybe clip
     if cfg.clip:
       # We use eps = 0.5 to make sure that after clipping we, `x` is wholly in
       # the buckets. This does not affect us, because there is _round following.
@@ -118,14 +120,19 @@ def _make_clip_and_round(cfg: config.Tensor):
         eps = 0.0
       fwd_clip_bound = clip_bound - eps
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
+
+    # Maybe noise
     if cfg.noise_fn:
       assert context.key is not None, (
           'noise_fn is set, requestic stochastic rounding, but key key was not'
           ' passed.'
       )
       x = x + cfg.noise_fn(x.shape, context.key)
+
+    # Maybe round
     if cfg.round:
       x = _round(x, round_to_halves=not cfg.preserve_zero)
+
     return x
 
   def vjp_fwd(x, context):
@@ -171,7 +178,6 @@ class DotGeneralRes:
   rhs: TensorRes
 
 
-# TODO(lew): Gradient of this function is costly. Optimize.
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
   cfg = copy.deepcopy(cfg)
