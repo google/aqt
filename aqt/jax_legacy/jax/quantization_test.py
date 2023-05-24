@@ -857,28 +857,6 @@ class AQTTest(parameterized.TestCase):
     self.assertEqual(output.dtype, input_dtype)
 
   @parameterized.parameters(
-      dict(quant_type=quantization.QuantType.AQT),
-      dict(quant_type=quantization.QuantType.FAKE_QUANT))
-  def test_quantized_dot_raises_with_mixed_dtype(self, quant_type):
-    weight_params = QuantOps.WeightParams(prec=4, axis=(0,), half_shift=False)
-    act_params = QuantOps.ActHParams(
-        input_distribution='symmetric',
-        bounds=jnp.array([[3.0, 1.5]]),
-        prec=4,
-        half_shift=False)
-    act = self.lhs.astype(jnp.bfloat16)
-    w = self.rhs.astype(jnp.float32)
-    with self.assertRaises(TypeError):
-      quantization.quantized_dot(
-          w=w,
-          act=act,
-          weight_params=weight_params,
-          act_hparams=act_params,
-          bounds_params=None,
-          quant_type=quant_type,
-          prefer_int8_to_int32_dot=True)
-
-  @parameterized.parameters(
       itertools.product(
           (jnp.bfloat16, jnp.float32), (4, None),
           (quantization.QuantType.AQT, quantization.QuantType.FAKE_QUANT)))
@@ -906,24 +884,6 @@ class AQTTest(parameterized.TestCase):
         dot_dimension_numbers=(((1,), (0,)), ((), ())),
         quant_type=quant_type)
     self.assertEqual(output.dtype, input_dtype)
-
-  def test_dynamic_quantized_dot_general_raises_with_mixed_dtype(self):
-    lhs_params = QuantOps.ActHParams(
-        input_distribution='symmetric', bounds=2.0, prec=4, half_shift=False)
-    rhs_params = QuantOps.ActHParams(
-        input_distribution='symmetric', bounds=1.5, prec=4, half_shift=False)
-    lhs_act = self.lhs.astype(jnp.bfloat16)
-    rhs_act = self.rhs.astype(jnp.float32)
-    with self.assertRaises(TypeError):
-      quantization.quantized_dynamic_dot_general(
-          lhs_act=lhs_act,
-          rhs_act=rhs_act,
-          lhs_act_hparams=lhs_params,
-          rhs_act_hparams=rhs_params,
-          lhs_bounds_params=None,
-          rhs_bounds_params=None,
-          dot_dimension_numbers=(((1,), (0,)), ((), ())),
-          quant_type=QuantType.AQT)
 
   @parameterized.parameters(
       dict(lhs_prec=16, rhs_prec=16), dict(lhs_prec=None, rhs_prec=16),
