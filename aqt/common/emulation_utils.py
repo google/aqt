@@ -45,15 +45,15 @@ class EmulatedFromatsEnum(enum.Enum):
 
   # The following uses xla reduce precision ops.
   # E8M2B127 with round-to-nearest-even
-  E8M2B127_RTNE = 'e8m2b7_rtne'
+  E8M2B127_RTNE = 'e8m2b127_rtne'
   # E8M3B127 with round-to-nearest-even
-  E8M3B127_RTNE = 'e8m3b7_rtne'
+  E8M3B127_RTNE = 'e8m3b127_rtne'
   # E8M4B127 with round-to-nearest-even
-  E8M4B127_RTNE = 'e8m4b7_rtne'
+  E8M4B127_RTNE = 'e8m4b127_rtne'
   # E8M5B127 with round-to-nearest-even
-  E8M5B127_RTNE = 'e8m5b7_rtne'
+  E8M5B127_RTNE = 'e8m5b127_rtne'
   # E8M6B127 with round-to-nearest-even
-  E8M6B127_RTNE = 'e8m6b7_rtne'
+  E8M6B127_RTNE = 'e8m6b127_rtne'
 
   # INT8 with rounding formats
   # INT8 with round-to-nearest-even
