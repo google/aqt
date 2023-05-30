@@ -39,26 +39,12 @@ def _context_split(context: Context) -> tuple[Context, Context]:
   return mk_ctx(None), mk_ctx(None)
 
 
-def _get_max_value_representation(cfg: config.Tensor):
-  """Largest quantization tensor value is mapped onto 'int' value returned by this function."""
-  assert cfg.bits is not None
-  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
-  clip_bound = 2.0 ** (cfg.bits - 1)
+def _get_edge_of_last_bucket(cfg: config.Tensor):
+  ret = 2.0 ** (cfg.bits - 1)
   if cfg.preserve_zero:
-    clip_bound -= 0.5
-  if cfg.preserve_max_val:
-    clip_bound -= 0.5
-  return clip_bound
-
-
-def _get_clip_bound(cfg: config.Tensor):
-  """Returns the clip bound when using integer values."""
-  assert cfg.bits is not None
-  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
-  clip_bound = 2.0 ** (cfg.bits - 1)
-  if cfg.preserve_zero:
-    clip_bound -= 0.5
-  return clip_bound
+    # Lose one bucket.
+    ret -= 0.5
+  return ret
 
 
 def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
@@ -66,25 +52,41 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   if cfg is None:
     return jnp.ones((1,) * len(x.shape), dtype=x.dtype)
 
-  # We have 2 sources for contraction axes:
   assert (
       cfg.calib_shared_axes is not None
   ), 'Perhaps you are using fake_quant and forgot to set them.'
 
-  # x_bound is the input range that gets mapped to the integer clip_bound
-  # For dynamic quant x_bound = max(x); for static quant x_bound = cfg.bound
   if cfg.bound is None:
-    x_bound = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
+    abs_max = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
   else:
     assert cfg.bound > 0, 'Static quantization bound should be positive.'
-    x_bound = jnp.asarray(cfg.bound)
-  x_bound = jnp.where(x_bound == 0.0, 1.0, x_bound)
+    abs_max = jnp.asarray(cfg.bound)
+  abs_max = jnp.where(abs_max == 0.0, 1.0, abs_max)
   if cfg.bound_stop_grad:
-    x_bound = lax.stop_gradient(x_bound)
+    # TODO(lew): Does not matter in DG, because we are using custom gradient.
+    #   We should take that into account somehow.
+    abs_max = lax.stop_gradient(abs_max)
 
-  # This is the value that the x_bound is mapped to.
-  x_bound_repr = _get_max_value_representation(cfg)
-  new_scale = x_bound_repr / x_bound
+  assert cfg.bits is not None
+  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
+
+  abs_max_mapped_to = _get_edge_of_last_bucket(cfg)
+  if cfg.preserve_max_val:
+    # In this case we are mapping abs_max onto center of the last bucket
+    # Lose half of last bucket
+    abs_max_mapped_to -= 0.5
+  # Now abs_max_mapped_to is either center or edge of the last bucket.
+
+  # Verifying the correctness of this function amounts to verifying this table:
+  # pylint: disable=line-too-long
+  # if preserve_zero == F, zero might be rounded either to [-1, 0] bucket or to [0, 1] bucket
+  # preserve_zero, preserve_max_val, 8b, 2b, 1b
+  # F, F, 128.0, 2.0, 1.0  # bucket count is even; map onto the far edge of the last bucket
+  # F, T, 127.5, 1.5, 0.5  # bucket count is even; map onto the center of the last bucket
+  # T, F, 127.5, 1.5, 0.5  # bucket count is odd;  map onto the far edge of the last bucket
+  # T, T, 127.0, 1.0, 0.0  # bucket count is odd;  map onto the center of the last bucket
+
+  new_scale = abs_max_mapped_to / abs_max
   if cfg.po2_scale:
     # With floor the bigges value (we are using jnp.max) is in the range of
     # clipping and therefore have a correct gradinet.
@@ -92,35 +94,22 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   return new_scale
 
 
-def _round(x, round_to_halves=False):
-  """(Mostly) unbiased rounding to either an integer or integer+0.5 ."""
-  if round_to_halves:
-    return jnp.floor(x) + 0.5
-  else:
-    return jnp.floor(x + 0.5)
-    # TODO(lew): test this code
-    # return lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
-
-
 def _make_clip_and_round(cfg: config.Tensor):
   """Function make_clip_and_round."""
+  # This function is supposed to round values in a bucket to its center.
+  # The way to check for correctness is to check that the values between
+  # the buckets are "hard to decide".
+  # Let's look at 0 or 0.5 (depending on preserve zero),
+  # and lets look at the edge of the last bucket (table in fresh_scale_).
+
   assert cfg is not None
-  clip_bound = _get_clip_bound(cfg)
+  assert cfg.bits is not None
+  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
+
+  # preserve_max_val does not affect the edge of the last bucket.
+  edge_of_last_bucket = _get_edge_of_last_bucket(cfg)
 
   def fwd(x, context):
-    # Maybe clip
-    if cfg.clip:
-      # We use eps = 0.5 to make sure that after clipping we, `x` is wholly in
-      # the buckets. This does not affect us, because there is _round following.
-      if cfg.round:
-        eps = 0.5
-      else:
-        # If we are not rounding, we don't care about the largest value possible
-        # jumping into additional bucket. Because we are not using real ints.
-        eps = 0.0
-      fwd_clip_bound = clip_bound - eps
-      x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
-
     # Maybe noise
     if cfg.noise_fn:
       assert context.key is not None, (
@@ -129,9 +118,26 @@ def _make_clip_and_round(cfg: config.Tensor):
       )
       x = x + cfg.noise_fn(x.shape, context.key)
 
+    # Maybe clip
+    if cfg.clip:
+      # If we are not rounding, we just clip to bucket edges.
+      fwd_clip_bound = edge_of_last_bucket
+      # If, after clip, we are rounding, we need to make sure that
+      # we won't round values at the edge_of_last_bucket away to the
+      # non-existing bucket.
+      if cfg.round:
+        # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
+        fwd_clip_bound -= 0.5
+      x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
+
     # Maybe round
     if cfg.round:
-      x = _round(x, round_to_halves=not cfg.preserve_zero)
+      # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
+      round_to_halves = not cfg.preserve_zero
+      if round_to_halves:
+        x = jnp.floor(x) + 0.5
+      else:
+        x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
 
     return x
 
@@ -142,7 +148,7 @@ def _make_clip_and_round(cfg: config.Tensor):
   def vjp_bwd(res, grad):
     (x,) = res
     # This is gradient of clip. For boundary values we will have full graindent.
-    ret = (x <= clip_bound) * (x >= -clip_bound) * grad
+    ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
     return (ret, None)
 
   vjp = jax.custom_vjp(fwd)
