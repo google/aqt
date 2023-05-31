@@ -92,20 +92,17 @@ def _einsum_op(
     train: bool = True,
     **einsum_kwargs) -> tf.Tensor:
   """Updates quantizers at event_count=0 and computes einsum."""
-  with tf.variable_scope(varscope_name):
-    lhs_tq = aqt_tensor.TensorQuantizer(
-        lhs.shape, lhs_config, name="lhs")
-    rhs_tq = aqt_tensor.TensorQuantizer(
-        rhs.shape, rhs_config, name="rhs")
+  aqtc = aqt_config.AqtEinsumConfig(
+      lhs=lhs_config, rhs=rhs_config)
+  einsum = aqt_einsum.Einsum(eq, aqtc, lhs.shape, rhs.shape, name=varscope_name)
 
   event_count = tf.constant(0, tf.int64)
   updates = [
-      lhs_tq.update(lhs, lhs_weights, event_count),
-      rhs_tq.update(rhs, rhs_weights, event_count)
+      einsum.update_lhs(lhs, lhs_weights, event_count),
+      einsum.update_rhs(rhs, rhs_weights, event_count)
   ]
   with tf.control_dependencies(updates):
-    return aqt_ops.aqt_einsum(eq, lhs_tq, lhs, rhs_tq, rhs, train,
-                              **einsum_kwargs)
+    return einsum.apply(lhs, rhs, train, **einsum_kwargs)
 
 
 def _generate_missing_shared_axes() -> Sequence[Dict[str, Any]]:

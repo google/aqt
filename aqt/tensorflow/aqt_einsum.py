@@ -34,10 +34,11 @@ label are contracting.
 """
 
 import string
-from typing import Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 from aqt.common import aqt_config
 from aqt.common import aqt_config_utils
+from aqt.tensorflow import aqt_ops_util
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 
@@ -181,3 +182,131 @@ def einsum(
       inv_scale = tf.einsum(eq, lhs_inv_scale, rhs_inv_scale,
                             **tf_einsum_kwargs)
       return out * inv_scale
+
+
+class Einsum:
+  """Encapsulates a quantized einsum op and calibration state."""
+
+  def __init__(
+      self,
+      eq: str,
+      config: aqt_config.AqtEinsumConfig,
+      lhs_shape: Iterable[Optional[int]],
+      rhs_shape: Iterable[Optional[int]],
+      name: str = 'einsum',
+      lhs_name: str = 'lhs',
+      rhs_name: str = 'rhs',
+  ):
+    """Creates a Einsum instance.
+
+    This encapsulates the state necessary for quantizing both
+    of the einsum arguments.
+
+    Args:
+      eq: the einsum equation.
+      config: an AqtEinsumConfig
+      lhs_shape: shape of the lhs tensor
+      rhs_shape: shape of the rhs tensor
+      name: variable scope for all variables to be created.
+      lhs_name: scope for left hand side variables only.
+      rhs_name: scope for right hand side variables only.
+    """
+    self.eq = eq
+    self.name = name
+    self.lhs_name = lhs_name
+    self.rhs_name = rhs_name
+
+    with tf.variable_scope(name):
+      self.lhs_quantizer = aqt_tensor.TensorQuantizer(
+          lhs_shape, config.lhs, name=lhs_name)
+      self.rhs_quantizer = aqt_tensor.TensorQuantizer(
+          rhs_shape, config.rhs, name=rhs_name)
+
+  def update_lhs(
+      self,
+      x: tf.Tensor,
+      weights: tf.Tensor,
+      event_count: tf.Tensor,
+  ) -> tf.Operation:
+    """Updates variables for an observation of the lhs.
+
+    Updating variables for an argument updates the statistics
+    for a new input to account for incremental observations of
+    a tensor's entries' magnitudes.
+
+    This also updates the scales, if they were set according to
+    a previous calibration config and now we've moved on to
+    a new event associated with a different calibration configuration
+    in the schedule.
+
+    Args:
+      x: a tensor for the observation of an lhs input
+      weights: a weight matrix broadcastable to x, representing how much weight
+        the corresponding axes should have on statistics associated with
+        quantizing that dimension.
+      event_count: the event of the observation
+
+    Returns:
+      The tf.Operation corresponding to the update
+    """
+    return self.lhs_quantizer.update(x, weights, event_count)
+
+  def update_rhs(
+      self,
+      x: tf.Tensor,
+      weights: tf.Tensor,
+      event_count: tf.Tensor,
+  ) -> tf.Operation:
+    """Computes analogue of update_lhs, but for rhs."""
+    return self.rhs_quantizer.update(x, weights, event_count)
+
+  def apply(
+      self,
+      lhs: tf.Tensor,
+      rhs: tf.Tensor,
+      train: bool = True,
+      **tf_einsum_kwargs
+  ) -> tf.Tensor:
+    """Generates a pure quantized einsum op.
+
+    Make sure that `apply` is called within the context of any updates
+    to statistics used for calibration you'd like to happen before the
+    op.
+
+    Args:
+      lhs: a float32 tensor for the left hand side
+      rhs: a float32 tensor for the right hand side
+      train: whether to generate the training or serving graph
+      **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
+
+    Returns:
+      A tf.Tensor generated from possibly quantizing lhs and rhs
+      with clip bounds derived from the current quantizer statistics.
+    """
+
+    return einsum(
+        self.eq,
+        self.lhs_quantizer,
+        lhs,
+        self.rhs_quantizer,
+        rhs,
+        train,
+        **tf_einsum_kwargs)
+
+  def diagnostics(
+      self,
+      lhs: tf.Tensor,
+      rhs: tf.Tensor,
+  ) -> Dict[str, tf.Tensor]:
+    """Returns a dictionary from keys to diagnostic tensors.
+
+    Args:
+      lhs: lhs argument to self.Apply, used for deriving diangostics relative to
+        a given input.
+      rhs: as above, but for rhs
+
+    Returns:
+      A dictionary with various quantization-related diagnostics,
+      whose string keys are prefixed by self.name/self.{lhs,rhs}_name.
+    """
+    return aqt_ops_util.diagnostics(self, lhs, rhs)

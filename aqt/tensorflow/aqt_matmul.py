@@ -25,6 +25,7 @@ from typing import Callable, Dict, Iterable, Optional
 
 from aqt.common import aqt_config
 from aqt.common import aqt_config_utils
+from aqt.tensorflow import aqt_ops_util
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 
@@ -620,23 +621,4 @@ class Matmul:
       A dictionary with various quantization-related diagnostics,
       whose string keys are prefixed by self.name/self.{lhs,rhs}_name.
     """
-    d = {}
-    quantizers = [
-        (self.lhs_name, self.lhs_quantizer, lhs),
-        (self.rhs_name, self.rhs_quantizer, rhs),
-    ]
-    if grad is not None:
-      assert self.grad_quantizer is not None, (
-          'If grad is given, then grad_quantizer must be defined.')
-      quantizers.append((self.grad_name, self.grad_quantizer, grad))
-    for prefix, quantizer, argument in quantizers:
-      clipped_proportion = tf.cast(tf.abs(argument) > quantizer.clip_range(),
-                                   tf.float32)
-      prefix = f'{self.name}/{prefix}'
-      d[f'{prefix}/clipped_proportion'] = tf.math.reduce_mean(
-          clipped_proportion)
-      d[f'{prefix}/clip'] = quantizer.clip_range()
-      d[f'{prefix}/event_count'] = quantizer._last_update
-      for name, var in quantizer.calibration_variables().items():
-        d[f'{prefix}/{name}'] = var
-    return d
+    return aqt_ops_util.diagnostics(self, lhs, rhs, grad)
