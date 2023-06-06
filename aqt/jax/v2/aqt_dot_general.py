@@ -436,8 +436,8 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
       fwd_dot_general_raw=_make_dot_general_raw(cfg.fwd),
       dlhs_dot_general_raw=_make_dot_general_raw(cfg.dlhs),
       drhs_dot_general_raw=_make_dot_general_raw(cfg.drhs),
-      dlhs_use_fwd_quant=(cfg.dlhs.use_fwd_quant if cfg.dlhs else True),
-      drhs_use_fwd_quant=(cfg.drhs.use_fwd_quant if cfg.drhs else True),
+      dlhs_use_fwd_quant=cfg.dlhs.use_fwd_quant,
+      drhs_use_fwd_quant=cfg.drhs.use_fwd_quant,
   )
 
   def ret_dg(

@@ -112,6 +112,16 @@ def check_eq(
     test_eq(f"{name}: gr", gr1 * gr_mult, gr2)  # backward pass
 
 
+def fqt_param_dict(s):
+  return dict(
+      cfg=config.fully_quantized(8, True),
+      seed=s,
+      # Fails with "fail: not equal; case:  aqt vs fq (dg_full): gl"
+      # on "aqt vs fq (dg_full)"
+      check_aqt_vs_fq_dg_full=False,
+  )
+
+
 class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   def test_empty(self):
@@ -169,7 +179,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   @parameterized.parameters([
       *[dict(cfg=config.fully_quantized(8, False), seed=s) for s in range(10)],
-      # *[dict(cfg=config.fully_quantized(8, True), seed=s) for s in range(10)],
+      *[fqt_param_dict(s) for s in range(10)],
       dict(cfg=config.DotGeneral.make(None, None)),
       dict(cfg=config.DotGeneral.make(1, 1)),
       dict(cfg=config.DotGeneral.make(1, 2)),
@@ -204,11 +214,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_shape=(20, 30),
       gra_shape=(10, 30),  # has to be the shape of the output
       seed=0,
+      check_aqt_vs_fq_dg_full=True,
   ):
     readonly_cfg = cfg
     del cfg
 
-    def make_cfg(use_fake_quant=False, *, use_fwd_quant=None):
+    def modify_cfg(use_fake_quant=False, *, use_fwd_quant=None):
       cfg = copy.deepcopy(readonly_cfg)
       # Setting po2_scale is ensuring that fake_quant and full dot_general
       # have the same numerics when scales are power of two (po2).
@@ -247,13 +258,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     gra = rand_unif(gra_shape, gra_maxval, seed + 2)
 
     def aqt_dg_full(use_fake_quant, use_fwd_quant=None):
-      cfg = make_cfg(use_fake_quant, use_fwd_quant=use_fwd_quant)
+      cfg = modify_cfg(use_fake_quant, use_fwd_quant=use_fwd_quant)
       dg = aqt.make_dot_general(cfg)
       context = aqt.Context(key=None, train_step=None)
       return lambda lhs, rhs: dg(lhs, rhs, dims, context=context)
 
     def aqt_dg_raw(use_fake_quant):
-      cfg = make_cfg(use_fake_quant).fwd
+      cfg = modify_cfg(use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
       context = aqt.Context(key=None, train_step=None)
       return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
@@ -297,10 +308,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       )
 
     # Test whether dtypes are correct in jaxpr
-    test_jaxpr(lambda: aqt_dg_full(False)(lhs, rhs), [make_cfg().fwd])
-    test_jaxpr(lambda: jax.vjp(aqt_dg_full(False), lhs, rhs), [make_cfg().fwd])
+    test_jaxpr(lambda: aqt_dg_full(False)(lhs, rhs), [modify_cfg().fwd])
+    test_jaxpr(
+        lambda: jax.vjp(aqt_dg_full(False), lhs, rhs), [modify_cfg().fwd]
+    )
     _, backprop = jax.vjp(aqt_dg_full(False), lhs, rhs)
-    test_jaxpr(lambda: backprop(gra), [make_cfg().dlhs, make_cfg().drhs])
+    test_jaxpr(lambda: backprop(gra), [modify_cfg().dlhs, modify_cfg().drhs])
 
     # Test exact equalities.
     def check(name, dg1, dg2, **kwargs):
@@ -312,11 +325,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         aqt_dg_raw(True),
         test_gradient=False,
     )
-    check(
-        "aqt vs fq (dg_full)",
-        aqt_dg_full(False),
-        aqt_dg_full(True),
-    )
+    if check_aqt_vs_fq_dg_full:
+      check(
+          "aqt vs fq (dg_full)",
+          aqt_dg_full(False),
+          aqt_dg_full(True),
+      )
     check(
         "use_fwd_quant (aqt, no round or clip)",
         aqt_dg_full(False, use_fwd_quant=False),
