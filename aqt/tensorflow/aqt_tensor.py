@@ -129,7 +129,8 @@ class Stats:
     aqt_common.check_shapes_conformal(x.shape.as_list(), self._data_shape)
     if weight is not None and len(x.shape) != len(weight.shape):
       raise ValueError(
-          f'expected rank(x)={len(x.shape)} == rank(weight)={weight.shape}')
+          f'expected rank(x)={len(x.shape)} == rank(weight)={len(weight.shape)}'
+      )
 
     def update_var(var, s, reduce_max=False):
       assert len(s.shape) == len(self._data_shape), (s.shape, self._data_shape)
