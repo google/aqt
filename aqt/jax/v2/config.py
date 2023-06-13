@@ -151,4 +151,12 @@ def fully_quantized(bits: int = 8, use_fwd_quant: bool = True) -> DotGeneral:
   cfg.fwd.use_fwd_quant = use_fwd_quant
   cfg.dlhs.use_fwd_quant = use_fwd_quant
   cfg.drhs.use_fwd_quant = use_fwd_quant
+
+  def noise_fn(shape, key):
+    return jax.random.uniform(key, shape) - 0.5
+
+  cfg.dlhs.lhs.noise_fn = noise_fn
+  cfg.dlhs.rhs.noise_fn = noise_fn
+  cfg.drhs.lhs.noise_fn = noise_fn
+  cfg.drhs.rhs.noise_fn = noise_fn
   return cfg
