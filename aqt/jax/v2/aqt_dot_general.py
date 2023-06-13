@@ -157,16 +157,25 @@ def _make_clip_and_round(cfg: config.Tensor):
   return vjp
 
 
-def make_fake_quant(cfg: config.Tensor):
+def make_fake_quant(cfg: config.Tensor, return_scale: bool = False):
+  """Creates a fake_quant function."""
   def fake_quant(x, context):
     if cfg.bits is None:
-      return x
+      if return_scale:
+        dummy_scale = jnp.max(x, axis=cfg.calib_shared_axes, keepdims=True)
+        return x, x, jnp.ones_like(dummy_scale)
+      else:
+        return x
     scale = _fresh_scale(x, cfg)
     x = x * scale
     clip_and_round = cfg.clip_and_round or _make_clip_and_round(cfg)
-    x = clip_and_round(x, context)
-    x = x / scale
-    return x
+    qx = clip_and_round(x, context)
+    inv_scale = 1.0 / scale
+    x = qx * inv_scale
+    if return_scale:
+      return x, qx, inv_scale
+    else:
+      return x
 
   return fake_quant
 
@@ -185,6 +194,42 @@ class DotGeneralRes:
   rhs: TensorRes
 
 
+def _scale_trans(x, ca, ba):
+  for i in ca:
+    assert x.shape[i] == 1
+  ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
+  x = jnp.transpose(x, ba + ra + ca)
+  # TODO(lew): x = jnp.squeeze(x, axis=range(len(ba+ra): len(x.shape))
+  shape_ba = x.shape[: len(ba)]
+  shape_ra = x.shape[len(ba) : len(x.shape) - len(ca)]
+  # Will need to add additional axes (size 1) for the other shape_ra
+  x = x.reshape(shape_ba + shape_ra)
+  return x
+
+
+def _lhs_scale_transpose(lhs_scale, dimension_numbers, lhs_shape, rhs_shape):
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  qlhs_scale_t = _scale_trans(lhs_scale, lhs_ca, lhs_ba)
+  # inserting dummy axes for rhs_ra
+  assert len(qlhs_scale_t.shape) == len(lhs_shape) - len(lhs_ca)
+  start = len(qlhs_scale_t.shape)
+  end = len(rhs_shape) - len(rhs_ca) - len(rhs_ba) + start
+  lhs_dummy_axes = range(start, end)
+  qlhs_scale_t = jnp.expand_dims(qlhs_scale_t, axis=lhs_dummy_axes)
+  return qlhs_scale_t
+
+
+def _rhs_scale_transpose(rhs_scale, dimension_numbers, lhs_shape, rhs_shape):
+  del rhs_shape
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  qrhs_scale_t = _scale_trans(rhs_scale, rhs_ca, rhs_ba)
+  start = len(rhs_ba)
+  end = len(lhs_shape) - len(lhs_ca) - len(lhs_ba) + start
+  rhs_dummy_axes = range(start, end)
+  qrhs_scale_t = jnp.expand_dims(qrhs_scale_t, axis=rhs_dummy_axes)
+  return qrhs_scale_t
+
+
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
   cfg = copy.deepcopy(cfg)
@@ -199,7 +244,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # - contraction axes (ca)
     # - batch axes (ba)
     # - remaining axes (ra).
-    (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+    (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
     context_lhs, context_rhs = _context_split(context)
@@ -233,38 +278,19 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # - contraction axes ca disappear from the output
     # - order of the remaining axes (ra) is preserved.
 
-    def scale_trans(x, ca, ba):
-      for i in ca:
-        assert x.shape[i] == 1
-      ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
-      x = jnp.transpose(x, ba + ra + ca)
-      # TODO(lew): x = jnp.squeeze(x, axis=range(len(ba+ra): len(x.shape))
-      shape_ba = x.shape[: len(ba)]
-      shape_ra = x.shape[len(ba) : -len(ca)]
-      # Will need to add additional axes (size 1) for the other shape_ra
-      x = x.reshape(shape_ba + shape_ra)
-      return x
-
     if cfg.lhs.bits is not None:
-      qlhs_scale_t = scale_trans(lhs_scale, lhs_ca, lhs_ba)
-      # inserting dummy axes for rhs_ra
-      assert len(qlhs_scale_t.shape) == len(lhs.shape) - len(lhs_ca)
-      start = len(qlhs_scale_t.shape)
-      end = len(rhs.shape) - len(rhs_ca) - len(rhs_ba) + start
-      lhs_dummy_axes = range(start, end)
-      qlhs_scale_t = 1.0 / jnp.expand_dims(qlhs_scale_t, axis=lhs_dummy_axes)
+      qlhs_scale_t = 1.0 / _lhs_scale_transpose(
+          lhs_scale, dimension_numbers, lhs.shape, rhs.shape
+      )
       out = out * qlhs_scale_t
     else:
       qlhs_scale_t = 1.0
     lhs_res = TensorRes(value=lhs, qvalue=qlhs, qvalue_scale=qlhs_scale_t)
 
     if cfg.rhs.bits is not None:
-      qrhs_scale_t = scale_trans(rhs_scale, rhs_ca, rhs_ba)
-      start = len(rhs_ba)
-      end = len(lhs.shape) - len(lhs_ca) - len(lhs_ba) + start
-      rhs_dummy_axes = range(start, end)
-      qrhs_scale_t = jnp.expand_dims(qrhs_scale_t, axis=rhs_dummy_axes)
-      qrhs_scale_t = 1.0 / qrhs_scale_t
+      qrhs_scale_t = 1.0 / _rhs_scale_transpose(
+          rhs_scale, dimension_numbers, lhs.shape, rhs.shape
+      )
       out = out * qrhs_scale_t
     else:
       qrhs_scale_t = 1.0
@@ -299,8 +325,12 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     context_lhs, context_rhs = _context_split(context)
     del context
 
-    lhs_fq = make_fake_quant(cfg_cpy.lhs)(lhs, context_lhs)
-    rhs_fq = make_fake_quant(cfg_cpy.rhs)(rhs, context_rhs)
+    lhs_fq, lhs_q, lhs_inv_scale = make_fake_quant(cfg_cpy.lhs, True)(
+        lhs, context_lhs
+    )
+    rhs_fq, rhs_q, rhs_inv_scale = make_fake_quant(cfg_cpy.rhs, True)(
+        rhs, context_rhs
+    )
     # The unit tests check for exact equality on CPU and TPU.
     # These 'astype(bf16)' and preferred_element_type make the unit tests pass.
     # We need a better comment why is that.
@@ -311,10 +341,17 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         precision=lax.Precision.DEFAULT,
         preferred_element_type=jnp.float32,
     )
+
+    qlhs_scale_t = _lhs_scale_transpose(
+        lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+    )
+    qrhs_scale_t = _rhs_scale_transpose(
+        rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+    )
     res = DotGeneralRes(
         context_bwd=context_bwd,
-        lhs=TensorRes(value=lhs, qvalue=lhs_fq, qvalue_scale=1.0),
-        rhs=TensorRes(value=rhs, qvalue=rhs_fq, qvalue_scale=1.0),
+        lhs=TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=qlhs_scale_t),
+        rhs=TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=qrhs_scale_t),
     )
     return out, res
 
@@ -357,10 +394,8 @@ def _dot_general_raw_attach_gradient(
       res: DotGeneralRes,
       g,
   ):
-    # fwd_context contains the key that was captured in vjp_fwd.
-    # It was already used there and we should not use it here again.
-    # If we need a key, we should use one passed into res parameter.
-    def ranges_like(*xs, start=0):
+    def ranges_like(*xs):
+      start = 0
       for x in xs:
         yield tuple(range(start, start + len(x)))
         start += len(x)

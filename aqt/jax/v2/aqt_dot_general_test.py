@@ -141,8 +141,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             shape = (sample_size,)
             a = jax.random.uniform(key, shape, minval=-v, maxval=v)
             context = aqt.Context(key=None, train_step=None)
-            qa = aqt.make_fake_quant(cfg)(a, context)
-            bucket_noise = qa - a  #  ~ U(-bucket_size/2, bucket_size/2)
+            a_fq = aqt.make_fake_quant(cfg)(a, context)
+            bucket_noise = a_fq - a  #  ~ U(-bucket_size/2, bucket_size/2)
             bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
             bucket_size = (v * 2) / bucket_count
             noise = bucket_noise / bucket_size + 0.5  # ~U(0, 1)
@@ -188,6 +188,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.DotGeneral.make(8, 8)),
       dict(cfg=config.DotGeneral.make(None, 8)),
       dict(cfg=config.DotGeneral.make(8, None)),
+      dict(
+          cfg=fqt_param_dict(s=10)["cfg"],
+          dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
+          # contraction: 2, 5; batch: 4, 3
+          lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
+          rhs_shape=(5, 2, 4, 6, 3),  # non-contr: 4, 6, 3
+          gra_shape=(4, 3, 6),
+      ),
       dict(
           cfg=config.DotGeneral.make(2, 2),
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
