@@ -13,6 +13,14 @@
 # limitations under the License.
 """Quantized dot_general."""
 
+# Lingo in this file:
+#
+# - lhs(rhs) - left(right) hand side of a binary operation
+# - ca - contraction axes
+# - ba - batch axes
+# - ra - remaining axes
+
+
 # pylint: disable=g-explicit-bool-comparison
 
 import copy
@@ -157,25 +165,24 @@ def _make_clip_and_round(cfg: config.Tensor):
   return vjp
 
 
-def make_fake_quant(cfg: config.Tensor, return_scale: bool = False):
-  """Creates a fake_quant function."""
+def _quant(x, cfg, ca, context):
+  if cfg.bits is None:
+    return x, None
+  if cfg.calib_shared_axes is None:
+    cfg.calib_shared_axes = ca
+  scale = _fresh_scale(x, cfg)
+  x_s = x * scale
+  clip_and_round = cfg.clip_and_round or _make_clip_and_round(cfg)
+  x_q = clip_and_round(x_s, context)
+  return x_q, 1.0 / scale
+
+
+def make_fake_quant(cfg: config.Tensor, ca=None):
   def fake_quant(x, context):
-    if cfg.bits is None:
-      if return_scale:
-        dummy_scale = jnp.max(x, axis=cfg.calib_shared_axes, keepdims=True)
-        return x, x, jnp.ones_like(dummy_scale)
-      else:
-        return x
-    scale = _fresh_scale(x, cfg)
-    x = x * scale
-    clip_and_round = cfg.clip_and_round or _make_clip_and_round(cfg)
-    qx = clip_and_round(x, context)
-    inv_scale = 1.0 / scale
-    x = qx * inv_scale
-    if return_scale:
-      return x, qx, inv_scale
-    else:
-      return x
+    x_q, inv_scale = _quant(x, cfg, ca, context)
+    if inv_scale is not None:
+      x_q = x_q * inv_scale
+    return x_q
 
   return fake_quant
 
@@ -184,7 +191,7 @@ def make_fake_quant(cfg: config.Tensor, return_scale: bool = False):
 class TensorRes:
   value: jnp.ndarray
   qvalue: jnp.ndarray
-  qvalue_scale: Union[jnp.ndarray, float]
+  qvalue_scale: Union[jnp.ndarray, None]
 
 
 @flax.struct.dataclass
@@ -208,6 +215,13 @@ def _scale_trans(x, ca, ba):
 
 
 def _lhs_scale_transpose(lhs_scale, dimension_numbers, lhs_shape, rhs_shape):
+  """Transposes lhs_scale to output dimension order."""
+  if lhs_scale is None:
+    return None
+  # The axis order in out is as follows: batch, lhs_ra, rhs_ra
+  # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
+  # - contraction axes ca disappear from the output
+  # - order of the remaining axes (ra) is preserved.
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
   qlhs_scale_t = _scale_trans(lhs_scale, lhs_ca, lhs_ba)
   # inserting dummy axes for rhs_ra
@@ -220,6 +234,8 @@ def _lhs_scale_transpose(lhs_scale, dimension_numbers, lhs_shape, rhs_shape):
 
 
 def _rhs_scale_transpose(rhs_scale, dimension_numbers, lhs_shape, rhs_shape):
+  if rhs_scale is None:
+    return None
   del rhs_shape
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
   qrhs_scale_t = _scale_trans(rhs_scale, rhs_ca, rhs_ba)
@@ -228,6 +244,12 @@ def _rhs_scale_transpose(rhs_scale, dimension_numbers, lhs_shape, rhs_shape):
   rhs_dummy_axes = range(start, end)
   qrhs_scale_t = jnp.expand_dims(qrhs_scale_t, axis=rhs_dummy_axes)
   return qrhs_scale_t
+
+
+def _maybe_mul(x, scale):
+  if scale is None:
+    return x
+  return x * scale
 
 
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
@@ -240,61 +262,35 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       dimension_numbers,
       context,
   ):
-    # All axes can be partitioned into:
-    # - contraction axes (ca)
-    # - batch axes (ba)
-    # - remaining axes (ra).
     (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
     context_lhs, context_rhs = _context_split(context)
     del context
 
-    qlhs = lhs
-    if cfg.lhs.bits is not None:
-      cfg.lhs.calib_shared_axes = cfg.lhs.calib_shared_axes or lhs_ca
-      lhs_scale = _fresh_scale(qlhs, cfg.lhs)
-      qlhs = qlhs * lhs_scale
-      clip_and_round = cfg.lhs.clip_and_round or _make_clip_and_round(cfg.lhs)
-      qlhs = clip_and_round(qlhs, context_lhs)
-
-    qrhs = rhs
-    if cfg.rhs.bits is not None:
-      cfg.rhs.calib_shared_axes = cfg.rhs.calib_shared_axes or rhs_ca
-      rhs_scale = _fresh_scale(qrhs, cfg.rhs)
-      qrhs = qrhs * rhs_scale
-      clip_and_round = cfg.rhs.clip_and_round or _make_clip_and_round(cfg.rhs)
-      qrhs = clip_and_round(qrhs, context_rhs)
+    lhs_q, lhs_inv_scale = _quant(lhs, cfg.lhs, lhs_ca, context_lhs)
+    rhs_q, rhs_inv_scale = _quant(rhs, cfg.rhs, rhs_ca, context_rhs)
 
     out = lax.dot_general(
-        qlhs.astype(cfg.lax_dg_in_dtype),
-        qrhs.astype(cfg.lax_dg_in_dtype),
+        lhs_q.astype(cfg.lax_dg_in_dtype),
+        rhs_q.astype(cfg.lax_dg_in_dtype),
         dimension_numbers=dimension_numbers,
         preferred_element_type=cfg.lax_dg_out_dtype,
         precision=lax.Precision.DEFAULT,
     )
-    # The axis order in out is as follows: batch, lhs_ra, rhs_ra
-    # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
-    # - contraction axes ca disappear from the output
-    # - order of the remaining axes (ra) is preserved.
 
-    if cfg.lhs.bits is not None:
-      qlhs_scale_t = 1.0 / _lhs_scale_transpose(
-          lhs_scale, dimension_numbers, lhs.shape, rhs.shape
-      )
-      out = out * qlhs_scale_t
-    else:
-      qlhs_scale_t = 1.0
-    lhs_res = TensorRes(value=lhs, qvalue=qlhs, qvalue_scale=qlhs_scale_t)
+    lhs_inv_scale_t = _lhs_scale_transpose(
+        lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+    )
+    rhs_inv_scale_t = _rhs_scale_transpose(
+        rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+    )
 
-    if cfg.rhs.bits is not None:
-      qrhs_scale_t = 1.0 / _rhs_scale_transpose(
-          rhs_scale, dimension_numbers, lhs.shape, rhs.shape
-      )
-      out = out * qrhs_scale_t
-    else:
-      qrhs_scale_t = 1.0
-    rhs_res = TensorRes(value=rhs, qvalue=qrhs, qvalue_scale=qrhs_scale_t)
+    out = _maybe_mul(out, lhs_inv_scale_t)
+    out = _maybe_mul(out, rhs_inv_scale_t)
+
+    lhs_res = TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=lhs_inv_scale_t)
+    rhs_res = TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=rhs_inv_scale_t)
 
     res = DotGeneralRes(
         context_bwd=context_bwd,
@@ -309,28 +305,26 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       dimension_numbers,
       context,
   ):
+    """Creates a fake_quant function."""
     msg = (
         'use_fake_quant mode is used in tests and it is exactly equal when'
         ' po2_scale == True; Did you forget to set it?'
     )
-    cfg_cpy = copy.deepcopy(cfg)
-    (lhs_ca, rhs_ca), _ = dimension_numbers
-    cfg_cpy.lhs.calib_shared_axes = cfg_cpy.lhs.calib_shared_axes or lhs_ca
-    cfg_cpy.rhs.calib_shared_axes = cfg_cpy.rhs.calib_shared_axes or rhs_ca
+    assert cfg.lhs.po2_scale, msg
+    assert cfg.rhs.po2_scale, msg
 
-    assert cfg_cpy.lhs.po2_scale, msg
-    assert cfg_cpy.rhs.po2_scale, msg
+    (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
     context_lhs, context_rhs = _context_split(context)
     del context
 
-    lhs_fq, lhs_q, lhs_inv_scale = make_fake_quant(cfg_cpy.lhs, True)(
-        lhs, context_lhs
-    )
-    rhs_fq, rhs_q, rhs_inv_scale = make_fake_quant(cfg_cpy.rhs, True)(
-        rhs, context_rhs
-    )
+    lhs_q, lhs_inv_scale = _quant(lhs, cfg.lhs, lhs_ca, context_lhs)
+    lhs_fq = _maybe_mul(lhs_q, lhs_inv_scale)
+
+    rhs_q, rhs_inv_scale = _quant(rhs, cfg.rhs, rhs_ca, context_rhs)
+    rhs_fq = _maybe_mul(rhs_q, rhs_inv_scale)
+
     # The unit tests check for exact equality on CPU and TPU.
     # These 'astype(bf16)' and preferred_element_type make the unit tests pass.
     # We need a better comment why is that.
@@ -342,16 +336,21 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         preferred_element_type=jnp.float32,
     )
 
-    qlhs_scale_t = _lhs_scale_transpose(
+    lhs_inv_scale_t = _lhs_scale_transpose(
         lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
-    qrhs_scale_t = _rhs_scale_transpose(
+
+    rhs_inv_scale_t = _rhs_scale_transpose(
         rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
+
+    lhs_res = TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=lhs_inv_scale_t)
+    rhs_res = TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=rhs_inv_scale_t)
+
     res = DotGeneralRes(
         context_bwd=context_bwd,
-        lhs=TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=qlhs_scale_t),
-        rhs=TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=qrhs_scale_t),
+        lhs=lhs_res,
+        rhs=rhs_res,
     )
     return out, res
 
@@ -419,7 +418,9 @@ def _dot_general_raw_attach_gradient(
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
       if use_fwd_quant:
-        gv = g * y_res.qvalue_scale
+        gv = g
+        if y_res.qvalue_scale is not None:
+          gv = gv * y_res.qvalue_scale
         yv = y_res.qvalue
       else:
         gv = g
