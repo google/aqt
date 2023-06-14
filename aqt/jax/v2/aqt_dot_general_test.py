@@ -135,7 +135,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           for seed in range(10):
             key = jax.random.PRNGKey(seed)
             cfg = config.Tensor.make(prec)
-            cfg.preserve_zero = preserve_zero
+            cfg.numerics.preserve_zero = preserve_zero
             cfg.calib_shared_axes = (0,)
             sample_size = 10000
             shape = (sample_size,)

@@ -14,7 +14,7 @@
 """Configuration dataclasses."""
 
 import dataclasses
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 import jax
 import jax.numpy as jnp
 
@@ -26,12 +26,27 @@ NoiseFn = Callable[[tuple[int, ...], jax.random.KeyArray], jnp.ndarray]
 
 
 @dataclasses.dataclass
+class NoNumerics:
+  """No quantization, use a native type such as bf16."""
+
+  pass
+
+
+@dataclasses.dataclass
+class IntNumerics:
+  bits: int
+  preserve_zero: bool
+
+
+Numerics = Union[NoNumerics, IntNumerics]
+
+
+@dataclasses.dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
-  bits: Optional[int]
+  numerics: Numerics
   calib_shared_axes: Optional[list[int]]
-  preserve_zero: bool
   bound: Optional[float]
   bound_stop_grad: bool
   # false = map max val on the end of the last bucket
@@ -46,12 +61,15 @@ class Tensor:
 
   @classmethod
   def make(cls, bits: Optional[int]) -> 'Tensor':
-    pz = False if bits == 1 else True
+    if bits is None:
+      numerics = NoNumerics()
+    else:
+      pz = False if bits == 1 else True
+      numerics = IntNumerics(bits=bits, preserve_zero=pz)
 
     return Tensor(
-        bits=bits,
+        numerics=numerics,
         calib_shared_axes=None,
-        preserve_zero=pz,
         bound=None,
         bound_stop_grad=True,
         preserve_max_val=False,

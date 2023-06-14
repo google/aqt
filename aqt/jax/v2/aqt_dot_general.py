@@ -48,7 +48,7 @@ def _context_split(context: Context) -> tuple[Context, Context]:
   return mk_ctx(None), mk_ctx(None)
 
 
-def _get_edge_of_last_bucket(cfg: config.Tensor):
+def _get_edge_of_last_bucket(cfg: config.IntNumerics):
   ret = 2.0 ** (cfg.bits - 1)
   if cfg.preserve_zero:
     # Lose one bucket.
@@ -64,6 +64,8 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   assert (
       cfg.calib_shared_axes is not None
   ), 'Perhaps you are using fake_quant and forgot to set them.'
+  assert isinstance(cfg.numerics, config.IntNumerics)
+  assert cfg.numerics.bits <= 22, 'Too many bits, float32 has less precision.'
 
   if cfg.bound is None:
     abs_max = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
@@ -76,10 +78,7 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     #   We should take that into account somehow.
     abs_max = lax.stop_gradient(abs_max)
 
-  assert cfg.bits is not None
-  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
-
-  abs_max_mapped_to = _get_edge_of_last_bucket(cfg)
+  abs_max_mapped_to = _get_edge_of_last_bucket(cfg.numerics)
   if cfg.preserve_max_val:
     # In this case we are mapping abs_max onto center of the last bucket
     # Lose half of last bucket
@@ -111,12 +110,11 @@ def _make_clip_and_round(cfg: config.Tensor):
   # Let's look at 0 or 0.5 (depending on preserve zero),
   # and lets look at the edge of the last bucket (table in fresh_scale_).
 
-  assert cfg is not None
-  assert cfg.bits is not None
-  assert cfg.bits <= 22, 'Too many bits, float32 has less precision.'
+  assert isinstance(cfg.numerics, config.IntNumerics)
+  assert cfg.numerics.bits <= 22, 'Too many bits, float32 has less precision.'
 
   # preserve_max_val does not affect the edge of the last bucket.
-  edge_of_last_bucket = _get_edge_of_last_bucket(cfg)
+  edge_of_last_bucket = _get_edge_of_last_bucket(cfg.numerics)
 
   def fwd(x, context):
     # Maybe noise
@@ -142,7 +140,7 @@ def _make_clip_and_round(cfg: config.Tensor):
     # Maybe round
     if cfg.round:
       # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
-      round_to_halves = not cfg.preserve_zero
+      round_to_halves = not cfg.numerics.preserve_zero
       if round_to_halves:
         x = jnp.floor(x) + 0.5
       else:
@@ -166,7 +164,7 @@ def _make_clip_and_round(cfg: config.Tensor):
 
 
 def _quant(x, cfg, ca, context):
-  if cfg.bits is None:
+  if isinstance(cfg.numerics, config.NoNumerics):
     return x, None
   if cfg.calib_shared_axes is None:
     cfg.calib_shared_axes = ca
@@ -507,20 +505,28 @@ However if there is any other use, we will drop that assumption."""
     # we need to share these axes: lhs[1:] , rhs[:-1]
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
 
-    if cfg.lhs.bits is not None:
+    if isinstance(cfg.lhs.numerics, config.NoNumerics):
+      pass
+    elif isinstance(cfg.lhs.numerics, config.IntNumerics):
       # Flax assumptions.
       assert cfg.lhs.calib_shared_axes == list(range(1, rank))
       lhs_scale = _fresh_scale(lhs, cfg.lhs)
       lhs = lhs * lhs_scale
       clip_and_round = cfg.lhs.clip_and_round or _make_clip_and_round(cfg.lhs)
       lhs = clip_and_round(lhs, None)
+    else:
+      assert False, cfg.lhs.numerics
 
-    if cfg.rhs.bits is not None:
+    if isinstance(cfg.rhs.numerics, config.NoNumerics):
+      pass
+    elif isinstance(cfg.rhs.numerics, config.IntNumerics):
       assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
       rhs_scale = _fresh_scale(rhs, cfg.rhs)
       rhs = rhs * rhs_scale
       clip_and_round = cfg.rhs.clip_and_round or _make_clip_and_round(cfg.rhs)
       rhs = clip_and_round(rhs, None)
+    else:
+      assert False, cfg.rhs.numerics
 
     out = lax.conv_general_dilated(
         lhs=lhs,
@@ -536,11 +542,19 @@ However if there is any other use, we will drop that assumption."""
         preferred_element_type=preferred_element_type,
     )
 
-    if cfg.lhs.bits is not None:
+    if isinstance(cfg.lhs.numerics, config.NoNumerics):
+      pass
+    elif isinstance(cfg.lhs.numerics, config.IntNumerics):
       out /= lhs_scale
+    else:
+      assert False
 
-    if cfg.rhs.bits is not None:
+    if isinstance(cfg.rhs.numerics, config.NoNumerics):
+      pass
+    elif isinstance(cfg.rhs.numerics, config.IntNumerics):
       out /= rhs_scale
+    else:
+      assert False
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales
     # in 1xN (rows x colums) conv each row can have different scale, but
