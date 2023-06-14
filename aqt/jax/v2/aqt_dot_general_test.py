@@ -243,11 +243,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg.dlhs.use_fake_quant = use_fake_quant
       cfg.drhs.use_fake_quant = use_fake_quant
 
+      def disable_quant_types(c):
+        c.lax_dg_in_dtype = jnp.bfloat16
+        c.lax_dg_out_dtype = jnp.float32
+
+      if use_fake_quant:
+        disable_quant_types(cfg.fwd)
+        disable_quant_types(cfg.dlhs)
+        disable_quant_types(cfg.drhs)
+
       if use_fwd_quant is not None:
         # If we disable all rounding, we are just testing whether the scales are
         # correct. We don't even need to disable clipping and we are testing
         # that the scales are not too large.
         def disable_quant(c):
+          disable_quant_types(c)
           c.lhs.round = False
           c.rhs.round = False
           # c.lhs.clip = False

@@ -254,7 +254,6 @@ def _maybe_mul(x, scale):
 
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
-  cfg = copy.deepcopy(cfg)
 
   def my_dot_general(
       lhs,
@@ -262,6 +261,16 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       dimension_numbers,
       context,
   ):
+    """Creates a fake_quant function."""
+
+    if cfg.use_fake_quant:
+      msg = (
+          'use_fake_quant mode is used in tests and it is exactly equal when'
+          ' po2_scale == True; Did you forget to set it?'
+      )
+      assert cfg.lhs.po2_scale, msg
+      assert cfg.rhs.po2_scale, msg
+
     (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
@@ -271,9 +280,21 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_q, lhs_inv_scale = _quant(lhs, cfg.lhs, lhs_ca, context_lhs)
     rhs_q, rhs_inv_scale = _quant(rhs, cfg.rhs, rhs_ca, context_rhs)
 
+    lhs_q2 = lhs_q
+    rhs_q2 = rhs_q
+
+    if cfg.use_fake_quant:
+      lhs_q2 = _maybe_mul(lhs_q2, lhs_inv_scale)
+      rhs_q2 = _maybe_mul(rhs_q2, rhs_inv_scale)
+      # The unit tests check for exact equality on CPU and TPU.
+      # These bf16 and f32 make the unit tests pass.
+      # We need a better comment why is that.
+      assert cfg.lax_dg_in_dtype == jnp.bfloat16
+      assert cfg.lax_dg_out_dtype == jnp.float32
+
     out = lax.dot_general(
-        lhs_q.astype(cfg.lax_dg_in_dtype),
-        rhs_q.astype(cfg.lax_dg_in_dtype),
+        lhs_q2.astype(cfg.lax_dg_in_dtype),
+        rhs_q2.astype(cfg.lax_dg_in_dtype),
         dimension_numbers=dimension_numbers,
         preferred_element_type=cfg.lax_dg_out_dtype,
         precision=lax.Precision.DEFAULT,
@@ -286,8 +307,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
 
-    out = _maybe_mul(out, lhs_inv_scale_t)
-    out = _maybe_mul(out, rhs_inv_scale_t)
+    if not cfg.use_fake_quant:
+      out = _maybe_mul(out, lhs_inv_scale_t)
+      out = _maybe_mul(out, rhs_inv_scale_t)
 
     lhs_res = TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=lhs_inv_scale_t)
     rhs_res = TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=rhs_inv_scale_t)
@@ -299,65 +321,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     )
     return out, res
 
-  def fq_dot_general(
-      lhs,
-      rhs,
-      dimension_numbers,
-      context,
-  ):
-    """Creates a fake_quant function."""
-    msg = (
-        'use_fake_quant mode is used in tests and it is exactly equal when'
-        ' po2_scale == True; Did you forget to set it?'
-    )
-    assert cfg.lhs.po2_scale, msg
-    assert cfg.rhs.po2_scale, msg
-
-    (lhs_ca, rhs_ca), _ = dimension_numbers
-
-    context, context_bwd = _context_split(context)
-    context_lhs, context_rhs = _context_split(context)
-    del context
-
-    lhs_q, lhs_inv_scale = _quant(lhs, cfg.lhs, lhs_ca, context_lhs)
-    lhs_fq = _maybe_mul(lhs_q, lhs_inv_scale)
-
-    rhs_q, rhs_inv_scale = _quant(rhs, cfg.rhs, rhs_ca, context_rhs)
-    rhs_fq = _maybe_mul(rhs_q, rhs_inv_scale)
-
-    # The unit tests check for exact equality on CPU and TPU.
-    # These 'astype(bf16)' and preferred_element_type make the unit tests pass.
-    # We need a better comment why is that.
-    out = jax.lax.dot_general(
-        lhs_fq.astype(jnp.bfloat16),
-        rhs_fq.astype(jnp.bfloat16),
-        dimension_numbers,
-        precision=lax.Precision.DEFAULT,
-        preferred_element_type=jnp.float32,
-    )
-
-    lhs_inv_scale_t = _lhs_scale_transpose(
-        lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
-    )
-
-    rhs_inv_scale_t = _rhs_scale_transpose(
-        rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
-    )
-
-    lhs_res = TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=lhs_inv_scale_t)
-    rhs_res = TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=rhs_inv_scale_t)
-
-    res = DotGeneralRes(
-        context_bwd=context_bwd,
-        lhs=lhs_res,
-        rhs=rhs_res,
-    )
-    return out, res
-
-  if cfg.use_fake_quant:
-    return fq_dot_general
-  else:
-    return my_dot_general
+  return my_dot_general
 
 
 def _dot_general_raw_attach_gradient(
@@ -418,9 +382,7 @@ def _dot_general_raw_attach_gradient(
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
       if use_fwd_quant:
-        gv = g
-        if y_res.qvalue_scale is not None:
-          gv = gv * y_res.qvalue_scale
+        gv = _maybe_mul(g, y_res.qvalue_scale)
         yv = y_res.qvalue
       else:
         gv = g
