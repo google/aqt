@@ -24,7 +24,8 @@
 # pylint: disable=g-explicit-bool-comparison
 
 import copy
-from typing import Optional, Union
+import functools
+from typing import Callable, Optional, Union
 from aqt.jax.v2 import config
 import flax.struct
 import jax
@@ -48,7 +49,7 @@ def _context_split(context: Context) -> tuple[Context, Context]:
   return mk_ctx(None), mk_ctx(None)
 
 
-def _get_edge_of_last_bucket(cfg: config.IntNumerics):
+def _get_edge_of_last_int_bucket(cfg: config.IntNumerics):
   ret = 2.0 ** (cfg.bits - 1)
   if cfg.preserve_zero:
     # Lose one bucket.
@@ -56,16 +57,12 @@ def _get_edge_of_last_bucket(cfg: config.IntNumerics):
   return ret
 
 
-def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
+def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   """Calibration scale."""
-  if cfg is None:
-    return jnp.ones((1,) * len(x.shape), dtype=x.dtype)
-
-  assert (
-      cfg.calib_shared_axes is not None
-  ), 'Perhaps you are using fake_quant and forgot to set them.'
   assert isinstance(cfg.numerics, config.IntNumerics)
   assert cfg.numerics.bits <= 22, 'Too many bits, float32 has less precision.'
+  msg = 'Perhaps you are using fake_quant and forgot to set them.'
+  assert cfg.calib_shared_axes is not None, msg
 
   if cfg.bound is None:
     abs_max = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
@@ -78,7 +75,7 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     #   We should take that into account somehow.
     abs_max = lax.stop_gradient(abs_max)
 
-  abs_max_mapped_to = _get_edge_of_last_bucket(cfg.numerics)
+  abs_max_mapped_to = _get_edge_of_last_int_bucket(cfg.numerics)
   if cfg.preserve_max_val:
     # In this case we are mapping abs_max onto center of the last bucket
     # Lose half of last bucket
@@ -102,8 +99,8 @@ def _fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   return new_scale
 
 
-def _make_clip_and_round(cfg: config.Tensor):
-  """Function make_clip_and_round."""
+def _make_int_quant(cfg: config.Tensor):
+  """Function make_quant."""
   # This function is supposed to round values in a bucket to its center.
   # The way to check for correctness is to check that the values between
   # the buckets are "hard to decide".
@@ -114,7 +111,7 @@ def _make_clip_and_round(cfg: config.Tensor):
   assert cfg.numerics.bits <= 22, 'Too many bits, float32 has less precision.'
 
   # preserve_max_val does not affect the edge of the last bucket.
-  edge_of_last_bucket = _get_edge_of_last_bucket(cfg.numerics)
+  edge_of_last_bucket = _get_edge_of_last_int_bucket(cfg.numerics)
 
   def fwd(x, context):
     # Maybe noise
@@ -155,6 +152,8 @@ def _make_clip_and_round(cfg: config.Tensor):
   def vjp_bwd(res, grad):
     (x,) = res
     # This is gradient of clip. For boundary values we will have full graindent.
+    # TODO(lew): This should be optional, it is inefficient for calibrations
+    #   like max(abs(x)).
     ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
     return (ret, None)
 
@@ -163,33 +162,68 @@ def _make_clip_and_round(cfg: config.Tensor):
   return vjp
 
 
-def _quant(x, cfg, ca, context):
+def _scale_quant(x, *, cfg, ca, context):
+  """The core quantizing function."""
   if isinstance(cfg.numerics, config.NoNumerics):
-    return x, None
+    return x, None, None
   if cfg.calib_shared_axes is None:
     cfg.calib_shared_axes = ca
-  scale = _fresh_scale(x, cfg)
+  scale = _int_fresh_scale(x, cfg)
   x_s = x * scale
-  clip_and_round = cfg.clip_and_round or _make_clip_and_round(cfg)
-  x_q = clip_and_round(x_s, context)
-  return x_q, 1.0 / scale
+  quant = cfg.clip_and_round or _make_int_quant(cfg)
+  quant = functools.partial(quant, context=context)
+  x_q, quant_grad = jax.vjp(quant, x_s)
+  # We are passing quant_grad (and not more) ot the backward pass.
+  # That is equivalent to having:
+  # scale = stop_gradient(scale)
+  #
+  # This is not the only possible choice and we intend to allow experimentation.
+  # However for today we hardcoded this choice.
+  #
+  # In order to achevie no-stop-gradiend solution, we should take vjp
+  # of a larger piece of code like the whole _scale_quant.
+  #
+  # TODO(lew): Implement configuration of stop-gradient.
+  inv_scale = 1.0 / scale
+
+  return x_q, inv_scale, quant_grad
+
+
+def _residual(
+    *, x, x_q, inv_scale, quant_grad, side, dg_dims, lhs_shape, rhs_shape
+):
+  """Assembles TensorRes."""
+  assert side in ['lhs', 'rhs']
+  transpose_scale = (
+      _rhs_scale_transpose if side == 'rhs' else _lhs_scale_transpose
+  )
+  inv_scale_t = transpose_scale(inv_scale, dg_dims, lhs_shape, rhs_shape)
+  # TODO(lew): Remove when we have appropriate tests.
+  #   Don't forget to make it configurable whether we apply clip_gradient.
+  quant_grad = None
+  return TensorRes(
+      value=x,
+      qvalue=x_q,
+      qvalue_scale=inv_scale_t,
+      quant_grad=quant_grad,
+  )
 
 
 def make_fake_quant(cfg: config.Tensor, ca=None):
   def fake_quant(x, context):
-    x_q, inv_scale = _quant(x, cfg, ca, context)
-    if inv_scale is not None:
-      x_q = x_q * inv_scale
-    return x_q
+    x_q, inv_scale, _ = _scale_quant(x, cfg=cfg, ca=ca, context=context)
+    return _maybe_mul(x_q, inv_scale)
 
   return fake_quant
 
 
 @flax.struct.dataclass
 class TensorRes:
+  """All the things we pass from the forward pass to the backward pass."""
   value: jnp.ndarray
   qvalue: jnp.ndarray
   qvalue_scale: Union[jnp.ndarray, None]
+  quant_grad: Union[Callable[[jnp.ndarray], tuple[jnp.ndarray]], None]
 
 
 @flax.struct.dataclass
@@ -275,20 +309,51 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     context_lhs, context_rhs = _context_split(context)
     del context
 
-    lhs_q, lhs_inv_scale = _quant(lhs, cfg.lhs, lhs_ca, context_lhs)
-    rhs_q, rhs_inv_scale = _quant(rhs, cfg.rhs, rhs_ca, context_rhs)
+    lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
+        lhs, cfg=cfg.lhs, ca=lhs_ca, context=context_lhs
+    )
 
-    lhs_q2 = lhs_q
-    rhs_q2 = rhs_q
+    lhs_res = _residual(
+        x=lhs,
+        x_q=lhs_q,
+        inv_scale=lhs_inv_scale,
+        quant_grad=lhs_quant_grad,
+        side='lhs',
+        dg_dims=dimension_numbers,
+        lhs_shape=lhs.shape,
+        rhs_shape=rhs.shape,
+    )
+
+    rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
+        rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
+    )
+
+    rhs_res = _residual(
+        x=rhs,
+        x_q=rhs_q,
+        inv_scale=rhs_inv_scale,
+        quant_grad=rhs_quant_grad,
+        side='rhs',
+        dg_dims=dimension_numbers,
+        lhs_shape=lhs.shape,
+        rhs_shape=rhs.shape,
+    )
 
     if cfg.use_fake_quant:
-      lhs_q2 = _maybe_mul(lhs_q2, lhs_inv_scale)
-      rhs_q2 = _maybe_mul(rhs_q2, rhs_inv_scale)
+      # TODO(lew): After we implement optimization to not double-quantize,
+      #   Think what would happen if we pass fq value (xhs_q2) in residual?
+      lhs_q2 = _maybe_mul(lhs_q, lhs_inv_scale)
+      rhs_q2 = _maybe_mul(rhs_q, rhs_inv_scale)
       # The unit tests check for exact equality on CPU and TPU.
       # These bf16 and f32 make the unit tests pass.
       # We need a better comment why is that.
       assert cfg.lax_dg_in_dtype == jnp.bfloat16
       assert cfg.lax_dg_out_dtype == jnp.float32
+    else:
+      # TODO(lew): Pass a quantized tensor in the residual and use it.
+      #   Currently we will double-quantize tensor even if it was already int8.
+      lhs_q2 = lhs_q
+      rhs_q2 = rhs_q
 
     out = lax.dot_general(
         lhs_q2.astype(cfg.lax_dg_in_dtype),
@@ -298,19 +363,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         precision=lax.Precision.DEFAULT,
     )
 
-    lhs_inv_scale_t = _lhs_scale_transpose(
-        lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
-    )
-    rhs_inv_scale_t = _rhs_scale_transpose(
-        rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
-    )
-
     if not cfg.use_fake_quant:
-      out = _maybe_mul(out, lhs_inv_scale_t)
-      out = _maybe_mul(out, rhs_inv_scale_t)
-
-    lhs_res = TensorRes(value=lhs, qvalue=lhs_q, qvalue_scale=lhs_inv_scale_t)
-    rhs_res = TensorRes(value=rhs, qvalue=rhs_q, qvalue_scale=rhs_inv_scale_t)
+      out = _maybe_mul(out, lhs_res.qvalue_scale)
+      out = _maybe_mul(out, rhs_res.qvalue_scale)
 
     res = DotGeneralRes(
         context_bwd=context_bwd,
@@ -362,7 +417,12 @@ def _dot_general_raw_attach_gradient(
         start += len(x)
 
     def grad_dot_general(
-        y_res: TensorRes, dot_general, y_is_lhs, context, use_fwd_quant
+        y_res: TensorRes,
+        quant_grad,
+        dot_general,
+        y_is_lhs,
+        context,
+        use_fwd_quant,
     ):
       y_ndim = y_res.value.ndim
 
@@ -389,14 +449,27 @@ def _dot_general_raw_attach_gradient(
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
-      return jax.lax.transpose(out, out_axes)
+      transposed_out = jax.lax.transpose(out, out_axes)
+      if quant_grad is not None:
+        transposed_out = quant_grad(transposed_out)[0]
+      return transposed_out
 
     context1, context2 = _context_split(res.context_bwd)
     dlhs = grad_dot_general(
-        res.rhs, dlhs_dot_general_raw, False, context1, dlhs_use_fwd_quant
+        res.rhs,
+        res.lhs.quant_grad,
+        dlhs_dot_general_raw,
+        False,
+        context1,
+        dlhs_use_fwd_quant,
     )
     drhs = grad_dot_general(
-        res.lhs, drhs_dot_general_raw, True, context2, drhs_use_fwd_quant
+        res.lhs,
+        res.rhs.quant_grad,
+        drhs_dot_general_raw,
+        True,
+        context2,
+        drhs_use_fwd_quant,
     )
     return (
         dlhs.astype(res.lhs.value.dtype),
@@ -510,10 +583,10 @@ However if there is any other use, we will drop that assumption."""
     elif isinstance(cfg.lhs.numerics, config.IntNumerics):
       # Flax assumptions.
       assert cfg.lhs.calib_shared_axes == list(range(1, rank))
-      lhs_scale = _fresh_scale(lhs, cfg.lhs)
+      lhs_scale = _int_fresh_scale(lhs, cfg.lhs)
       lhs = lhs * lhs_scale
-      clip_and_round = cfg.lhs.clip_and_round or _make_clip_and_round(cfg.lhs)
-      lhs = clip_and_round(lhs, None)
+      quant = cfg.lhs.clip_and_round or _make_int_quant(cfg.lhs)
+      lhs = quant(lhs, None)
     else:
       assert False, cfg.lhs.numerics
 
@@ -521,10 +594,10 @@ However if there is any other use, we will drop that assumption."""
       pass
     elif isinstance(cfg.rhs.numerics, config.IntNumerics):
       assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
-      rhs_scale = _fresh_scale(rhs, cfg.rhs)
+      rhs_scale = _int_fresh_scale(rhs, cfg.rhs)
       rhs = rhs * rhs_scale
-      clip_and_round = cfg.rhs.clip_and_round or _make_clip_and_round(cfg.rhs)
-      rhs = clip_and_round(rhs, None)
+      quant = cfg.rhs.clip_and_round or _make_int_quant(cfg.rhs)
+      rhs = quant(rhs, None)
     else:
       assert False, cfg.rhs.numerics
 

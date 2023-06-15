@@ -307,7 +307,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           ret *= delta
 
           def res(v):
-            return aqt.TensorRes(value=v, qvalue=v, qvalue_scale=None)
+            return aqt.TensorRes(
+                value=v, qvalue=v, qvalue_scale=None, quant_grad=None
+            )
 
           res = aqt.DotGeneralRes(
               context_bwd=context,
