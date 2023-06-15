@@ -79,46 +79,14 @@ def test_eq(name, a, b):
     print(a[:3, :3])
     print(b.shape)
     print(b[:3, :3])
-    print("fail: not equal; case: ", name)
+    print(f"FAIL: {name}")
     assert False
-
-
-def check_eq(
-    name,
-    dg1,
-    dg2,
-    lhs,
-    rhs,
-    gra,
-    lr_mult=1.0,
-    gl_mult=1.0,
-    gr_mult=1.0,
-    test_gradient=True,
-):
-  """Tests whether dg1 and dg2 are identical or proportional."""
-
-  def app(dg):
-    lrf = dg(lhs, rhs)
-    lr, backprop = jax.vjp(dg, lhs, rhs)
-    test_eq("lrf", lrf, lr)
-    gl, gr = backprop(gra) if test_gradient else (None, None)
-    return lr, gl, gr
-
-  lr1, gl1, gr1 = app(dg1)
-  lr2, gl2, gr2 = app(dg2)
-  test_eq(f"{name}: lr", lr1 * lr_mult, lr2)  # forward pass
-  if test_gradient:
-    test_eq(f"{name}: gl", gl1 * gl_mult, gl2)  # backward pass
-    test_eq(f"{name}: gr", gr1 * gr_mult, gr2)  # backward pass
 
 
 def fqt_param_dict(s):
   return dict(
       cfg=config.fully_quantized(8, True),
       seed=s,
-      # Fails with "fail: not equal; case:  aqt vs fq (dg_full): gl"
-      # on "aqt vs fq (dg_full)"
-      check_aqt_vs_fq_dg_full=False,
   )
 
 
@@ -222,7 +190,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_shape=(20, 30),
       gra_shape=(10, 30),  # has to be the shape of the output
       seed=0,
-      check_aqt_vs_fq_dg_full=True,
   ):
     readonly_cfg = cfg
     del cfg
@@ -336,46 +303,49 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     test_jaxpr(lambda: backprop(gra), [modify_cfg().dlhs, modify_cfg().drhs])
 
     # Test exact equalities.
-    def check(name, dg1, dg2, **kwargs):
-      check_eq(name, dg1, dg2, lhs, rhs, gra, **kwargs)
+    def check(dgs):
+      good_lr = None
+      good_gl = None
+      good_gr = None
+      for name, dg, options in dgs:
+        # Default settings:
+        if "test_gradient" not in options:
+          options["test_gradient"] = True
+        if "mult" not in options:
+          options["mult"] = (1.0, 1.0, 1.0)
 
-    check(
-        "aqt vs fq (dg_raw)",
-        aqt_dg_raw(False),
-        aqt_dg_raw(True),
-        test_gradient=False,
-    )
-    if check_aqt_vs_fq_dg_full:
-      check(
-          "aqt vs fq (dg_full)",
-          aqt_dg_full(False),
-          aqt_dg_full(True),
-      )
-    check(
-        "use_fwd_quant (aqt, no round or clip)",
-        aqt_dg_full(False, use_fwd_quant=False),
-        aqt_dg_full(False, use_fwd_quant=True),
-    )
-    check(
-        "dg_raw vs dg_full (aqt)",
-        aqt_dg_raw(False),
-        aqt_dg_full(False),
-        test_gradient=False,
-    )
-    check(
-        "dg_raw vs dg_full (fq)",
-        aqt_dg_raw(True),
-        aqt_dg_full(True),
-        test_gradient=False,
-    )
-    check(
-        "lax_dg vs lax_dg_248",
-        lax_dg,
-        lax_dg_248,
-        lr_mult=2.0,
-        gl_mult=4.0,
-        gr_mult=8.0,
-    )
+        lrf = dg(lhs, rhs)
+        lr, backprop = jax.vjp(dg, lhs, rhs)
+
+        gl, gr = backprop(gra) if options["test_gradient"] else (None, None)
+        good_lr = lr if good_lr is None else good_lr
+        good_gl = gl if good_gl is None else good_gl
+        good_gr = gr if good_gr is None else good_gr
+
+        test_eq(f"{name}: lr vs lrf", lr, lrf)
+
+        lr_mult, gl_mult, gr_mult = options["mult"]
+        test_eq(f"{name}: lr", good_lr, lr / lr_mult)  # forward pass
+        if options["test_gradient"]:
+          test_eq(f"{name}: gl", good_gl, gl / gl_mult)  # backward pass
+          test_eq(f"{name}: gr", good_gr, gr / gr_mult)  # backward pass
+
+    check([
+        ("default    ", aqt_dg_full(False), dict()),
+        ("FQ         ", aqt_dg_full(True), dict()),
+        ("raw fwd    ", aqt_dg_raw(False), dict(test_gradient=False)),
+        ("raw fwd FQ ", aqt_dg_raw(True), dict(test_gradient=False)),
+    ])
+
+    check([
+        ("fwd_quant=T", aqt_dg_full(False, use_fwd_quant=False), dict()),
+        ("fwd_quant=F", aqt_dg_full(False, use_fwd_quant=True), dict()),
+    ])
+
+    check([
+        ("lax_dg    ", lax_dg, dict()),
+        ("lax_dg_248", lax_dg_248, dict(mult=(2.0, 4.0, 8.0))),
+    ])
 
   def test_dynamic_context(self):
     @jax.jit
