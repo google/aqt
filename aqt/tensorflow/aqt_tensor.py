@@ -320,6 +320,16 @@ class TensorQuantizer:
       self._last_update = get_variable('last_update', [], tf.int64,
                                        tf.int64.min)
 
+  def tracked_variables(self) -> Dict[str, tf.Variable]:
+    """Returns variables used to track updates and calibration variables."""
+    variables = {
+        'last_update': self._last_update,
+    }
+    variables.update(self.calibration_variables())
+    if self.config.use_quantized_variable:
+      variables['quantized_variable'] = self.quantized_variable
+    return variables
+
   def calibration_variables(self) -> Dict[str, tf.Variable]:
     """Returns scale and stats variables used to calibrate tensors."""
     return {

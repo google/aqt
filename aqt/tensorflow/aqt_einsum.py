@@ -34,7 +34,7 @@ label are contracting.
 """
 
 import string
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from aqt.common import aqt_config
 from aqt.common import aqt_config_utils
@@ -89,19 +89,33 @@ def _parse_equation(eq: str) -> Tuple[str, str, str]:
 def _validate_shared_axes(
     lhs_config: aqt_config.StatsConfig,  # Prevent python auto-formatting.
     rhs_config: aqt_config.StatsConfig,
-    lhs: str,
-    rhs: str,
-    out: str) -> None:
+    eq: str) -> None:
   """Validates that contracting axes have shared statistics."""
-  contracting_labels = set(lhs + rhs) - set(out)
+  lhs_contracting_dims, rhs_contracting_dims = get_contracting_dims(eq)
 
-  axes_name_configs = [(lhs, 'lhs', lhs_config), (rhs, 'rhs', rhs_config)]
+  axes_name_configs = [(lhs_contracting_dims, 'lhs', lhs_config),
+                       (rhs_contracting_dims, 'rhs', rhs_config)]
   for axes, name, config in axes_name_configs:
     shared_indices = set(config.share_stats_axes)
-    for i, label in enumerate(axes):
-      if label in contracting_labels and i not in shared_indices:
+    for i in axes:
+      if i not in shared_indices:
         raise aqt_config.ConfigError(
             f'axis {i} of {name} must be shared due to contraction')
+
+
+def get_contracting_dims(
+    eq: str) -> Tuple[List[Optional[int]], List[Optional[int]]]:
+  """Returns contracting dimensions in the einsum equation."""
+  lhs, rhs, out = _parse_equation(eq)
+  contracting_labels = set(lhs + rhs) - set(out)
+
+  lhs_contracting_dims, rhs_contracting_dims = [], []
+  for labels, axes in (lhs, lhs_contracting_dims), (rhs, rhs_contracting_dims):
+    for i, label in enumerate(labels):
+      if label in contracting_labels:
+        axes.append(i)
+
+  return lhs_contracting_dims, rhs_contracting_dims
 
 
 def einsum(
@@ -137,13 +151,10 @@ def einsum(
     the quantization schedules between arguments are misaligned, or a
     contracting axis does not have shared statistics.
   """
-  lhs_labels, rhs_labels, out_labels = _parse_equation(eq)
   _validate_shared_axes(
       lhs_quantizer.config.stats_config,  #
       rhs_quantizer.config.stats_config,
-      lhs_labels,
-      rhs_labels,
-      out_labels)
+      eq)
   aqt_config_utils._validate_alignment(
       'lhs_quantizer.config.tensor_configs',  #
       lhs_quantizer.config.tensor_configs,

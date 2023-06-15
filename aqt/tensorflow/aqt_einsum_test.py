@@ -163,6 +163,27 @@ def _generate_test_equations() -> Sequence[Dict[str, str]]:
   return [dict(zip(keys, vals)) for vals in cases]
 
 
+def _generate_contrating_dims() -> Sequence[Dict[str, Any]]:
+  keys = ["testcase_name", "eq", "lhs_contracting_dims", "rhs_contracting_dims"]
+  cases = [
+      ("diag", "ii,->i", [], []),
+      ("sum", "i,->", [0], []),
+      ("trace", "ii,->", [0, 1], []),
+      ("transpose", ",ij->ji", [], []),
+      ("matmul", "ij,jk->ik", [1], [0]),
+      ("batch_matmul", "bij,bjk->bik", [2], [1]),
+      ("dot", "i,i->", [0], [0]),
+      ("vec_mat_mult", "u,uv->v", [0], [0]),
+      ("batch_vec_mat_mul", "bu,uv->bv", [1], [0]),
+      ("channel_vec_mat_mult", "u,nuv->nv", [0], [1]),
+      ("batch_channel_vec_mat_mult", "bu,nuv->bnv", [1], [1]),
+      ("block_vec_mat_mult", "nu,nuv->nv", [1], [1]),
+      ("batch_block_vec_mat_mult", "bnu,nuv->bnv", [2], [1]),
+      ("batch_transpose_matmul", "bmu,nm->bnu", [1], [1]),
+  ]
+  return [dict(zip(keys, vals)) for vals in cases]
+
+
 class EinsumTest(tf.test.TestCase, parameterized.TestCase):
 
   def setUp(self):
@@ -537,6 +558,15 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       tf.global_variables_initializer().run()
       for actual_grad, expected_grad in zip(actual, expected):
         self.assertAllEqual(actual_grad, expected_grad)
+
+  @parameterized.named_parameters(_generate_contrating_dims())
+  def test_contracting_dims(self, eq: str,
+                            lhs_contracting_dims: Sequence[Optional[int]],
+                            rhs_contracting_dims: Sequence[Optional[int]]):
+    l_dims, r_dims = aqt_einsum.get_contracting_dims(eq)
+    for actual, expected in [(l_dims, lhs_contracting_dims),
+                             (r_dims, rhs_contracting_dims)]:
+      self.assertAllEqual(actual, expected)
 
 
 if __name__ == "__main__":
