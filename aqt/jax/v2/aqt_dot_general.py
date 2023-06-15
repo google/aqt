@@ -168,8 +168,11 @@ def _scale_quant(x, *, cfg, ca, context):
     return x, None, None
   if cfg.calib_shared_axes is None:
     cfg.calib_shared_axes = ca
-  scale = _int_fresh_scale(x, cfg)
-  x_s = x * scale
+  fresh_scale_fn = cfg.fresh_scale or functools.partial(
+      _int_fresh_scale, cfg=cfg
+  )
+  scale = fresh_scale_fn(x)
+  x_s = _maybe_mul(x, scale)
   quant = cfg.clip_and_round or _make_int_quant(cfg)
   quant = functools.partial(quant, context=context)
   x_q, quant_grad = jax.vjp(quant, x_s)
@@ -184,7 +187,7 @@ def _scale_quant(x, *, cfg, ca, context):
   # of a larger piece of code like the whole _scale_quant.
   #
   # TODO(lew): Implement configuration of stop-gradient.
-  inv_scale = 1.0 / scale
+  inv_scale = _maybe_inv(scale)
 
   return x_q, inv_scale, quant_grad
 
@@ -282,6 +285,12 @@ def _maybe_mul(x, scale):
   if scale is None:
     return x
   return x * scale
+
+
+def _maybe_inv(x):
+  if x is None:
+    return None
+  return 1.0 / x
 
 
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
