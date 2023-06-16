@@ -202,13 +202,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
       cfg.fwd.lhs.po2_scale = True
       cfg.fwd.rhs.po2_scale = True
+
       cfg.dlhs.lhs.po2_scale = True
       cfg.dlhs.rhs.po2_scale = True
+
       cfg.drhs.lhs.po2_scale = True
       cfg.drhs.rhs.po2_scale = True
-      cfg.fwd.use_fake_quant = use_fake_quant
-      cfg.dlhs.use_fake_quant = use_fake_quant
-      cfg.drhs.use_fake_quant = use_fake_quant
+
+      cfg.fwd.lhs.use_fake_quant = use_fake_quant
+      cfg.fwd.rhs.use_fake_quant = use_fake_quant
+
+      cfg.dlhs.lhs.use_fake_quant = use_fake_quant
+      cfg.dlhs.rhs.use_fake_quant = use_fake_quant
+
+      cfg.drhs.lhs.use_fake_quant = use_fake_quant
+      cfg.drhs.rhs.use_fake_quant = use_fake_quant
 
       def disable_quant_types(c):
         c.lax_dg_in_dtype = jnp.bfloat16

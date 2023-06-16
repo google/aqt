@@ -304,13 +304,12 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   ):
     """Creates a fake_quant function."""
 
-    if cfg.use_fake_quant:
-      msg = (
-          'use_fake_quant mode is used in tests and it is exactly equal when'
-          ' po2_scale == True; Did you forget to set it?'
-      )
-      assert cfg.lhs.po2_scale, msg
-      assert cfg.rhs.po2_scale, msg
+    msg = (
+        'use_fake_quant mode is used in tests and it is exactly equal when'
+        ' po2_scale == True; Did you forget to set it?'
+    )
+    assert (not cfg.lhs.use_fake_quant) or cfg.lhs.po2_scale, msg
+    assert (not cfg.rhs.use_fake_quant) or cfg.rhs.po2_scale, msg
 
     (lhs_ca, rhs_ca), _ = dimension_numbers
 
@@ -321,7 +320,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
         lhs, cfg=cfg.lhs, ca=lhs_ca, context=context_lhs
     )
-
+    lhs_q2 = (
+        _maybe_mul(lhs_q, lhs_inv_scale) if cfg.lhs.use_fake_quant else lhs_q
+    )
     lhs_res = _residual(
         x=lhs,
         x_q=lhs_q,
@@ -336,7 +337,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
         rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
     )
-
+    rhs_q2 = (
+        _maybe_mul(rhs_q, rhs_inv_scale) if cfg.rhs.use_fake_quant else rhs_q
+    )
     rhs_res = _residual(
         x=rhs,
         x_q=rhs_q,
@@ -348,21 +351,11 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         rhs_shape=rhs.shape,
     )
 
-    if cfg.use_fake_quant:
-      # TODO(lew): After we implement optimization to not double-quantize,
-      #   Think what would happen if we pass fq value (xhs_q2) in residual?
-      lhs_q2 = _maybe_mul(lhs_q, lhs_inv_scale)
-      rhs_q2 = _maybe_mul(rhs_q, rhs_inv_scale)
-      # The unit tests check for exact equality on CPU and TPU.
-      # These bf16 and f32 make the unit tests pass.
-      # We need a better comment why is that.
+    # TODO(lew): After we implement optimization to not double-quantize,
+    #   what would happen if we pass fq value (xhs_q2) in residual?
+    if cfg.lhs.use_fake_quant or cfg.rhs.use_fake_quant:
       assert cfg.lax_dg_in_dtype == jnp.bfloat16
       assert cfg.lax_dg_out_dtype == jnp.float32
-    else:
-      # TODO(lew): Pass a quantized tensor in the residual and use it.
-      #   Currently we will double-quantize tensor even if it was already int8.
-      lhs_q2 = lhs_q
-      rhs_q2 = rhs_q
 
     out = lax.dot_general(
         lhs_q2.astype(cfg.lax_dg_in_dtype),
@@ -372,8 +365,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         precision=lax.Precision.DEFAULT,
     )
 
-    if not cfg.use_fake_quant:
+    if not cfg.lhs.use_fake_quant:
       out = _maybe_mul(out, lhs_res.qvalue_scale)
+
+    if not cfg.rhs.use_fake_quant:
       out = _maybe_mul(out, rhs_res.qvalue_scale)
 
     res = DotGeneralRes(

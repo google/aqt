@@ -60,6 +60,7 @@ class Tensor:
   noise_fn: Optional[NoiseFn]
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
+  use_fake_quant: bool
 
   @classmethod
   def make(cls, bits: Optional[int]) -> 'Tensor':
@@ -81,6 +82,7 @@ class Tensor:
         fresh_scale=None,
         noise_fn=None,
         po2_scale=False,
+        use_fake_quant=False,
     )
 
 
@@ -96,7 +98,6 @@ class DotGeneralRaw:
   # use_fwd_quant is ignored in forward pass.
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
   use_fwd_quant: bool
-  use_fake_quant: bool
 
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRaw':
@@ -121,7 +122,6 @@ class DotGeneralRaw:
         lax_dg_in_dtype=lax_dg_in_dtype,
         lax_dg_out_dtype=lax_dg_out_dtype,
         use_fwd_quant=True,
-        use_fake_quant=False,
     )
 
   @classmethod
