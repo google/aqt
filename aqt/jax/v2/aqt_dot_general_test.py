@@ -45,9 +45,15 @@ def test_jaxpr(f, cfgs: list[config.DotGeneralRaw]):
   trityps = [trityp for trityp in jaxpr_to_trityp(f_jaxpr)]
   assert len(trityps) == len(cfgs)
   for (lhs_sa, rhs_sa, out_sa), cfg in zip(trityps, cfgs):
-    assert lhs_sa.dtype == cfg.lax_dg_in_dtype
-    assert rhs_sa.dtype == cfg.lax_dg_in_dtype
-    assert out_sa.dtype == cfg.lax_dg_out_dtype
+    if cfg.lhs.dtype == jnp.int8 and cfg.rhs.dtype == jnp.int8:
+      in_dtype = jnp.int8
+      out_dtype = jnp.int32
+    else:
+      in_dtype = jnp.bfloat16
+      out_dtype = jnp.float32
+    assert lhs_sa.dtype == in_dtype
+    assert rhs_sa.dtype == in_dtype
+    assert out_sa.dtype == out_dtype
 
 
 def rand_unif(shape, maxval, seed):
@@ -219,8 +225,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg.drhs.rhs.use_fake_quant = use_fake_quant
 
       def disable_quant_types(c):
-        c.lax_dg_in_dtype = jnp.bfloat16
-        c.lax_dg_out_dtype = jnp.float32
+        c.lhs.dtype = jnp.bfloat16
+        c.rhs.dtype = jnp.bfloat16
 
       if use_fake_quant:
         disable_quant_types(cfg.fwd)
@@ -237,8 +243,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           c.rhs.round = False
           # c.lhs.clip = False
           # c.rhs.clip = False
-          c.lax_dg_in_dtype = jnp.bfloat16
-          c.lax_dg_out_dtype = jnp.float32
           c.use_fwd_quant = use_fwd_quant
         disable_quant(cfg.fwd)
         disable_quant(cfg.dlhs)
@@ -383,8 +387,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
     test_jaxpr(lambda: dg(lhs, rhs), [cfg])
-    assert cfg.lax_dg_in_dtype == jnp.int8
-    assert cfg.lax_dg_out_dtype == jnp.int32
+    assert cfg.lhs.dtype == jnp.int8
+    assert cfg.rhs.dtype == jnp.int8
 
   @parameterized.parameters([
       (1, 1),

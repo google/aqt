@@ -61,14 +61,25 @@ class Tensor:
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
   use_fake_quant: bool
+  dtype: DType
 
   @classmethod
   def make(cls, bits: Optional[int]) -> 'Tensor':
+    """Makes."""
     if bits is None:
       numerics = NoNumerics()
     else:
       pz = False if bits == 1 else True
       numerics = IntNumerics(bits=bits, preserve_zero=pz)
+
+    if (
+        bits is not None
+        and bits <= 8
+        and bits != 1  # we currently round to -0.5 and 0.5 for 1 bit (pz)
+    ):
+      dtype = jnp.int8
+    else:
+      dtype = jnp.bfloat16
 
     return Tensor(
         numerics=numerics,
@@ -83,6 +94,7 @@ class Tensor:
         noise_fn=None,
         po2_scale=False,
         use_fake_quant=False,
+        dtype=dtype,
     )
 
 
@@ -92,8 +104,6 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
-  lax_dg_in_dtype: DType
-  lax_dg_out_dtype: DType
   # use_fwd_quant is observed when this dot_general is used in gradient.
   # use_fwd_quant is ignored in forward pass.
   # Whether the gradient should be taken at unquantized wgt/act or quantized.
@@ -102,25 +112,9 @@ class DotGeneralRaw:
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
-    # These types match default TPU behavior. GPU would need some work.
-    # Relevant: https://github.com/google/jax/issues/14022
-    lax_dg_in_dtype = jnp.bfloat16
-    lax_dg_out_dtype = jnp.float32
-    if (
-        lhs_bits is not None
-        and rhs_bits is not None
-        and lhs_bits <= 8
-        and rhs_bits <= 8
-        and lhs_bits != 1  # we currently round to -0.5 and 0.5 for 1 bit
-        and rhs_bits != 1
-    ):
-      lax_dg_in_dtype = jnp.int8
-      lax_dg_out_dtype = jnp.int32
     return DotGeneralRaw(
         lhs=Tensor.make(lhs_bits),
         rhs=Tensor.make(rhs_bits),
-        lax_dg_in_dtype=lax_dg_in_dtype,
-        lax_dg_out_dtype=lax_dg_out_dtype,
         use_fwd_quant=True,
     )
 

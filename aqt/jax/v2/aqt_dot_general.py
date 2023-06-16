@@ -351,17 +351,28 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         rhs_shape=rhs.shape,
     )
 
+    # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
     # TODO(lew): After we implement optimization to not double-quantize,
     #   what would happen if we pass fq value (xhs_q2) in residual?
-    if cfg.lhs.use_fake_quant or cfg.rhs.use_fake_quant:
-      assert cfg.lax_dg_in_dtype == jnp.bfloat16
-      assert cfg.lax_dg_out_dtype == jnp.float32
+    if cfg.lhs.use_fake_quant:
+      assert cfg.lhs.dtype == jnp.bfloat16
+    if cfg.rhs.use_fake_quant:
+      assert cfg.lhs.dtype == jnp.bfloat16
+
+    # These types match default TPU behavior. GPU would need some work.
+    # Relevant: https://github.com/google/jax/issues/14022
+    if cfg.lhs.dtype == jnp.int8 and cfg.rhs.dtype == jnp.int8:
+      lax_dg_in_dtype = jnp.int8
+      lax_dg_out_dtype = jnp.int32
+    else:
+      lax_dg_in_dtype = jnp.bfloat16
+      lax_dg_out_dtype = jnp.float32
 
     out = lax.dot_general(
-        lhs_q2.astype(cfg.lax_dg_in_dtype),
-        rhs_q2.astype(cfg.lax_dg_in_dtype),
+        lhs_q2.astype(lax_dg_in_dtype),
+        rhs_q2.astype(lax_dg_in_dtype),
         dimension_numbers=dimension_numbers,
-        preferred_element_type=cfg.lax_dg_out_dtype,
+        preferred_element_type=lax_dg_out_dtype,
         precision=lax.Precision.DEFAULT,
     )
 
