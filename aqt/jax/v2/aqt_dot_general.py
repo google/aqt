@@ -164,6 +164,18 @@ def _make_int_quant(cfg: config.Tensor):
 
 def _scale_quant(x, *, cfg, ca, context):
   """The core quantizing function."""
+  msg = (
+      'use_fake_quant mode is used in tests and it is exactly equal when'
+      ' po2_scale == True; Did you forget to set it?'
+  )
+  assert (not cfg.use_fake_quant) or cfg.po2_scale, msg
+
+  # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
+  # TODO(lew): After we implement optimization to not double-quantize,
+  #   what would happen if we pass fq value (xhs_q2) in residual?
+  if cfg.use_fake_quant:
+    assert cfg.dtype == jnp.bfloat16
+
   if isinstance(cfg.numerics, config.NoNumerics):
     return x, None, None
   if cfg.calib_shared_axes is None:
@@ -304,13 +316,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   ):
     """Creates a fake_quant function."""
 
-    msg = (
-        'use_fake_quant mode is used in tests and it is exactly equal when'
-        ' po2_scale == True; Did you forget to set it?'
-    )
-    assert (not cfg.lhs.use_fake_quant) or cfg.lhs.po2_scale, msg
-    assert (not cfg.rhs.use_fake_quant) or cfg.rhs.po2_scale, msg
-
     (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
@@ -350,14 +355,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         lhs_shape=lhs.shape,
         rhs_shape=rhs.shape,
     )
-
-    # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
-    # TODO(lew): After we implement optimization to not double-quantize,
-    #   what would happen if we pass fq value (xhs_q2) in residual?
-    if cfg.lhs.use_fake_quant:
-      assert cfg.lhs.dtype == jnp.bfloat16
-    if cfg.rhs.use_fake_quant:
-      assert cfg.lhs.dtype == jnp.bfloat16
 
     # These types match default TPU behavior. GPU would need some work.
     # Relevant: https://github.com/google/jax/issues/14022
