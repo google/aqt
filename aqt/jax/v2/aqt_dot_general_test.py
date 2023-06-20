@@ -89,9 +89,11 @@ def test_eq(name, a, b):
     assert False
 
 
-def fqt_param_dict(s):
+def fqt_param_dict(s, use_fwd_quant):
   return dict(
-      cfg=config.fully_quantized(8, True),
+      cfg=config.fully_quantized(
+          use_fwd_quant=use_fwd_quant, use_stochastic_rounding=False
+      ),
       seed=s,
   )
 
@@ -152,8 +154,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
-      *[dict(cfg=config.fully_quantized(8, False), seed=s) for s in range(10)],
-      *[fqt_param_dict(s) for s in range(10)],
+      *[fqt_param_dict(s, use_fwd_quant=False) for s in range(10)],
+      *[fqt_param_dict(s, use_fwd_quant=True) for s in range(10)],
       dict(cfg=config.DotGeneral.make(None, None)),
       dict(cfg=config.DotGeneral.make(1, 1)),
       dict(cfg=config.DotGeneral.make(1, 2)),
@@ -163,7 +165,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.DotGeneral.make(None, 8)),
       dict(cfg=config.DotGeneral.make(8, None)),
       dict(
-          cfg=fqt_param_dict(s=10)["cfg"],
+          cfg=fqt_param_dict(s=10, use_fwd_quant=True)["cfg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4

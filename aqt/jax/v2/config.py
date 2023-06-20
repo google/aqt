@@ -156,14 +156,40 @@ class DotGeneral:
     )
 
 
-def fully_quantized(bits: int = 8, use_fwd_quant: bool = True) -> DotGeneral:
+def fully_quantized(
+    *,
+    fwd_bits: int = 8,
+    bwd_bits: int = 8,
+    use_fwd_quant: bool = True,
+    use_stochastic_rounding: bool = True,
+    use_dummy_static_bound: bool = False,
+) -> DotGeneral:
   """Fully Quantized Training."""
   cfg = DotGeneral(
-      fwd=DotGeneralRaw.make(bits, bits),
-      dlhs=DotGeneralRaw.make(bits, bits),
-      drhs=DotGeneralRaw.make(bits, bits),
+      fwd=DotGeneralRaw.make(fwd_bits, fwd_bits),
+      dlhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
+      drhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
   )
   cfg.fwd.use_fwd_quant = use_fwd_quant
   cfg.dlhs.use_fwd_quant = use_fwd_quant
   cfg.drhs.use_fwd_quant = use_fwd_quant
+
+  if use_stochastic_rounding:
+
+    def noise_fn(shape, key):
+      return jax.random.uniform(key, shape) - 0.5
+
+    cfg.dlhs.lhs.noise_fn = noise_fn
+    cfg.dlhs.rhs.noise_fn = noise_fn
+    cfg.drhs.lhs.noise_fn = noise_fn
+    cfg.drhs.rhs.noise_fn = noise_fn
+
+  if use_dummy_static_bound:
+    cfg.fwd.lhs.bound = 1.0
+    cfg.fwd.rhs.bound = 1.0
+    cfg.drhs.lhs.bound = 1.0
+    cfg.drhs.rhs.bound = 1.0
+    cfg.dlhs.lhs.bound = 1.0
+    cfg.dlhs.rhs.bound = 1.0
+
   return cfg
