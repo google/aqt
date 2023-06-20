@@ -55,6 +55,8 @@ class Tensor:
   preserve_max_val: bool
   clip: bool
   round: bool
+  # noise+clip+round
+  # We apply gradient of clip_and_round in bwd pass.
   clip_and_round: Optional[ClipAndRoundFn]
   fresh_scale: Optional[FreshScaleFn]
   noise_fn: Optional[NoiseFn]

@@ -98,6 +98,29 @@ def fqt_param_dict(s, use_fwd_quant):
   )
 
 
+# TODO(lew): Use this in a unit-test of quant_grad.
+def round_with_vjp_for_test(remove_gradients_on_negative_x=False):
+  def fwd(x, context):
+    del context
+    return jax.lax.round(x, jax.lax.RoundingMethod.TO_NEAREST_EVEN)
+    # return x
+
+  def vjp_fwd(x, context):
+    res = (x,)
+    return fwd(x, context), res
+
+  def vjp_bwd(res, grad):
+    (x,) = res
+    ret = grad
+    if remove_gradients_on_negative_x:
+      ret *= x >= 0
+    return (ret, None)
+
+  vjp = jax.custom_vjp(fwd)
+  vjp.defvjp(vjp_fwd, vjp_bwd)
+  return vjp
+
+
 class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   def test_empty(self):

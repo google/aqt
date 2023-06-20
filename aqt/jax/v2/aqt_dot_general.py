@@ -65,6 +65,7 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   assert cfg.calib_shared_axes is not None, msg
 
   if cfg.bound is None:
+    # If you want to use different calibration, modify _make_int_quant.vjp_bwd.
     abs_max = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
   else:
     assert cfg.bound > 0, 'Static quantization bound should be positive.'
@@ -150,11 +151,12 @@ def _make_int_quant(cfg: config.Tensor):
     return fwd(x, context), res
 
   def vjp_bwd(res, grad):
-    (x,) = res
     # This is gradient of clip. For boundary values we will have full graindent.
-    # TODO(lew): This should be optional, it is inefficient for calibrations
-    #   like max(abs(x)).
-    ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
+    # We might use something like this for calibrations other than abs(max(x))
+    # (x,) = res
+    # ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
+    del res
+    ret = grad
     return (ret, None)
 
   vjp = jax.custom_vjp(fwd)
@@ -214,7 +216,7 @@ def _residual(
   )
   inv_scale_t = transpose_scale(inv_scale, dg_dims, lhs_shape, rhs_shape)
   # TODO(lew): Remove when we have appropriate tests.
-  #   Don't forget to make it configurable whether we apply clip_gradient.
+  # quant_grad won't cause additional computations if it is STE.
   quant_grad = None
   return TensorRes(
       value=x,
@@ -361,6 +363,12 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     if cfg.lhs.dtype == jnp.int8 and cfg.rhs.dtype == jnp.int8:
       lax_dg_in_dtype = jnp.int8
       lax_dg_out_dtype = jnp.int32
+      if cfg.lhs.clip_and_round is None and cfg.lhs.clip_and_round is None:
+        msg = 'Need cfg.xhs.clip and cfg.xhs.round to use HW int8'
+        assert cfg.lhs.round and cfg.lhs.clip, msg
+        assert cfg.rhs.round and cfg.rhs.clip, msg
+      else:
+        assert False, "For now, we don't allow HW int8 with clip_and_round"
     else:
       lax_dg_in_dtype = jnp.bfloat16
       lax_dg_out_dtype = jnp.float32
