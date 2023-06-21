@@ -215,9 +215,7 @@ def _residual(
       _rhs_scale_transpose if side == 'rhs' else _lhs_scale_transpose
   )
   inv_scale_t = transpose_scale(inv_scale, dg_dims, lhs_shape, rhs_shape)
-  # TODO(lew): Remove when we have appropriate tests.
   # quant_grad won't cause additional computations if it is STE.
-  quant_grad = None
   return TensorRes(
       value=x,
       qvalue=x_q,

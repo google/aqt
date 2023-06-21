@@ -98,29 +98,6 @@ def fqt_param_dict(s, use_fwd_quant):
   )
 
 
-# TODO(lew): Use this in a unit-test of quant_grad.
-def round_with_vjp_for_test(remove_gradients_on_negative_x=False):
-  def fwd(x, context):
-    del context
-    return jax.lax.round(x, jax.lax.RoundingMethod.TO_NEAREST_EVEN)
-    # return x
-
-  def vjp_fwd(x, context):
-    res = (x,)
-    return fwd(x, context), res
-
-  def vjp_bwd(res, grad):
-    (x,) = res
-    ret = grad
-    if remove_gradients_on_negative_x:
-      ret *= x >= 0
-    return (ret, None)
-
-  vjp = jax.custom_vjp(fwd)
-  vjp.defvjp(vjp_fwd, vjp_bwd)
-  return vjp
-
-
 class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   def test_empty(self):
@@ -225,8 +202,39 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     readonly_cfg = cfg
     del cfg
 
-    def modify_cfg(use_fake_quant=False, *, use_fwd_quant=None):
+    def modify_cfg(
+        *,
+        use_fake_quant=False,
+        use_fwd_quant=None,
+        fwd_lhs_tricky_clip_and_round=False,
+    ):
       cfg = copy.deepcopy(readonly_cfg)
+      if fwd_lhs_tricky_clip_and_round:
+        # Tricky means that we have zero gradient on x < 0
+        def tricky_clip_and_round():
+          def fwd(x, context):
+            del context
+            return jax.lax.round(x, jax.lax.RoundingMethod.TO_NEAREST_EVEN)
+            # return x
+
+          def vjp_fwd(x, context):
+            res = (x,)
+            return fwd(x, context), res
+
+          def vjp_bwd(res, grad):
+            (x,) = res
+            ret = grad * (x >= 0)
+            return (ret, None)
+
+          vjp = jax.custom_vjp(fwd)
+          vjp.defvjp(vjp_fwd, vjp_bwd)
+          return vjp
+
+        cfg.fwd.lhs.clip_and_round = tricky_clip_and_round()
+        # Needed because int8 casting would do additional clip and round.
+        cfg.fwd.lhs.dtype = jnp.bfloat16
+        cfg.fwd.rhs.dtype = jnp.bfloat16
+
       # Setting po2_scale is ensuring that fake_quant and full dot_general
       # have the same numerics when scales are power of two (po2).
       # We are passing dims to config so that we can reuse it in fake_quant.
@@ -266,6 +274,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           disable_quant_types(c)
           c.lhs.round = False
           c.rhs.round = False
+          assert c.lhs.clip_and_round is None
+          assert c.rhs.clip_and_round is None
           # c.lhs.clip = False
           # c.rhs.clip = False
           c.use_fwd_quant = use_fwd_quant
@@ -279,14 +289,22 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1)
     gra = rand_unif(gra_shape, gra_maxval, seed + 2)
 
-    def aqt_dg_full(use_fake_quant, use_fwd_quant=None):
-      cfg = modify_cfg(use_fake_quant, use_fwd_quant=use_fwd_quant)
+    def aqt_dg_full(
+        use_fake_quant,
+        use_fwd_quant=None,
+        fwd_lhs_tricky_clip_and_round=False,
+    ):
+      cfg = modify_cfg(
+          use_fake_quant=use_fake_quant,
+          use_fwd_quant=use_fwd_quant,
+          fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
+      )
       dg = aqt.make_dot_general(cfg)
       context = aqt.Context(key=None, train_step=None)
       return lambda lhs, rhs: dg(lhs, rhs, dims, context=context)
 
     def aqt_dg_raw(use_fake_quant):
-      cfg = modify_cfg(use_fake_quant).fwd
+      cfg = modify_cfg(use_fake_quant=use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
       context = aqt.Context(key=None, train_step=None)
       return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
@@ -350,11 +368,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           options["test_gradient"] = True
         if "mult" not in options:
           options["mult"] = (1.0, 1.0, 1.0)
+        if "check_fwd_lhs_tricky_clip_and_round" not in options:
+          options["check_fwd_lhs_tricky_clip_and_round"] = False
 
         lrf = dg(lhs, rhs)
         lr, backprop = jax.vjp(dg, lhs, rhs)
 
         gl, gr = backprop(gra) if options["test_gradient"] else (None, None)
+
+        if options["check_fwd_lhs_tricky_clip_and_round"]:
+          # Test that all the expected were zero anyway
+          where_zero_gradient_expected = lhs < 0
+          assert (gl[where_zero_gradient_expected] == 0.0).all()
+
         good_lr = lr if good_lr is None else good_lr
         good_gl = gl if good_gl is None else good_gl
         good_gr = gr if good_gr is None else good_gr
@@ -383,6 +409,15 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ("lax_dg    ", lax_dg, dict()),
         ("lax_dg_248", lax_dg_248, dict(mult=(2.0, 4.0, 8.0))),
     ])
+
+    if isinstance(readonly_cfg.fwd.lhs.numerics, config.IntNumerics):
+      check([
+          (
+              "check_fwd_lhs_tricky_clip_and_round",
+              aqt_dg_full(False, fwd_lhs_tricky_clip_and_round=True),
+              dict(check_fwd_lhs_tricky_clip_and_round=True),
+          ),
+      ])
 
   def test_dynamic_context(self):
     @jax.jit
