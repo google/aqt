@@ -25,7 +25,7 @@ import numpy as np
 import scipy.stats
 
 
-def test_jaxpr(f, cfgs: list[config.DotGeneralRaw]):
+def test_jaxpr(f, cfgs: list[config.DotGeneralRaw], dtype):
   """Tests whether dot_generals in f conform to cfgs."""
 
   def jaxpr_to_trityp(jaxpr):
@@ -49,16 +49,18 @@ def test_jaxpr(f, cfgs: list[config.DotGeneralRaw]):
       in_dtype = jnp.int8
       out_dtype = jnp.int32
     else:
-      in_dtype = jnp.bfloat16
-      out_dtype = jnp.float32
+      in_dtype = dtype
+      out_dtype = dtype
     assert lhs_sa.dtype == in_dtype
     assert rhs_sa.dtype == in_dtype
     assert out_sa.dtype == out_dtype
 
 
-def rand_unif(shape, maxval, seed):
+def rand_unif(shape, maxval, seed, dtype=jnp.float32):
   key = jax.random.PRNGKey(seed)
-  return jax.random.uniform(key=key, shape=shape, minval=-maxval, maxval=maxval)
+  return jax.random.uniform(
+      key=key, shape=shape, minval=-maxval, maxval=maxval, dtype=dtype
+  )
 
 
 # The main test strategy is :
@@ -154,14 +156,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
-      *[fqt_param_dict(s, use_fwd_quant=False) for s in range(10)],
-      *[fqt_param_dict(s, use_fwd_quant=True) for s in range(10)],
       dict(cfg=config.DotGeneral.make(None, None)),
       dict(cfg=config.DotGeneral.make(1, 1)),
       dict(cfg=config.DotGeneral.make(1, 2)),
       dict(cfg=config.DotGeneral.make(2, 1)),
       dict(cfg=config.DotGeneral.make(2, 2)),
       dict(cfg=config.DotGeneral.make(8, 8)),
+      # That test could fail numerically because bf16
+      # can't keep in the product of int8*int8 accurately.
+      # It just so happens that this test does not fail but others do.
+      # We do this test anyway, to catch jax-compilation-time errors.
+      dict(cfg=config.DotGeneral.make(2, 2), dtype=jnp.bfloat16),
+      dict(cfg=config.DotGeneral.make(8, 8), dtype=jnp.bfloat16),
       dict(cfg=config.DotGeneral.make(None, 8)),
       dict(cfg=config.DotGeneral.make(8, None)),
       dict(
@@ -180,6 +186,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           rhs_shape=(5, 2, 4, 6, 3),  # non-contr: 4, 6, 3
           gra_shape=(4, 3, 6),
       ),
+      *[fqt_param_dict(s, use_fwd_quant=False) for s in range(10)],
+      *[fqt_param_dict(s, use_fwd_quant=True) for s in range(10)],
   ])
   def test_dot_general(
       self,
@@ -198,6 +206,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_shape=(20, 30),
       gra_shape=(10, 30),  # has to be the shape of the output
       seed=0,
+      dtype=jnp.float32,
   ):
     readonly_cfg = cfg
     del cfg
@@ -285,9 +294,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return cfg
 
     # test dot_general
-    lhs = rand_unif(lhs_shape, lhs_maxval, seed)
-    rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1)
-    gra = rand_unif(gra_shape, gra_maxval, seed + 2)
+    lhs = rand_unif(lhs_shape, lhs_maxval, seed, dtype)
+    rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
+    gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
 
     def aqt_dg_full(
         use_fake_quant,
@@ -350,12 +359,22 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       )
 
     # Test whether dtypes are correct in jaxpr
-    test_jaxpr(lambda: aqt_dg_full(False)(lhs, rhs), [modify_cfg().fwd])
     test_jaxpr(
-        lambda: jax.vjp(aqt_dg_full(False), lhs, rhs), [modify_cfg().fwd]
+        lambda: aqt_dg_full(False)(lhs, rhs),
+        [modify_cfg().fwd],
+        lhs.dtype,
+    )
+    test_jaxpr(
+        lambda: jax.vjp(aqt_dg_full(False), lhs, rhs),
+        [modify_cfg().fwd],
+        lhs.dtype,
     )
     _, backprop = jax.vjp(aqt_dg_full(False), lhs, rhs)
-    test_jaxpr(lambda: backprop(gra), [modify_cfg().dlhs, modify_cfg().drhs])
+    test_jaxpr(
+        lambda: backprop(gra),
+        [modify_cfg().dlhs, modify_cfg().drhs],
+        gra.dtype,
+    )
 
     # Test exact equalities.
     def check(dgs):
@@ -446,7 +465,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
-    test_jaxpr(lambda: dg(lhs, rhs), [cfg])
+    test_jaxpr(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
     assert cfg.lhs.dtype == jnp.int8
     assert cfg.rhs.dtype == jnp.int8
 
