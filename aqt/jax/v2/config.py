@@ -164,6 +164,7 @@ def fully_quantized(
     bwd_bits: int = 8,
     use_fwd_quant: bool = True,
     use_stochastic_rounding: bool = True,
+    # The dummy static bound flag is temporal, only for performance benchmarking
     use_dummy_static_bound: bool = False,
 ) -> DotGeneral:
   """Fully Quantized Training."""

@@ -69,7 +69,7 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     abs_max = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
   else:
     assert cfg.bound > 0, 'Static quantization bound should be positive.'
-    abs_max = jnp.asarray(cfg.bound)
+    abs_max = jnp.asarray(cfg.bound).reshape((1,) * len(x.shape))
   abs_max = jnp.where(abs_max == 0.0, 1.0, abs_max)
   if cfg.bound_stop_grad:
     # TODO(lew): Does not matter in DG, because we are using custom gradient.
@@ -462,6 +462,9 @@ def _dot_general_raw_attach_gradient(
         yv = y_res.qvalue
       else:
         gv = g
+        # TODO(lew, yichizh): think through a third option - using the clipped
+        # y_res.value in case the bound is not abs_max anymore.
+        # This will incur less error.
         yv = y_res.value
       out, _ = dot_general(gv, yv, dims, context)
 
