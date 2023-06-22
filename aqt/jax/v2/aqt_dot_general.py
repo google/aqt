@@ -176,7 +176,7 @@ def _scale_quant(x, *, cfg, ca, context):
   # TODO(lew): After we implement optimization to not double-quantize,
   #   what would happen if we pass fq value (xhs_q2) in residual?
   if cfg.use_fake_quant:
-    assert cfg.dtype == jnp.bfloat16
+    assert cfg.dtype != jnp.int8
 
   if isinstance(cfg.numerics, config.NoNumerics):
     return x, None, None
@@ -358,9 +358,13 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # These types match default TPU behavior. GPU would need some work.
     # Relevant: https://github.com/google/jax/issues/14022
+    assert lhs.dtype == rhs.dtype
     if cfg.lhs.dtype == jnp.int8 and cfg.rhs.dtype == jnp.int8:
       lax_dg_in_dtype = jnp.int8
-      lax_dg_out_dtype = jnp.int32
+      accumulator_type = jnp.int32
+      # TODO(lew): accumulator_type could be bf16 here for most dot products
+      #   but it needs to be confirmed by experiment.
+      #   I should put it back in the config.
       if cfg.lhs.clip_and_round is None and cfg.lhs.clip_and_round is None:
         msg = 'Need cfg.xhs.clip and cfg.xhs.round to use HW int8'
         assert cfg.lhs.round and cfg.lhs.clip, msg
@@ -368,16 +372,16 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       else:
         assert False, "For now, we don't allow HW int8 with clip_and_round"
     else:
-      lax_dg_in_dtype = jnp.bfloat16
-      lax_dg_out_dtype = jnp.float32
+      lax_dg_in_dtype = lhs.dtype
+      accumulator_type = lhs.dtype
 
     out = lax.dot_general(
         lhs_q2.astype(lax_dg_in_dtype),
         rhs_q2.astype(lax_dg_in_dtype),
         dimension_numbers=dimension_numbers,
-        preferred_element_type=lax_dg_out_dtype,
+        preferred_element_type=accumulator_type,
         precision=lax.Precision.DEFAULT,
-    )
+    ).astype(lhs.dtype)
 
     if not cfg.lhs.use_fake_quant:
       out = _maybe_mul(out, lhs_res.qvalue_scale)
@@ -492,11 +496,7 @@ def _dot_general_raw_attach_gradient(
         context2,
         drhs_use_fwd_quant,
     )
-    return (
-        dlhs.astype(res.lhs.value.dtype),
-        drhs.astype(res.rhs.value.dtype),
-        None,
-    )
+    return (dlhs, drhs, None)
 
   vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(2,))
   vjp.defvjp(make_fwd(True), vjp_bwd)
@@ -556,7 +556,7 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         dimension_numbers=dimension_numbers,
         context=context,
     )
-    return out.astype(lhs.dtype)
+    return out
 
   return ret_dg
 
