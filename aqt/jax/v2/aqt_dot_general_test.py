@@ -287,7 +287,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           assert c.rhs.clip_and_round is None
           # c.lhs.clip = False
           # c.rhs.clip = False
-          c.use_fwd_quant = use_fwd_quant
+          c.rhs.use_fwd_quant = use_fwd_quant
         disable_quant(cfg.fwd)
         disable_quant(cfg.dlhs)
         disable_quant(cfg.drhs)

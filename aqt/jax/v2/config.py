@@ -64,6 +64,9 @@ class Tensor:
   po2_scale: bool
   use_fake_quant: bool
   dtype: DType
+  # Controls at what value of input tensor should be used.
+  # No effect if there was no MultiTensor given.
+  use_fwd_quant: bool
 
   @classmethod
   def make(cls, bits: Optional[int]) -> 'Tensor':
@@ -97,6 +100,7 @@ class Tensor:
         po2_scale=False,
         use_fake_quant=False,
         dtype=dtype,
+        use_fwd_quant=False,
     )
 
 
@@ -106,10 +110,6 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
-  # use_fwd_quant is observed when this dot_general is used in gradient.
-  # use_fwd_quant is ignored in forward pass.
-  # Whether the gradient should be taken at unquantized wgt/act or quantized.
-  use_fwd_quant: bool
 
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRaw':
@@ -117,7 +117,6 @@ class DotGeneralRaw:
     return DotGeneralRaw(
         lhs=Tensor.make(lhs_bits),
         rhs=Tensor.make(rhs_bits),
-        use_fwd_quant=True,
     )
 
   @classmethod
@@ -173,9 +172,9 @@ def fully_quantized(
       dlhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
       drhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
   )
-  cfg.fwd.use_fwd_quant = use_fwd_quant
-  cfg.dlhs.use_fwd_quant = use_fwd_quant
-  cfg.drhs.use_fwd_quant = use_fwd_quant
+  # Only rhs is accepting MultiTensor
+  cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+  cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
 
   if use_stochastic_rounding:
 
