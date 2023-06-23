@@ -206,24 +206,6 @@ def _scale_quant(x, *, cfg, ca, context):
   return x_q, inv_scale, quant_grad
 
 
-def _residual(
-    *, x, x_q, inv_scale, quant_grad, side, dg_dims, lhs_shape, rhs_shape
-):
-  """Assembles TensorRes."""
-  assert side in ['lhs', 'rhs']
-  transpose_scale = (
-      _rhs_scale_transpose if side == 'rhs' else _lhs_scale_transpose
-  )
-  inv_scale_t = transpose_scale(inv_scale, dg_dims, lhs_shape, rhs_shape)
-  # quant_grad won't cause additional computations if it is STE.
-  return TensorRes(
-      value=x,
-      qvalue=x_q,
-      qvalue_scale=inv_scale_t,
-      quant_grad=quant_grad,
-  )
-
-
 def make_fake_quant(cfg: config.Tensor, ca=None):
   def fake_quant(x, context):
     x_q, inv_scale, _ = _scale_quant(x, cfg=cfg, ca=ca, context=context)
@@ -328,15 +310,14 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_q2 = (
         _maybe_mul(lhs_q, lhs_inv_scale) if cfg.lhs.use_fake_quant else lhs_q
     )
-    lhs_res = _residual(
-        x=lhs,
-        x_q=lhs_q,
-        inv_scale=lhs_inv_scale,
+    lhs_inv_scale_t = _lhs_scale_transpose(
+        lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+    )
+    lhs_res = TensorRes(
+        value=lhs,
+        qvalue=lhs_q,
+        qvalue_scale=lhs_inv_scale_t,
         quant_grad=lhs_quant_grad,
-        side='lhs',
-        dg_dims=dimension_numbers,
-        lhs_shape=lhs.shape,
-        rhs_shape=rhs.shape,
     )
 
     rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
@@ -345,15 +326,14 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     rhs_q2 = (
         _maybe_mul(rhs_q, rhs_inv_scale) if cfg.rhs.use_fake_quant else rhs_q
     )
-    rhs_res = _residual(
-        x=rhs,
-        x_q=rhs_q,
-        inv_scale=rhs_inv_scale,
+    rhs_inv_scale_t = _rhs_scale_transpose(
+        rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+    )
+    rhs_res = TensorRes(
+        value=rhs,
+        qvalue=rhs_q,
+        qvalue_scale=rhs_inv_scale_t,
         quant_grad=rhs_quant_grad,
-        side='rhs',
-        dg_dims=dimension_numbers,
-        lhs_shape=lhs.shape,
-        rhs_shape=rhs.shape,
     )
 
     # These types match default TPU behavior. GPU would need some work.
