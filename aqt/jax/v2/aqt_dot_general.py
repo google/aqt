@@ -215,11 +215,21 @@ def make_fake_quant(cfg: config.Tensor, ca=None):
 
 
 @flax.struct.dataclass
+class QTensor:
+  qvalue: jnp.ndarray
+  qvalue_scale_t: jnp.ndarray
+
+
+@flax.struct.dataclass
+class MultiTensor:
+  x: jnp.ndarray
+  qx: Optional[QTensor]
+
+
+@flax.struct.dataclass
 class TensorRes:
   """All the things we pass from the forward pass to the backward pass."""
-  value: jnp.ndarray
-  qvalue: jnp.ndarray
-  qvalue_scale: Union[jnp.ndarray, None]
+  mt: MultiTensor
   quant_grad: Union[Callable[[jnp.ndarray], tuple[jnp.ndarray]], None]
 
 
@@ -314,9 +324,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
     lhs_res = TensorRes(
-        value=lhs,
-        qvalue=lhs_q,
-        qvalue_scale=lhs_inv_scale_t,
+        mt=MultiTensor(
+            x=lhs, qx=QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
+        ),
         quant_grad=lhs_quant_grad,
     )
 
@@ -330,9 +340,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
     rhs_res = TensorRes(
-        value=rhs,
-        qvalue=rhs_q,
-        qvalue_scale=rhs_inv_scale_t,
+        mt=MultiTensor(
+            x=rhs, qx=QTensor(qvalue=rhs_q, qvalue_scale_t=rhs_inv_scale_t)
+        ),
         quant_grad=rhs_quant_grad,
     )
 
@@ -364,10 +374,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     ).astype(lhs.dtype)
 
     if not cfg.lhs.use_fake_quant:
-      out = _maybe_mul(out, lhs_res.qvalue_scale)
+      out = _maybe_mul(out, lhs_inv_scale_t)
 
     if not cfg.rhs.use_fake_quant:
-      out = _maybe_mul(out, rhs_res.qvalue_scale)
+      out = _maybe_mul(out, rhs_inv_scale_t)
 
     res = DotGeneralRes(
         context_bwd=context_bwd,
@@ -426,7 +436,7 @@ def _dot_general_raw_attach_gradient(
         context,
         use_fwd_quant,
     ):
-      y_ndim = y_res.value.ndim
+      y_ndim = y_res.mt.x.ndim
 
       (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
       if y_is_lhs:
@@ -442,14 +452,15 @@ def _dot_general_raw_attach_gradient(
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
       if use_fwd_quant:
-        gv = _maybe_mul(g, y_res.qvalue_scale)
-        yv = y_res.qvalue
+        assert y_res.mt.qx is not None
+        gv = _maybe_mul(g, y_res.mt.qx.qvalue_scale_t)
+        yv = y_res.mt.qx.qvalue
       else:
         gv = g
         # TODO(lew, yichizh): think through a third option - using the clipped
         # y_res.value in case the bound is not abs_max anymore.
         # This will incur less error.
-        yv = y_res.value
+        yv = y_res.mt.x
       out, _ = dot_general(gv, yv, dims, context)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))

@@ -339,7 +339,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
           def res(v):
             return aqt.TensorRes(
-                value=v, qvalue=v, qvalue_scale=None, quant_grad=None
+                mt=aqt.MultiTensor(
+                    x=v,
+                    qx=None,
+                ),
+                quant_grad=None,
             )
 
           res = aqt.DotGeneralRes(
