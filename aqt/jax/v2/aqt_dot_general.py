@@ -313,16 +313,23 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
     #  - Can we carry untransposed scale and transpose here?
     if isinstance(rhs, MultiTensor):
+      # We are in gradient code.
+      fwd_quantized = rhs.qx is not None
+      expect_fwd_quantized = cfg.rhs.use_fwd_quant is not None
+      msg = (
+          'Misconfiguration: use_fwd_quant=True, but there is no fwd'
+          ' quantization (but rhs.qx is None).'
+      )
+      assert fwd_quantized == expect_fwd_quantized, msg
       if cfg.rhs.use_fwd_quant:
-        msg = (
-            'Misconfiguration: use_fwd_quant=True, but there is no fwd'
-            ' quantization (but rhs.qx is None).'
-        )
         assert rhs.qx is not None, msg
         lhs = _maybe_mul(lhs, rhs.qx.qvalue_scale_t)
         rhs = rhs.qx.qvalue
       else:
         rhs = rhs.x
+    else:
+      assert cfg.rhs.use_fwd_quant is None, 'cannot set use_fwd_quant in fwd'
+
     assert isinstance(rhs, jnp.ndarray)
     (lhs_ca, rhs_ca), _ = dimension_numbers
 
@@ -339,16 +346,13 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_inv_scale_t = _lhs_scale_transpose(
         lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
-    lhs_res = TensorRes(
-        # TODO(lew): x=lhs should be clipped if we are using
-        #   tighter calibration than abs(max(...))
-        # TODO(lew): This is incompatible with pytype, the whole qx
-        #   should be None when lhs_inv_scale_t is None.
-        mt=MultiTensor(
-            x=lhs, qx=QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
-        ),
-        quant_grad=lhs_quant_grad,
+    lhs_qx = (
+        None
+        if lhs_inv_scale_t is None
+        else QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
     )
+    lhs_mt = MultiTensor(x=lhs, qx=lhs_qx)
+    lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
     rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
         rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
@@ -359,12 +363,15 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     rhs_inv_scale_t = _rhs_scale_transpose(
         rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
-    rhs_res = TensorRes(
-        mt=MultiTensor(
-            x=rhs, qx=QTensor(qvalue=rhs_q, qvalue_scale_t=rhs_inv_scale_t)
-        ),
-        quant_grad=rhs_quant_grad,
+    rhs_qx = (
+        None
+        if rhs_inv_scale_t is None
+        else QTensor(qvalue=rhs_q, qvalue_scale_t=rhs_inv_scale_t)
     )
+    rhs_mt = MultiTensor(x=rhs, qx=rhs_qx)
+    rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
+
+    # TODO(lew): mt.x above should be clipped for clipping calibrations
 
     # These types match default TPU behavior. GPU would need some work.
     # Relevant: https://github.com/google/jax/issues/14022

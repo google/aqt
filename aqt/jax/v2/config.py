@@ -66,7 +66,7 @@ class Tensor:
   dtype: DType
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
-  use_fwd_quant: bool
+  use_fwd_quant: Optional[bool]
 
   @classmethod
   def make(cls, bits: Optional[int]) -> 'Tensor':
@@ -100,7 +100,7 @@ class Tensor:
         po2_scale=False,
         use_fake_quant=False,
         dtype=dtype,
-        use_fwd_quant=False,
+        use_fwd_quant=None,
     )
 
 
@@ -148,13 +148,23 @@ class DotGeneral:
       cls,
       lhs_bits: Optional[int] = None,
       rhs_bits: Optional[int] = None,
+      bwd_bits: Optional[int] = None,
+      use_fwd_quant: bool = True,
   ) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
-    return cls(
+    cfg = cls(
         fwd=DotGeneralRaw.make(lhs_bits, rhs_bits),
-        dlhs=DotGeneralRaw.make(),
-        drhs=DotGeneralRaw.make(),
+        dlhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
+        drhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
     )
+
+    # Surprising: lhs quantization determines what drhs can do.
+    if lhs_bits is not None:
+      # Only rhs is accepting MultiTensor.
+      cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+    if rhs_bits is not None:
+      cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+    return cfg
 
 
 def fully_quantized(
@@ -163,21 +173,18 @@ def fully_quantized(
     bwd_bits: int = 8,
     use_fwd_quant: bool = True,
     use_stochastic_rounding: bool = True,
-    # The dummy static bound flag is temporal, only for performance benchmarking
+    # The dummy static bound flag is temporary, for performance benchmarking.
     use_dummy_static_bound: bool = False,
 ) -> DotGeneral:
   """Fully Quantized Training."""
-  cfg = DotGeneral(
-      fwd=DotGeneralRaw.make(fwd_bits, fwd_bits),
-      dlhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
-      drhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
+  cfg = DotGeneral.make(
+      lhs_bits=fwd_bits,
+      rhs_bits=fwd_bits,
+      bwd_bits=bwd_bits,
+      use_fwd_quant=use_fwd_quant,
   )
-  # Only rhs is accepting MultiTensor
-  cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
-  cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
 
   if use_stochastic_rounding:
-
     def noise_fn(shape, key):
       return jax.random.uniform(key, shape) - 0.5
 

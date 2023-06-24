@@ -25,8 +25,8 @@ import numpy as np
 import scipy.stats
 
 
-def test_jaxpr(f, cfgs: list[config.DotGeneralRaw], dtype):
-  """Tests whether dot_generals in f conform to cfgs."""
+def test_jaxpr_dtype(f, cfgs: list[config.DotGeneralRaw], float_dtype):
+  """Tests whether dot_generals in f conform to dtypes inside of cfgs."""
 
   def jaxpr_to_trityp(jaxpr):
     for eq in jaxpr.eqns:
@@ -49,8 +49,8 @@ def test_jaxpr(f, cfgs: list[config.DotGeneralRaw], dtype):
       in_dtype = jnp.int8
       out_dtype = jnp.int32
     else:
-      in_dtype = dtype
-      out_dtype = dtype
+      in_dtype = float_dtype
+      out_dtype = float_dtype
     assert lhs_sa.dtype == in_dtype
     assert rhs_sa.dtype == in_dtype
     assert out_sa.dtype == out_dtype
@@ -287,10 +287,15 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           assert c.rhs.clip_and_round is None
           # c.lhs.clip = False
           # c.rhs.clip = False
-          c.rhs.use_fwd_quant = use_fwd_quant
         disable_quant(cfg.fwd)
         disable_quant(cfg.dlhs)
         disable_quant(cfg.drhs)
+        lhs_quant = not isinstance(cfg.fwd.lhs.numerics, config.NoNumerics)
+        rhs_quant = not isinstance(cfg.fwd.rhs.numerics, config.NoNumerics)
+        if lhs_quant:
+          cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+        if rhs_quant:
+          cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
       return cfg
 
     # test dot_general
@@ -365,19 +370,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           lhs, rhs, dims, context=aqt.Context(key=None, train_step=None)
       )
 
-    # Test whether dtypes are correct in jaxpr
-    test_jaxpr(
+    test_jaxpr_dtype(
         lambda: aqt_dg_full(False)(lhs, rhs),
         [modify_cfg().fwd],
         lhs.dtype,
     )
-    test_jaxpr(
+    test_jaxpr_dtype(
         lambda: jax.vjp(aqt_dg_full(False), lhs, rhs),
         [modify_cfg().fwd],
         lhs.dtype,
     )
     _, backprop = jax.vjp(aqt_dg_full(False), lhs, rhs)
-    test_jaxpr(
+    test_jaxpr_dtype(
         lambda: backprop(gra),
         [modify_cfg().dlhs, modify_cfg().drhs],
         gra.dtype,
@@ -472,7 +476,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
-    test_jaxpr(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
+    test_jaxpr_dtype(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
     assert cfg.lhs.dtype == jnp.int8
     assert cfg.rhs.dtype == jnp.int8
 
