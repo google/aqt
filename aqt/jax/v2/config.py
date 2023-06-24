@@ -65,7 +65,7 @@ class Tensor:
   use_fake_quant: bool
   dtype: DType
   # Controls at what value of input tensor should be used.
-  # No effect if there was no MultiTensor given.
+  # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: bool
 
   @classmethod

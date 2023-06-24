@@ -334,6 +334,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             dimension_numbers,
             context,
         ):
+          if isinstance(rhs, aqt.MultiTensor):
+            rhs = rhs.x
+
           ret = jax.lax.dot_general(lhs, rhs, dimension_numbers)
           ret *= delta
 

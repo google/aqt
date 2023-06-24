@@ -301,13 +301,29 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
   def my_dot_general(
-      lhs,
-      rhs,
+      lhs: jnp.ndarray,
+      rhs: Union[jnp.ndarray, MultiTensor],
       dimension_numbers,
       context,
   ):
     """Creates a fake_quant function."""
-
+    # TODO(lew):
+    #  - Use qx.value with the int type.
+    #  - Handle qx.value with the int type in an optimized way.
+    #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
+    #  - Can we carry untransposed scale and transpose here?
+    if isinstance(rhs, MultiTensor):
+      if cfg.rhs.use_fwd_quant:
+        msg = (
+            'Misconfiguration: use_fwd_quant=True, but there is no fwd'
+            ' quantization (but rhs.qx is None).'
+        )
+        assert rhs.qx is not None, msg
+        lhs = _maybe_mul(lhs, rhs.qx.qvalue_scale_t)
+        rhs = rhs.qx.qvalue
+      else:
+        rhs = rhs.x
+    assert isinstance(rhs, jnp.ndarray)
     (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
@@ -324,6 +340,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
     lhs_res = TensorRes(
+        # TODO(lew): x=lhs should be clipped if we are using
+        #   tighter calibration than abs(max(...))
+        # TODO(lew): This is incompatible with pytype, the whole qx
+        #   should be None when lhs_inv_scale_t is None.
         mt=MultiTensor(
             x=lhs, qx=QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
         ),
@@ -393,8 +413,6 @@ def _dot_general_raw_attach_gradient(
     fwd_dot_general_raw,
     dlhs_dot_general_raw,
     drhs_dot_general_raw,
-    dlhs_use_fwd_quant=False,
-    drhs_use_fwd_quant=False,
 ):
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
@@ -434,7 +452,6 @@ def _dot_general_raw_attach_gradient(
         dot_general,
         y_is_lhs,
         context,
-        use_fwd_quant,
     ):
       y_ndim = y_res.mt.x.ndim
 
@@ -451,17 +468,7 @@ def _dot_general_raw_attach_gradient(
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
-      if use_fwd_quant:
-        assert y_res.mt.qx is not None
-        gv = _maybe_mul(g, y_res.mt.qx.qvalue_scale_t)
-        yv = y_res.mt.qx.qvalue
-      else:
-        gv = g
-        # TODO(lew, yichizh): think through a third option - using the clipped
-        # y_res.value in case the bound is not abs_max anymore.
-        # This will incur less error.
-        yv = y_res.mt.x
-      out, _ = dot_general(gv, yv, dims, context)
+      out, _ = dot_general(g, y_res.mt, dims, context)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
@@ -477,7 +484,6 @@ def _dot_general_raw_attach_gradient(
         dlhs_dot_general_raw,
         False,
         context1,
-        dlhs_use_fwd_quant,
     )
     drhs = grad_dot_general(
         res.lhs,
@@ -485,7 +491,6 @@ def _dot_general_raw_attach_gradient(
         drhs_dot_general_raw,
         True,
         context2,
-        drhs_use_fwd_quant,
     )
     return (dlhs, drhs, None)
 
@@ -517,8 +522,6 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
       fwd_dot_general_raw=_make_dot_general_raw(cfg.fwd),
       dlhs_dot_general_raw=_make_dot_general_raw(cfg.dlhs),
       drhs_dot_general_raw=_make_dot_general_raw(cfg.drhs),
-      dlhs_use_fwd_quant=cfg.dlhs.rhs.use_fwd_quant,
-      drhs_use_fwd_quant=cfg.drhs.rhs.use_fwd_quant,
   )
 
   def ret_dg(
