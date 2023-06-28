@@ -214,8 +214,8 @@ class DotGeneral:
 
 def fully_quantized(
     *,
-    fwd_bits: int = 8,
-    bwd_bits: int = 8,
+    fwd_bits: int | None = 8,
+    bwd_bits: int | None = 8,
     use_fwd_quant: bool = True,
     use_stochastic_rounding: bool = True,
     # The dummy static bound flag is temporary, for performance benchmarking.
