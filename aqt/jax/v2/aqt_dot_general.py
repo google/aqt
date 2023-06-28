@@ -70,7 +70,8 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   else:
     assert cfg.bound > 0, 'Static quantization bound should be positive.'
     abs_max = jnp.asarray(cfg.bound).reshape((1,) * len(x.shape))
-  abs_max = jnp.where(abs_max == 0.0, 1.0, abs_max)
+  # Attention: This line will change dtype of abs_max to float32
+  abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
   if cfg.bound_stop_grad:
     # TODO(lew): Does not matter in DG, because we are using custom gradient.
     #   We should take that into account somehow.
@@ -376,27 +377,15 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # These types match default TPU behavior. GPU would need some work.
     # Relevant: https://github.com/google/jax/issues/14022
     assert lhs.dtype == rhs.dtype
-    if cfg.lhs.dtype == jnp.int8 and cfg.rhs.dtype == jnp.int8:
-      lax_dg_in_dtype = jnp.int8
-      accumulator_type = jnp.int32
-      # TODO(lew): accumulator_type could be bf16 here for most dot products
-      #   but it needs to be confirmed by experiment.
-      #   I should put it back in the config.
-      if cfg.lhs.clip_and_round is None and cfg.lhs.clip_and_round is None:
-        msg = 'Need cfg.xhs.clip and cfg.xhs.round to use HW int8'
-        assert cfg.lhs.round and cfg.lhs.clip, msg
-        assert cfg.rhs.round and cfg.rhs.clip, msg
-      else:
-        assert False, "For now, we don't allow HW int8 with clip_and_round"
-    else:
-      lax_dg_in_dtype = lhs.dtype
-      accumulator_type = lhs.dtype
+    if cfg.dg_in_dtype is not None:
+      lhs_q2 = lhs_q2.astype(cfg.dg_in_dtype)
+      rhs_q2 = rhs_q2.astype(cfg.dg_in_dtype)
 
     out = lax.dot_general(
-        lhs_q2.astype(lax_dg_in_dtype),
-        rhs_q2.astype(lax_dg_in_dtype),
+        lhs_q2,
+        rhs_q2,
         dimension_numbers=dimension_numbers,
-        preferred_element_type=accumulator_type,
+        preferred_element_type=cfg.dg_accumulator_dtype,
         precision=lax.Precision.DEFAULT,
     ).astype(lhs.dtype)
 

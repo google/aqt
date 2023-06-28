@@ -110,13 +110,38 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
+  dg_in_dtype: DType
+  dg_accumulator_dtype: DType
 
   @classmethod
   def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
+    lhs_cfg = Tensor.make(lhs_bits)
+    rhs_cfg = Tensor.make(rhs_bits)
+
+    if lhs_cfg.dtype == jnp.int8 and rhs_cfg.dtype == jnp.int8:
+      dg_in_dtype = jnp.int8
+      dg_accumulator_dtype = jnp.int32
+      # TODO(lew): dg_accumulator_dtype could be bf16 here for most dot products
+      #   but it needs to be confirmed by experiment.
+      if lhs_cfg.clip_and_round is None and rhs_cfg.clip_and_round is None:
+        msg = 'Need xhs.clip and xhs.round to use HW int8'
+        assert lhs_cfg.round and lhs_cfg.clip, msg
+        assert rhs_cfg.round and rhs_cfg.clip, msg
+      else:
+        # TODO(lew): This will never fail. This test is too early.
+        # It should be config validation already in dot_general call.
+        assert False, "For now, we don't allow HW int8 with clip_and_round"
+    else:
+      # Use None to determine the dtype on the fly in aqt_dot_general
+      dg_in_dtype = None
+      dg_accumulator_dtype = None
+
     return DotGeneralRaw(
-        lhs=Tensor.make(lhs_bits),
-        rhs=Tensor.make(rhs_bits),
+        lhs=lhs_cfg,
+        rhs=rhs_cfg,
+        dg_in_dtype=dg_in_dtype,
+        dg_accumulator_dtype=dg_accumulator_dtype,
     )
 
   @classmethod

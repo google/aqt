@@ -269,6 +269,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       def disable_quant_types(c):
         c.lhs.dtype = jnp.bfloat16
         c.rhs.dtype = jnp.bfloat16
+        c.dg_in_dtype = None
+        c.dg_accumulator_dtype = None
 
       if use_fake_quant:
         disable_quant_types(cfg.fwd)
