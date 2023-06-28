@@ -114,7 +114,12 @@ class DotGeneralRaw:
   dg_accumulator_dtype: DType
 
   @classmethod
-  def make(cls, lhs_bits=None, rhs_bits=None) -> 'DotGeneralRaw':
+  def make(
+      cls,
+      lhs_bits=None,
+      rhs_bits=None,
+      save_accumulator_memory: bool = False,
+  ) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
     lhs_cfg = Tensor.make(lhs_bits)
     rhs_cfg = Tensor.make(rhs_bits)
@@ -122,8 +127,9 @@ class DotGeneralRaw:
     if lhs_cfg.dtype == jnp.int8 and rhs_cfg.dtype == jnp.int8:
       dg_in_dtype = jnp.int8
       dg_accumulator_dtype = jnp.int32
-      # TODO(lew): dg_accumulator_dtype could be bf16 here for most dot products
-      #   but it needs to be confirmed by experiment.
+      if save_accumulator_memory:
+        dg_accumulator_dtype = jnp.bfloat16
+
       if lhs_cfg.clip_and_round is None and rhs_cfg.clip_and_round is None:
         msg = 'Need xhs.clip and xhs.round to use HW int8'
         assert lhs_cfg.round and lhs_cfg.clip, msg
@@ -175,12 +181,26 @@ class DotGeneral:
       rhs_bits: Optional[int] = None,
       bwd_bits: Optional[int] = None,
       use_fwd_quant: bool = True,
+      fwd_save_accumulator_memory: bool = False,
+      bwd_save_accumulator_memory: bool = False,
   ) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
     cfg = cls(
-        fwd=DotGeneralRaw.make(lhs_bits, rhs_bits),
-        dlhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
-        drhs=DotGeneralRaw.make(bwd_bits, bwd_bits),
+        fwd=DotGeneralRaw.make(
+            lhs_bits,
+            rhs_bits,
+            save_accumulator_memory=fwd_save_accumulator_memory,
+        ),
+        dlhs=DotGeneralRaw.make(
+            bwd_bits,
+            bwd_bits,
+            save_accumulator_memory=bwd_save_accumulator_memory,
+        ),
+        drhs=DotGeneralRaw.make(
+            bwd_bits,
+            bwd_bits,
+            save_accumulator_memory=bwd_save_accumulator_memory,
+        ),
     )
 
     # Surprising: lhs quantization determines what drhs can do.
@@ -200,6 +220,8 @@ def fully_quantized(
     use_stochastic_rounding: bool = True,
     # The dummy static bound flag is temporary, for performance benchmarking.
     use_dummy_static_bound: bool = False,
+    fwd_save_accumulator_memory: bool = False,
+    bwd_save_accumulator_memory: bool = False,
 ) -> DotGeneral:
   """Fully Quantized Training."""
   cfg = DotGeneral.make(
@@ -207,6 +229,8 @@ def fully_quantized(
       rhs_bits=fwd_bits,
       bwd_bits=bwd_bits,
       use_fwd_quant=use_fwd_quant,
+      fwd_save_accumulator_memory=fwd_save_accumulator_memory,
+      bwd_save_accumulator_memory=bwd_save_accumulator_memory,
   )
 
   if use_stochastic_rounding:

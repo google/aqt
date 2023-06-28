@@ -122,7 +122,7 @@ def _make_int_quant(cfg: config.Tensor):
           'noise_fn is set, requestic stochastic rounding, but key key was not'
           ' passed.'
       )
-      x = x + cfg.noise_fn(x.shape, context.key)
+      x = (x + cfg.noise_fn(x.shape, context.key)).astype(x.dtype)
 
     # Maybe clip
     if cfg.clip:
