@@ -79,9 +79,10 @@ GetVariable = Callable[[str, Iterable[int], tf.dtypes.DType, Any], tf.Variable]
 def default_get_variable(name: str, shape: Iterable[int],
                          dtype: tf.dtypes.DType, init: Any) -> tf.Variable:
   """Creates a non-trainable resource variable with tf.get_variable."""
-  initializer = lambda: tf.constant(init, shape=shape, dtype=dtype)
+  initializer = lambda shape, dtype: tf.constant(init, shape=shape, dtype=dtype)
   return tf.get_variable(
-      name,
+      name=name,
+      shape=shape,
       dtype=dtype,
       trainable=False,
       initializer=initializer,
