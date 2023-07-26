@@ -203,7 +203,9 @@ def _scale_quant(x, *, cfg, ca, context):
   #
   # TODO(lew): Implement configuration of stop-gradient.
   inv_scale = _maybe_inv(scale)
-
+  # The int8 casting is not pushed into _make_int_quant because it will affect
+  # the quant_grad cotangent dtype
+  x_q = x_q.astype(cfg.dtype) if cfg.dtype == jnp.int8 else x_q
   return x_q, inv_scale, quant_grad
 
 
@@ -325,7 +327,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       if cfg.rhs.use_fwd_quant:
         assert rhs.qx is not None, msg
         lhs = _maybe_mul(lhs, rhs.qx.qvalue_scale_t)
-        rhs = rhs.qx.qvalue
+        # rhs.qx.qvalue is now int8 if casting earlier in _scale_quant()
+        # However, there is an assertion on lhs.dtype == rhs.dtype before matmul
+        # TODO(yichi): Do we need that assertion anymore?
+        rhs = rhs.qx.qvalue.astype(lhs.dtype)
       else:
         rhs = rhs.x
     else:
@@ -376,10 +381,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # These types match default TPU behavior. GPU would need some work.
     # Relevant: https://github.com/google/jax/issues/14022
-    assert lhs.dtype == rhs.dtype
-    if cfg.dg_in_dtype is not None:
-      lhs_q2 = lhs_q2.astype(cfg.dg_in_dtype)
-      rhs_q2 = rhs_q2.astype(cfg.dg_in_dtype)
+    assert lhs.dtype == rhs.dtype  # This assertion may be obsolete
 
     out = lax.dot_general(
         lhs_q2,

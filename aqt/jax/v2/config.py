@@ -142,6 +142,9 @@ class DotGeneralRaw:
       # Use None to determine the dtype on the fly in aqt_dot_general
       dg_in_dtype = None
       dg_accumulator_dtype = None
+      # Reconfig lhs and rhs tensor to prevent unequal dtype
+      lhs_cfg.dtype = jnp.bfloat16
+      rhs_cfg.dtype = jnp.bfloat16
 
     return DotGeneralRaw(
         lhs=lhs_cfg,
