@@ -341,9 +341,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
         lhs, cfg=cfg.lhs, ca=lhs_ca, context=context_lhs
     )
-    lhs_q2 = (
-        _maybe_mul(lhs_q, lhs_inv_scale) if cfg.lhs.use_fake_quant else lhs_q
-    )
     lhs_inv_scale_t = _lhs_scale_transpose(
         lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
@@ -357,9 +354,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
         rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
-    )
-    rhs_q2 = (
-        _maybe_mul(rhs_q, rhs_inv_scale) if cfg.rhs.use_fake_quant else rhs_q
     )
     rhs_inv_scale_t = _rhs_scale_transpose(
         rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
@@ -376,23 +370,38 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # These types match default TPU behavior. GPU would need some work.
     # Relevant: https://github.com/google/jax/issues/14022
+    # We need this assertion, because we are using lhs.dtype as out dtype.
     assert lhs.dtype == rhs.dtype
-    if cfg.dg_in_dtype is not None:
-      lhs_q2 = lhs_q2.astype(cfg.dg_in_dtype)
-      rhs_q2 = rhs_q2.astype(cfg.dg_in_dtype)
 
-    out = lax.dot_general(
-        lhs_q2,
-        rhs_q2,
-        dimension_numbers=dimension_numbers,
-        preferred_element_type=cfg.dg_accumulator_dtype,
-        precision=lax.Precision.DEFAULT,
-    ).astype(lhs.dtype)
+    if cfg.lhs.use_fake_quant:
+      msg = "Can't set dg_in_dtype in fake_quant mode."
+      assert cfg.dg_in_dtype is None, msg
 
-    if not cfg.lhs.use_fake_quant:
+      lhs_q = _maybe_mul(lhs_q, lhs_inv_scale)
+      rhs_q = _maybe_mul(rhs_q, rhs_inv_scale)
+
+      out = lax.dot_general(
+          lhs_q,
+          rhs_q,
+          dimension_numbers=dimension_numbers,
+          preferred_element_type=cfg.dg_accumulator_dtype,
+          precision=lax.Precision.DEFAULT,
+      ).astype(lhs.dtype)
+
+    else:
+      if cfg.dg_in_dtype is not None:
+        lhs_q = lhs_q.astype(cfg.dg_in_dtype)
+        rhs_q = rhs_q.astype(cfg.dg_in_dtype)
+
+      out = lax.dot_general(
+          lhs_q,
+          rhs_q,
+          dimension_numbers=dimension_numbers,
+          preferred_element_type=cfg.dg_accumulator_dtype,
+          precision=lax.Precision.DEFAULT,
+      ).astype(lhs.dtype)
+
       out = _maybe_mul(out, lhs_inv_scale_t)
-
-    if not cfg.rhs.use_fake_quant:
       out = _maybe_mul(out, rhs_inv_scale_t)
 
     res = DotGeneralRes(
