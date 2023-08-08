@@ -109,6 +109,9 @@ class Stats:
     for axis in self._config.share_stats_axes:
       self.stats_shape[axis] = 1
 
+    self.divide = (tf.math.divide_no_nan if self._config.safe_divide
+                   else tf.math.divide)
+
     def mk_var(name, init_val):
       return get_variable(name, self.stats_shape, tf.float32, init_val)
 
@@ -174,21 +177,24 @@ class Stats:
     ])
 
   def mean(self) -> tf.Tensor:
-    return self._sum_of_vals.read_value() / self._sum_of_ones.read_value()
+    return self.divide(self._sum_of_vals.read_value(),
+                       self._sum_of_ones.read_value())
 
   def l1_dev(self) -> tf.Tensor:
-    return self._sum_of_l1_vals.read_value() / self._sum_of_ones.read_value()
+    return self.divide(self._sum_of_l1_vals.read_value(),
+                       self._sum_of_ones.read_value())
 
   def lp_dev(self) -> tf.Tensor:
     if self._config.lp_order == 2:
       # sqrt() is numerically more accurate
-      return tf.sqrt(self._sum_of_lp_vals.read_value() /
-                     self._sum_of_ones.read_value())
+      return tf.sqrt(self.divide(self._sum_of_lp_vals.read_value(),
+                                 self._sum_of_ones.read_value()))
     else:
       # TODO(b/205769820): Make sure if the output of pow op below is
       # numerically valid
-      return (self._sum_of_lp_vals.read_value() /
-              self._sum_of_ones.read_value())**(1.0 / self._config.lp_order)
+      return self.divide(self._sum_of_lp_vals.read_value(),
+                         self._sum_of_ones.read_value()
+                         )**(1.0 / self._config.lp_order)
 
   def max_dev(self) -> tf.Tensor:
     return self._max_of_abs_vals

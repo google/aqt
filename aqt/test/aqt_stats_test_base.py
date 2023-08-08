@@ -182,6 +182,33 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
       self.assertAllEqual(
           self.bound(calibration_config), f32([[10 + 3 * 1 + 4 * 1 + 100 * 1]]))
 
+  @parameterized.named_parameters(
+      dict(inp=[[0, 0, 0, 0, 0]], w=[[42]], mean=0, l1=0, lp=0, mx=0, bd=10,
+           testcase_name="zero_inputs"),
+      dict(inp=[[1, 1, 1, -1, 0]], w=[[0]], mean=0, l1=0, lp=0, mx=0, bd=10,
+           testcase_name="zero_weights"),
+      dict(inp=[[1, 1, 1, -1, 0]], w=[[2]], mean=.5, l1=1, lp=1, mx=1, bd=117,
+           testcase_name="non_zeros"),
+      )
+  def test_filter_zeros_and_safe_divide(self, inp, w, mean, l1, lp, mx, bd):
+    """Makes sure that zero filter does not break statistics calculation."""
+    config = aqt_test_shared_base.test_stats_config()
+    config.filter_zeros = True
+    config.safe_divide = True
+    calibration_config = aqt_config.CalibrationConfig(
+        const_bound_coeff=10, l1_dev_coeff=3, lp_dev_coeff=4, max_dev_coeff=100)
+
+    with self.cached_session():
+      self.set_stats([1, 5], config)
+      self.update(inp, w)
+      self.check_mean([[mean]])
+      self.check_l1_dev([[l1]])
+      self.check_lp_dev([[lp]])
+      self.check_max_dev([[mx]])
+      # bound
+      self.assertAllEqual(
+          self.bound(calibration_config), f32([[bd]]))
+
   def test_p_norm(self):
     config = aqt_test_shared_base.test_stats_config()
     config.lp_order = 20  # close to max norm

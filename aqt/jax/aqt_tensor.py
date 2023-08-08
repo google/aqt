@@ -55,6 +55,11 @@ class Stats(nn.Module):
       stats_shape[axis] = 1
     self.stats_shape = stats_shape
 
+    def divide_no_nan(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+      res = jnp.where(y != 0, x / y, jnp.zeros_like(x))
+      return res
+    self.divide = divide_no_nan if self.config.safe_divide else jnp.divide
+
     def init_var(init_val: float) -> jnp.ndarray:
       return jnp.full(self.stats_shape, init_val, dtype=jnp.float32)
 
@@ -142,23 +147,24 @@ class Stats(nn.Module):
     update_var(self.sum_of_lp_vals, px**self.config.lp_order)
 
   def mean(self) -> jnp.ndarray:
-    return self.sum_of_vals.value / self.sum_of_ones.value
+    return self.divide(self.sum_of_vals.value, self.sum_of_ones.value)
 
   def max_dev(self) -> jnp.ndarray:
     return self.max_of_abs_vals.value
 
   def l1_dev(self) -> jnp.ndarray:
-    return self.sum_of_l1_vals.value / self.sum_of_ones.value
+    return self.divide(self.sum_of_l1_vals.value, self.sum_of_ones.value)
 
   def lp_dev(self) -> jnp.ndarray:
     if self.config.lp_order == 2:
       # sqrt() is numerically more accurate
-      return jnp.sqrt(self.sum_of_lp_vals.value / self.sum_of_ones.value)
+      return jnp.sqrt(self.divide(self.sum_of_lp_vals.value,
+                                  self.sum_of_ones.value))
     else:
       # TODO(b/205769820): Make sure if the output of pow op below is
       # numerically valid.
-      return (self.sum_of_lp_vals.value /
-              self.sum_of_ones.value)**(1.0 / self.config.lp_order)
+      return self.divide(self.sum_of_lp_vals.value,
+                         self.sum_of_ones.value)**(1.0 / self.config.lp_order)
 
   def bound(  #
       self, calibration_config: aqt_config.CalibrationConfig) -> jnp.ndarray:

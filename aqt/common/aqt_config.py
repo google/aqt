@@ -123,6 +123,12 @@ class StatsConfig(_BaseConfig):
     tpu_cross_replica_sum:
       Setting it to false might improve performance, but note that checkpoint
       might contain wrong value.
+
+    safe_divide:
+      When any components in the input tensor are zeros along the shared stats
+      axes (or all weights are zeros) and filter_zeros is True and
+      ema_update_count is 1 with no moving average, the sum_of_ones will have a
+      zero component. In such case, use divide_no_nan when updating stats.
   """
   # pyformat: enable
   ema_update_count: int
@@ -137,6 +143,8 @@ class StatsConfig(_BaseConfig):
   max_dev_prior: float = 0.0
 
   tpu_cross_replica_sum: bool = True
+
+  safe_divide: bool = False
 
   def validate(self, data_shape: List[Optional[int]]):  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
     """Validates this StatsConfig for the provided data shape.
@@ -174,6 +182,11 @@ class StatsConfig(_BaseConfig):
 
     if self.lp_order < 1:
       raise ConfigError(f'expected lp_order={self.lp_order} >= 1')
+
+    if self.safe_divide and not self.filter_zeros:
+      raise ConfigError(f'expected safe_divide={self.safe_divide} is False, '
+                        'no need to use safe_divide since sum_of_ones is '
+                        'non-zero when filter_zeros is False')
 
 
 @dataclasses.dataclass
