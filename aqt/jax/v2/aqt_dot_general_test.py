@@ -45,12 +45,9 @@ def test_jaxpr_dtype(f, cfgs: list[config.DotGeneralRaw], float_dtype):
   trityps = [trityp for trityp in jaxpr_to_trityp(f_jaxpr)]
   assert len(trityps) == len(cfgs)
   for (lhs_sa, rhs_sa, out_sa), cfg in zip(trityps, cfgs):
-    if cfg.lhs.dtype == jnp.int8 and cfg.rhs.dtype == jnp.int8:
-      in_dtype = jnp.int8
-      out_dtype = jnp.int32
-    else:
-      in_dtype = float_dtype
-      out_dtype = float_dtype
+    # If cfg has None, the type is inherited from the arguments' type.
+    in_dtype = cfg.dg_in_dtype or float_dtype
+    out_dtype = cfg.dg_accumulator_dtype or float_dtype
     assert lhs_sa.dtype == in_dtype
     assert rhs_sa.dtype == in_dtype
     assert out_sa.dtype == out_dtype
@@ -241,8 +238,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
         cfg.fwd.lhs.clip_and_round = tricky_clip_and_round()
         # Needed because int8 casting would do additional clip and round.
-        cfg.fwd.lhs.dtype = jnp.bfloat16
-        cfg.fwd.rhs.dtype = jnp.bfloat16
+        cfg.fwd.dg_in_dtype = None
 
       # Setting po2_scale is ensuring that fake_quant and full dot_general
       # have the same numerics when scales are power of two (po2).
@@ -267,8 +263,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg.drhs.rhs.use_fake_quant = use_fake_quant
 
       def disable_quant_types(c):
-        c.lhs.dtype = jnp.bfloat16
-        c.rhs.dtype = jnp.bfloat16
         c.dg_in_dtype = None
         c.dg_accumulator_dtype = None
 
@@ -479,8 +473,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
     test_jaxpr_dtype(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
-    assert cfg.lhs.dtype == jnp.int8
-    assert cfg.rhs.dtype == jnp.int8
+    assert cfg.dg_in_dtype == jnp.int8
 
   @parameterized.parameters([
       (1, 1),

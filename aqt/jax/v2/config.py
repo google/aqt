@@ -63,7 +63,6 @@ class Tensor:
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
   use_fake_quant: bool
-  dtype: DType
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
@@ -76,15 +75,6 @@ class Tensor:
     else:
       pz = False if bits == 1 else True
       numerics = IntNumerics(bits=bits, preserve_zero=pz)
-
-    if (
-        bits is not None
-        and bits <= 8
-        and bits != 1  # we currently round to -0.5 and 0.5 for 1 bit (pz)
-    ):
-      dtype = jnp.int8
-    else:
-      dtype = jnp.bfloat16
 
     return Tensor(
         numerics=numerics,
@@ -99,7 +89,7 @@ class Tensor:
         noise_fn=None,
         po2_scale=False,
         use_fake_quant=False,
-        dtype=dtype,
+        # dtype_x=dtype,
         use_fwd_quant=None,
     )
 
@@ -110,25 +100,28 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
-  dg_in_dtype: DType
-  dg_accumulator_dtype: DType
+  dg_in_dtype: Optional[DType]
+  dg_accumulator_dtype: Optional[DType]
 
   @classmethod
   def make(
       cls,
       lhs_bits=None,
       rhs_bits=None,
-      save_accumulator_memory: bool = False,
   ) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
     lhs_cfg = Tensor.make(lhs_bits)
     rhs_cfg = Tensor.make(rhs_bits)
 
-    if lhs_cfg.dtype == jnp.int8 and rhs_cfg.dtype == jnp.int8:
+    # Binary uses 0.5 right now.
+    if (
+        lhs_bits is not None
+        and rhs_bits is not None
+        and 2 <= lhs_bits <= 8
+        and 2 <= rhs_bits <= 8
+    ):
       dg_in_dtype = jnp.int8
       dg_accumulator_dtype = jnp.int32
-      if save_accumulator_memory:
-        dg_accumulator_dtype = jnp.bfloat16
 
       if lhs_cfg.clip_and_round is None and rhs_cfg.clip_and_round is None:
         msg = 'Need xhs.clip and xhs.round to use HW int8'
@@ -182,27 +175,12 @@ class DotGeneral:
       rhs_bits: Optional[int] = None,
       bwd_bits: Optional[int] = None,
       use_fwd_quant: bool = True,
-      fwd_save_accumulator_memory: bool = False,
-      bwd_save_accumulator_memory: bool = False,
   ) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
-    cfg = cls(
-        fwd=DotGeneralRaw.make(
-            lhs_bits,
-            rhs_bits,
-            save_accumulator_memory=fwd_save_accumulator_memory,
-        ),
-        dlhs=DotGeneralRaw.make(
-            bwd_bits,
-            bwd_bits,
-            save_accumulator_memory=bwd_save_accumulator_memory,
-        ),
-        drhs=DotGeneralRaw.make(
-            bwd_bits,
-            bwd_bits,
-            save_accumulator_memory=bwd_save_accumulator_memory,
-        ),
-    )
+    fwd = DotGeneralRaw.make(lhs_bits, rhs_bits)
+    dlhs = DotGeneralRaw.make(bwd_bits, bwd_bits)
+    drhs = DotGeneralRaw.make(bwd_bits, bwd_bits)
+    cfg = cls(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
     # Surprising: lhs quantization determines what drhs can do.
     if lhs_bits is not None:
@@ -226,8 +204,6 @@ def fully_quantized(
     vjp_rhs_stochastic_rounding: Optional[bool] = None,
     # The dummy static bound flag is temporary, for performance benchmarking.
     use_dummy_static_bound: bool = False,
-    fwd_save_accumulator_memory: bool = False,
-    bwd_save_accumulator_memory: bool = False,
 ) -> DotGeneral:
   """Fully Quantized Training."""
   cfg = DotGeneral.make(
@@ -235,8 +211,6 @@ def fully_quantized(
       rhs_bits=fwd_bits,
       bwd_bits=bwd_bits,
       use_fwd_quant=use_fwd_quant,
-      fwd_save_accumulator_memory=fwd_save_accumulator_memory,
-      bwd_save_accumulator_memory=bwd_save_accumulator_memory,
   )
 
   # Stochastic Rounding
@@ -279,3 +253,13 @@ def fully_quantized(
     cfg.dlhs.rhs.bound = 1.0
 
   return cfg
+
+
+def set_fwd_accumulator_dtype(
+    cfg: DotGeneral,
+    fwd_dtype: Optional[DType],
+    bwd_dtype: Optional[DType],
+):
+  cfg.fwd.dg_accumulator_dtype = fwd_dtype
+  cfg.dlhs.dg_accumulator_dtype = bwd_dtype
+  cfg.drhs.dg_accumulator_dtype = bwd_dtype
