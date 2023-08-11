@@ -15,6 +15,8 @@
 
 import dataclasses
 from typing import Any, Callable, Optional, Union
+
+from aqt.jax.v2.stochastic_rounding import random_centered_uniform
 import jax
 import jax.numpy as jnp
 
@@ -225,37 +227,25 @@ def fully_quantized(
   )
   assert new_style_sr_config_lhs != old_style_sr_config
 
-  def noise_fn(shape, key):
-    return jax.random.uniform(key, shape) - 0.5
-
   true = True  # A crude way to get around g-explicit-bool-comparison warning
 
+  # By default use jax.uniform for stochastic rounding
   if use_stochastic_rounding == true:
-    cfg.dlhs.lhs.noise_fn = noise_fn
-    cfg.dlhs.rhs.noise_fn = noise_fn
-    cfg.drhs.lhs.noise_fn = noise_fn
-    cfg.drhs.rhs.noise_fn = noise_fn
+    set_stochastic_rounding(cfg, True, True, 'jax.uniform')
 
   if vjp_lhs_stochastic_rounding == true:
-    cfg.dlhs.lhs.noise_fn = noise_fn
-    cfg.drhs.lhs.noise_fn = noise_fn
+    set_stochastic_rounding(cfg, True, False, 'jax.uniform')
 
   if vjp_rhs_stochastic_rounding == true:
-    cfg.dlhs.rhs.noise_fn = noise_fn
-    cfg.drhs.rhs.noise_fn = noise_fn
+    set_stochastic_rounding(cfg, False, True, 'jax.uniform')
 
   if use_dummy_static_bound:
-    cfg.fwd.lhs.bound = 1.0
-    cfg.fwd.rhs.bound = 1.0
-    cfg.drhs.lhs.bound = 1.0
-    cfg.drhs.rhs.bound = 1.0
-    cfg.dlhs.lhs.bound = 1.0
-    cfg.dlhs.rhs.bound = 1.0
+    set_static_bound(cfg, 1.0)
 
   return cfg
 
 
-def set_fwd_accumulator_dtype(
+def set_accumulator_dtype(
     cfg: DotGeneral,
     fwd_dtype: Optional[DType],
     bwd_dtype: Optional[DType],
@@ -263,3 +253,45 @@ def set_fwd_accumulator_dtype(
   cfg.fwd.dg_accumulator_dtype = fwd_dtype
   cfg.dlhs.dg_accumulator_dtype = bwd_dtype
   cfg.drhs.dg_accumulator_dtype = bwd_dtype
+
+
+def set_stochastic_rounding(
+    cfg: DotGeneral,
+    # Typically we have (but it's a caller's responsibility to check):
+    # - vjp_lhs_stochastic_rounding is referring to the gradient and
+    # - vjp_rhs_stochastic_rounding is referring to the activations/weights.
+    vjp_lhs_stochastic_rounding: bool,
+    vjp_rhs_stochastic_rounding: bool,
+    implementation: str,
+):
+  """Configure stochastic rounding implementation."""
+  noise_implementations = {
+      'jax.uniform': lambda shape, key: jax.random.uniform(key, shape) - 0.5,
+      'custom-1': random_centered_uniform,
+  }
+  msg = f'{implementation} not supported.'
+  assert implementation in noise_implementations.keys(), msg
+  noise_fn = noise_implementations[implementation]
+
+  if vjp_lhs_stochastic_rounding:
+    cfg.dlhs.lhs.noise_fn = noise_fn
+    cfg.drhs.lhs.noise_fn = noise_fn
+  else:
+    cfg.dlhs.lhs.noise_fn = None
+    cfg.drhs.lhs.noise_fn = None
+
+  if vjp_rhs_stochastic_rounding:
+    cfg.dlhs.rhs.noise_fn = noise_fn
+    cfg.drhs.rhs.noise_fn = noise_fn
+  else:
+    cfg.dlhs.rhs.noise_fn = None
+    cfg.drhs.rhs.noise_fn = None
+
+
+def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
+  cfg.fwd.lhs.bound = bound
+  cfg.fwd.rhs.bound = bound
+  cfg.drhs.lhs.bound = bound
+  cfg.drhs.rhs.bound = bound
+  cfg.dlhs.lhs.bound = bound
+  cfg.dlhs.rhs.bound = bound
