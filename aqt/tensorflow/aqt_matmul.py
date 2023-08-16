@@ -38,38 +38,6 @@ import tensorflow.compat.v1 as tf
 MatmulFn = Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
-def _possibly_use_quantized_variable(
-    quantizer: aqt_tensor.TensorQuantizer,  #
-    x: tf.Tensor,
-    train: bool) -> tf.Tensor:
-  """Returns quantized variable if not training and TQ.use_quantized_variable, casted to x.dtype.
-
-  Given an input tensor and its tensor quantizer, here we enforce to use the
-  quantized variable stored in the tensor quantizer as long as
-  TQ.use_quantized_variable is true and it is in inference, no matter if
-  FloatConfig is specified or not.
-
-  The semantics of FloatConfig which is meant not to use quantized variables
-  during inference should be respected by requiring users to specify
-  TensorQuantizer.use_quantized_variable=False. See more details at
-  b/219040448.
-
-  Args:
-    quantizer: TensorQuantizer for the input tensor x.
-    x: lhs or rhs of matmul.
-    train: Indicates if in training or not.
-
-  Returns:
-    The input tensor x or its quantized one.
-  """
-  if quantizer.config.use_quantized_variable and not train:
-    qx = quantizer.quantized_variable
-    if qx.dtype != x.dtype:
-      qx = tf.cast(qx, x.dtype)
-    return qx
-  return x
-
-
 def default_matmul(
     lhs_quantizer: aqt_tensor.TensorQuantizer,  #
     rhs_quantizer: aqt_tensor.TensorQuantizer,
@@ -80,8 +48,8 @@ def default_matmul(
     transpose_b: bool = False,
 ) -> tf.Tensor:
   """Perform tf.matmul with input tensors of float32 type."""
-  lhs = _possibly_use_quantized_variable(lhs_quantizer, lhs, train)
-  rhs = _possibly_use_quantized_variable(rhs_quantizer, rhs, train)
+  lhs = aqt_ops_util._possibly_use_quantized_variable(lhs_quantizer, lhs, train)
+  rhs = aqt_ops_util._possibly_use_quantized_variable(rhs_quantizer, rhs, train)
 
   return tf.matmul(lhs, rhs, transpose_a=transpose_a, transpose_b=transpose_b)
 
@@ -146,15 +114,20 @@ def int8_matmul(
     int_lhs = tf.cast(arg_lhs, tf.int8)
     int_rhs = tf.cast(arg_rhs, tf.int8)
 
-    int_lhs = _possibly_use_quantized_variable(lhs_quantizer, int_lhs, train)
-    int_rhs = _possibly_use_quantized_variable(rhs_quantizer, int_rhs, train)
+    int_lhs = aqt_ops_util._possibly_use_quantized_variable(
+        lhs_quantizer, int_lhs, train
+    )
+    int_rhs = aqt_ops_util._possibly_use_quantized_variable(
+        rhs_quantizer, int_rhs, train
+    )
 
     imm = tf.matmul(
         int_lhs,
         int_rhs,
         output_type=tf.int32,
         transpose_a=transpose_a,
-        transpose_b=transpose_b)
+        transpose_b=transpose_b,
+    )
     mm = tf.cast(imm, tf.float32)
     return mm
 

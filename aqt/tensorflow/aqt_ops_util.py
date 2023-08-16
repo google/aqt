@@ -16,6 +16,7 @@
 
 from typing import Dict, Optional
 
+from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 
 # TODO(b/220181240): Remove the pylint disable below and avoid using protected
@@ -23,6 +24,38 @@ import tensorflow.compat.v1 as tf
 # We repeatedly use protected methods from classes defined in other modules to
 # avoid exporting them as part of the public API.
 # pylint: disable=protected-access
+
+
+def _possibly_use_quantized_variable(
+    quantizer: aqt_tensor.TensorQuantizer,  #
+    x: tf.Tensor,
+    train: bool) -> tf.Tensor:
+  """Returns quantized variable if not training and TQ.use_quantized_variable, casted to x.dtype.
+
+  Given an input tensor and its tensor quantizer, here we enforce to use the
+  quantized variable stored in the tensor quantizer as long as
+  TQ.use_quantized_variable is true and it is in inference, no matter if
+  FloatConfig is specified or not.
+
+  The semantics of FloatConfig which is meant not to use quantized variables
+  during inference should be respected by requiring users to specify
+  TensorQuantizer.use_quantized_variable=False. See more details at
+  b/219040448.
+
+  Args:
+    quantizer: TensorQuantizer for the input tensor x.
+    x: lhs or rhs of matmul or einsum.
+    train: Indicates if in training or not.
+
+  Returns:
+    The input tensor x or its quantized one.
+  """
+  if quantizer.config.use_quantized_variable and not train:
+    qx = quantizer.quantized_variable
+    if qx.dtype != x.dtype:
+      qx = tf.cast(qx, x.dtype)
+    return qx
+  return x
 
 
 def diagnostics(
