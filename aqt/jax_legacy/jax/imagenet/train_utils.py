@@ -198,7 +198,7 @@ def create_input_iter(batch_size, data_dir, image_size, dtype, train, cache):
   return it
 
 
-class TrainState(struct.PyTreeNode):
+class TrainState(struct.PyTreeNode):  # pytype: disable=invalid-function-definition  # dataclass_transform
   """Train state keeping track of step, parameters, optimizer state, and etc."""
   step: int
   params: flax.core.FrozenDict[str, Any]
