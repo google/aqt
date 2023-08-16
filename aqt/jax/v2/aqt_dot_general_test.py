@@ -129,11 +129,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     repeats = 1000
     num_values = 100000
     shape = (repeats, num_values)
-    def assert_clt(noise: jnp.array):
+    def assert_clt(noise: jnp.ndarray):
       # Test if the sample mean of the noise conforms to Central Limit Theorem
       noise_std = 1 / jnp.sqrt(12.)  # std of a uniform distribution [-0.5, 0.5]
       noise_mean = jnp.mean(noise, axis=1)
       assert jnp.all(noise_mean * jnp.sqrt(num_values) < 4 * noise_std)
+
     # jax.uniform implementation
     jax_uniform_noise = jax.random.uniform(jax.random.PRNGKey(10), shape) - 0.5
     assert_clt(jax_uniform_noise)
