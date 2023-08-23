@@ -344,9 +344,8 @@ class TensorQuantizer(nn.Module):
     """Quantizes x with active quant config, if any, else act as identity."""
 
     def qparams(
-        config: aqt_config.AqtTensorConfig,
-        check_active: bool = True
-    ) -> Tuple[bool, jnp.array, jnp.array, jnp.array]:
+        config: aqt_config.AqtTensorConfig, check_active: bool = True
+    ) -> Tuple[bool, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
       """Returns parameters for AQT quantization routine."""
 
       should_quantize = False
