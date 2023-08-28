@@ -297,7 +297,7 @@ def _maybe_inv(x):
   return 1.0 / x
 
 
-def _make_dot_general_raw(cfg: config.DotGeneralRaw):
+def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
   def my_dot_general(
@@ -307,6 +307,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       context,
   ):
     """Creates a fake_quant function."""
+    # We need to copy because we modify cfg to populate some defaults.
+    cfg = copy.deepcopy(gcfg)
+
     # TODO(lew):
     #  - Use qx.value with the int type.
     #  - Handle qx.value with the int type in an optimized way.
