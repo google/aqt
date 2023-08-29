@@ -549,6 +549,11 @@ class TensorQuantizer:
         params.should_use_small_float, tf.bool)
     return params
 
+  def should_quantize(self, train: bool) -> tf.Tensor:
+    """Returns the number of quant configs are active."""
+    params = self._quantization_params(train)
+    return params.should_quantize
+
   def _to_quant(self, x: tf.Tensor, train: bool) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity."""
     with tf.variable_scope('to_quant'):
