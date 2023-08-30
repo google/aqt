@@ -129,9 +129,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     repeats = 1000
     num_values = 100000
     shape = (repeats, num_values)
+
     def assert_clt(noise: jnp.ndarray):
       # Test if the sample mean of the noise conforms to Central Limit Theorem
-      noise_std = 1 / jnp.sqrt(12.)  # std of a uniform distribution [-0.5, 0.5]
+
+      # std of a uniform distribution [-0.5, 0.5]
+      noise_std = 1 / jnp.sqrt(12.0)
       noise_mean = jnp.mean(noise, axis=1)
       assert jnp.all(noise_mean * jnp.sqrt(num_values) < 4 * noise_std)
 
@@ -171,6 +174,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
+      dict(cfg=config.int8_ttf_quant_v1(use_stochastic_rounding=False)),
       dict(cfg=config.DotGeneral.make(None, None)),
       dict(cfg=config.DotGeneral.make(1, 1)),
       dict(cfg=config.DotGeneral.make(1, 2)),

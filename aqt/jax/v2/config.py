@@ -295,3 +295,25 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
   cfg.drhs.rhs.bound = bound
   cfg.dlhs.lhs.bound = bound
   cfg.dlhs.rhs.bound = bound
+
+
+def int8_ttf_quant_v1(use_stochastic_rounding=True) -> DotGeneral:
+  """Version 1 of 'TTF' int8 quantized training recipe."""
+  fwd = DotGeneralRaw.make(8, 8)
+  dlhs = DotGeneralRaw.make(8, 8)
+  drhs = DotGeneralRaw.make(None, None)
+  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
+
+  # Surprising: lhs quantization determines what drhs can do.
+  # Only rhs is accepting MultiTensor.
+  cfg.drhs.rhs.use_fwd_quant = False
+  cfg.dlhs.rhs.use_fwd_quant = False
+  if use_stochastic_rounding:
+    set_stochastic_rounding(
+        cfg,
+        vjp_lhs_stochastic_rounding=True,
+        vjp_rhs_stochastic_rounding=False,
+        implementation='jax.uniform',
+    )
+
+  return cfg
