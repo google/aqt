@@ -438,8 +438,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         lr_mult, gl_mult, gr_mult = options["mult"]
         test_eq(f"{name}: lr", good_lr, lr / lr_mult)  # forward pass
         if options["test_gradient"]:
-          test_eq(f"{name}: gl", good_gl, gl / gl_mult)  # backward pass
-          test_eq(f"{name}: gr", good_gr, gr / gr_mult)  # backward pass
+          test_eq(f"{name}: gl", good_gl, gl / gl_mult)  # backward pass  # pytype: disable=unsupported-operands
+          test_eq(f"{name}: gr", good_gr, gr / gr_mult)  # backward pass  # pytype: disable=unsupported-operands
 
     check([
         ("default    ", aqt_dg_full(False), dict()),
