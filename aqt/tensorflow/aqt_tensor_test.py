@@ -229,6 +229,41 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
           tf.global_variables_initializer().run()
           self.assertAllEqual(var_qx, alt_qx)
 
+  def test_one_hot_case_methods(self):
+    """Validates clip_range is the same whether use_one_hot_case."""
+    sc = aqt_config.StatsConfig(
+        ema_update_count=2,
+        share_stats_axes=[1],
+        tpu_cross_replica_sum=False,
+    )
+    config = aqt_config.AqtTensorConfig(
+        begin_at_event=4,
+        quant_config=aqt_config.IntQuantConfig(bits=8),
+        calibration_config=aqt_config.CalibrationConfig(const_bound_coeff=1),
+        freeze_scale_at_begin=False)
+    config = aqt_config.AqtScheduleConfig(sc, [config])
+    config.fill_gaps_with_float_config()
+
+    batches = 5
+
+    rng = np.random.default_rng(1234)
+    data_shape = [4, 4]
+    x = rng.integers(-10, 10,
+                     size=(batches, *data_shape)
+                     ).astype(np.float32)
+
+    with tf.Graph().as_default():
+      quant = aqt_tensor.TensorQuantizer(data_shape=data_shape, config=config)
+      event_count = tf.Variable(0, trainable=False, dtype=tf.int64)
+      with self.cached_session():
+        tf.global_variables_initializer().run()
+        for i in range(batches):
+          event_count.assign_add(1)
+          quant.update(f32(x[i]), None, 1).run()
+          cr1 = quant.clip_range(use_one_hot_case=True).eval()
+          cr2 = quant.clip_range(use_one_hot_case=False).eval()
+          self.assertAllEqual(cr1, cr2)
+
 
 def extract_referenced_variables(t: tf.Tensor) -> Set[str]:
   """Returns a set of all referenced variable names in a tensor's graph."""
