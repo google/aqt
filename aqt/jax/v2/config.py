@@ -41,7 +41,17 @@ class IntNumerics:
   preserve_zero: bool
 
 
-Numerics = Union[NoNumerics, IntNumerics]
+@dataclasses.dataclass
+class OtherNumerics:
+  """Denotes that it is using quantization other than Int.
+
+  Logics defined by custom functions in Tensor config.
+  """
+
+  pass
+
+
+Numerics = Union[NoNumerics, IntNumerics, OtherNumerics]
 
 
 @dataclasses.dataclass
