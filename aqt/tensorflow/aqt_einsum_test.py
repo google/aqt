@@ -620,7 +620,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
                          ) -> Optional[aqt_config.AqtScheduleConfig]:
       if not quantize_bwd:
         return None
-      bwd_eq = aqt_einsum._get_einsum_transpose(eq, swap_ans=swap_ans)
+      bwd_eq = aqt_einsum.get_einsum_transpose(eq, swap_ans=swap_ans)
       # 16 bits to preserve gradients
       grad_config, _ = _exact_schedule_config(16, bwd_eq, 1.0)
       return grad_config

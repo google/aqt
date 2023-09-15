@@ -392,8 +392,13 @@ class AqtEinsumConfig(_BaseConfig):
   Attributes:
     lhs: quantization schedule for left-hand side argument
     rhs: quantization schedule for right-hand side argument
-    grad: quantization schedule for gradients (optional).
+    lhs_grad: quantization schedule for gradients used to calculate gradients of
+      left-hand side argument.
+    rhs_grad: quantization schedule for gradients used to calculate gradients of
+      right-hand side argument.
   """
   lhs: AqtScheduleConfig
   rhs: AqtScheduleConfig
+  lhs_grad: Optional[AqtScheduleConfig] = None
+  rhs_grad: Optional[AqtScheduleConfig] = None
 

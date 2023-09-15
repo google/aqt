@@ -305,7 +305,7 @@ def _get_self_contracting_labels(lhs: str, rhs: str, out: str
   )
 
 
-def _get_einsum_transpose(eq: str, swap_ans: bool = False) -> str:
+def get_einsum_transpose(eq: str, swap_ans: bool = False) -> str:
   """Returns Einsum transpose equation used for a backward pass.
 
   Assume equation is two-argument: x,y->out.
@@ -412,7 +412,7 @@ def einsum(
   else:
     assert lhs_grad_quantizer is not None
     assert rhs_grad_quantizer is not None
-    lhs_bwd_eq = _get_einsum_transpose(eq, swap_ans=False)
+    lhs_bwd_eq = get_einsum_transpose(eq, swap_ans=False)
     _validate_equation(lhs_bwd_eq)
     _validate_shared_axes(
         lhs_grad_quantizer.config.stats_config,  #
@@ -426,7 +426,7 @@ def einsum(
         rhs_quantizer.config.tensor_configs,
     )
     # validate 'grad,lhs->rhs_grad'
-    rhs_bwd_eq = _get_einsum_transpose(eq, swap_ans=True)
+    rhs_bwd_eq = get_einsum_transpose(eq, swap_ans=True)
     _validate_equation(rhs_bwd_eq)
     _validate_shared_axes(
         rhs_grad_quantizer.config.stats_config,  #
@@ -598,7 +598,7 @@ def einsum(
 
           with tf.name_scope('lhs'):
             qrhs = rhs_quantizer._to_quant(rhs_scaled, train)
-            lhs_transpose_eq = _get_einsum_transpose(eq, swap_ans=False)
+            lhs_transpose_eq = get_einsum_transpose(eq, swap_ans=False)
             lhs_bwd = _bwd(
                 lhs_transpose_eq,
                 lhs_grad_quantizer,
@@ -613,7 +613,7 @@ def einsum(
 
           with tf.name_scope('rhs'):
             qlhs = lhs_quantizer._to_quant(lhs_scaled, train)
-            rhs_transpose_eq = _get_einsum_transpose(eq, swap_ans=True)
+            rhs_transpose_eq = get_einsum_transpose(eq, swap_ans=True)
             rhs_bwd = _bwd(
                 rhs_transpose_eq,
                 rhs_grad_quantizer,
