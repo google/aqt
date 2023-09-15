@@ -48,38 +48,39 @@ class StatsTest(aqt_stats_test_base.StatsTest):
         mutable=["aqt"])
 
   def get_sum_of_ones(self):
-    return self._stats_state["aqt"]["sum_of_ones"]
+    return self.stats_state["aqt"]["sum_of_ones"]
 
   def get_sum_of_vals(self):
-    return self._stats_state["aqt"]["sum_of_vals"]
+    return self.stats_state["aqt"]["sum_of_vals"]
 
   def get_max_of_abs_vals(self):
-    return self._stats_state["aqt"]["max_of_abs_vals"]
+    return self.stats_state["aqt"]["max_of_abs_vals"]
 
   def get_sum_of_l1_vals(self):
-    return self._stats_state["aqt"]["sum_of_l1_vals"]
+    return self.stats_state["aqt"]["sum_of_l1_vals"]
 
   def get_sum_of_lp_vals(self):
-    return self._stats_state["aqt"]["sum_of_lp_vals"]
+    return self.stats_state["aqt"]["sum_of_lp_vals"]
 
   def set_ema_update_count(self, ema_update_count):
     self.override_ema_update_count = ema_update_count
 
   def mean(self):
-    return self._stats.apply(self._stats_state, method=self._stats.mean)
+    return self.stats.apply(self.stats_state, method=self.stats.mean)
 
   def max_dev(self):
-    return self._stats.apply(self._stats_state, method=self._stats.max_dev)
+    return self.stats.apply(self.stats_state, method=self.stats.max_dev)
 
   def l1_dev(self):
-    return self._stats.apply(self._stats_state, method=self._stats.l1_dev)
+    return self.stats.apply(self.stats_state, method=self.stats.l1_dev)
 
   def lp_dev(self):
-    return self._stats.apply(self._stats_state, method=self._stats.lp_dev)
+    return self.stats.apply(self.stats_state, method=self.stats.lp_dev)
 
   def bound(self, calibration_config):
-    return self._stats.apply(
-        self._stats_state, calibration_config, method=self._stats.bound)
+    return self.stats.apply(
+        self.stats_state, calibration_config, method=self.stats.bound
+    )
 
 
 class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):

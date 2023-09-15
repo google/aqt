@@ -267,6 +267,7 @@ class MatmulTest(aqt_matmul_test_base.MatmulTest):
       tf.global_variables_initializer().run()
       if config.grad:
         with self.subTest("Gradient shape"):
+          assert mm.grad_quantizer is not None
           self.assertSequenceEqual(mm.grad_quantizer.data_shape, target_shape)
 
       event_count = tf.constant(0, tf.int64)

@@ -51,38 +51,38 @@ class StatsTest(aqt_stats_test_base.StatsTest):
     self._stats.update(f32(sample), f32(weight)).run()
 
   def get_sum_of_ones(self):
-    return self._stats.calibration_variables()['sum_of_ones']
+    return self.stats.calibration_variables()['sum_of_ones']
 
   def get_sum_of_vals(self):
-    return self._stats.calibration_variables()['sum_of_vals']
+    return self.stats.calibration_variables()['sum_of_vals']
 
   def get_max_of_abs_vals(self):
     with self.cached_session() as sess, sess.as_default():
-      return self._stats.max_dev().eval()
+      return self.stats.max_dev().eval()
 
   def get_sum_of_l1_vals(self):
-    return self._stats.calibration_variables()['sum_of_l1_vals']
+    return self.stats.calibration_variables()['sum_of_l1_vals']
 
   def get_sum_of_lp_vals(self):
-    return self._stats.calibration_variables()['sum_of_lp_vals']
+    return self.stats.calibration_variables()['sum_of_lp_vals']
 
   def set_ema_update_count(self, ema_update_count):
-    self._stats._ema_update_count = ema_update_count
+    self.stats._ema_update_count = ema_update_count
 
   def mean(self):
-    return self._stats.mean()
+    return self.stats.mean()
 
   def max_dev(self):
-    return self._stats.max_dev()
+    return self.stats.max_dev()
 
   def l1_dev(self):
-    return self._stats.l1_dev()
+    return self.stats.l1_dev()
 
   def lp_dev(self):
-    return self._stats.lp_dev()
+    return self.stats.lp_dev()
 
   def bound(self, calibration_config):
-    return self._stats.bound(calibration_config)
+    return self.stats.bound(calibration_config)
 
 
 class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):

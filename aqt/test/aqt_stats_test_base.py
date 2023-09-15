@@ -59,6 +59,18 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
 
     raise NotImplementedError
 
+  @property
+  def stats(self):
+    if self._stats is None:
+      raise ValueError("set_stats() is not called")
+    return self._stats
+
+  @property
+  def stats_state(self):
+    if self._stats_state is None:
+      raise ValueError("set_stats() is not called")
+    return self._stats_state
+
   def get_sum_of_ones(self):
     raise NotImplementedError
 
