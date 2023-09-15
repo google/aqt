@@ -1,0 +1,35 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+
+[project]
+name="aqtp",
+version="0.2.0",
+description="AQT: Accurate Quantized Training",
+readme = "README.md"
+classifiers=[
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+],
+authors = [
+    {name = "Lukasz Lew", email = "lew@google.com"},
+]
+url="https://github.com/google/aqt",
+requires-python = ">=3.9"
+
+dependencies = [
+    "numpy>=1.12",
+    "jax>=0.4.11",
+]
+
+dynamic = ["readme", "version"]
+
+[project.urls]
+Source = "https://github.com/google/aqt"
