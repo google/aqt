@@ -93,8 +93,9 @@ def _parse_equation(eq: str) -> Tuple[str, str, str]:
 
 def _validate_shared_axes(
     lhs_config: aqt_config.StatsConfig,  # Prevent python auto-formatting.
-    rhs_config: aqt_config.StatsConfig,
-    eq: str) -> None:
+    rhs_config: aqt_config.StatsConfig | None,
+    eq: str,
+) -> None:
   """Validates that contracting axes have shared statistics."""
   lc_axes, rc_axes = get_contracting_axes(eq)
   lb_axes, rb_axes = get_batch_axes(eq)
@@ -102,6 +103,9 @@ def _validate_shared_axes(
   axes_name_configs = [(lc_axes, lb_axes, 'lhs', lhs_config),
                        (rc_axes, rb_axes, 'rhs', rhs_config)]
   for c_axes, b_axes, name, config in axes_name_configs:
+    # Skip if no stats config provided, used to verify the backward pass.
+    if not config:
+      continue
     shared_indices = set(config.share_stats_axes)
     for i in c_axes:
       if i not in shared_indices:
@@ -204,16 +208,54 @@ def get_batch_axes(eq: str) -> Tuple[List[Optional[int]], List[Optional[int]]]:
   return lb_axes, rb_axes
 
 
+def get_out_shape(
+    eq: str, lhs_shape: Iterable[int], rhs_shape: Iterable[int]
+) -> List[int]:
+  labeled_dimensions = {}
+  lhs, rhs, out = _parse_equation(eq)
+  for axes, shape in [(lhs, lhs_shape), (rhs, rhs_shape)]:
+    for label, dim in zip(axes, shape):
+      if label in labeled_dimensions:
+        assert labeled_dimensions[label] == dim
+      else:
+        labeled_dimensions[label] = dim
+  return [labeled_dimensions[label] for label in out]
+
+
 def default_einsum(
     eq: str,  #
-    lhs_quantizer: aqt_tensor.TensorQuantizer,
+    lhs_quantizer: aqt_tensor.TensorQuantizer | None,
     rhs_quantizer: aqt_tensor.TensorQuantizer,
     lhs: tf.Tensor,
     rhs: tf.Tensor,
     train: bool,
-    **tf_einsum_kwargs) -> tf.Tensor:
-  """Perform tf.einsum with input tensors of float type."""
-  lhs = aqt_ops_util._possibly_use_quantized_variable(lhs_quantizer, lhs, train)
+    **tf_einsum_kwargs,
+) -> tf.Tensor:
+  """Perform tf.einsum with input tensors of float type.
+
+  The gradient quantizer (assumed to be lhs) in the backward pass is optional.
+
+  Args:
+    eq: einsum equation
+    lhs_quantizer: TensorQuantizer for lhs
+    rhs_quantizer: TensorQuantizer for rhs
+    lhs: lhs of einsum
+    rhs: rhs of einsum
+    train: If false and `use_quantized_variable` in lhs_quantizer or
+      rhs_quantizer, then this indicates `aqt_einsum` should use the quantized
+      variable with the latest quantized, memorized from the most recent
+      `TensorQuantizer.update()` in quantized operations rather than the float
+      tensor input `lhs` or `rhs` provided to those operations at inference
+      time.
+    **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
+
+  Returns:
+    result of einsum
+  """
+  if lhs_quantizer:
+    lhs = aqt_ops_util._possibly_use_quantized_variable(
+        lhs_quantizer, lhs, train
+    )
   rhs = aqt_ops_util._possibly_use_quantized_variable(rhs_quantizer, rhs, train)
   return tf.einsum(eq, lhs, rhs, **tf_einsum_kwargs)
 
@@ -263,19 +305,46 @@ def _get_self_contracting_labels(lhs: str, rhs: str, out: str
   )
 
 
-def _einsum_transpose(eq: str, grad: tf.Tensor, y: tf.Tensor,
-                      swap_ans: bool = False,
-                      einsum_op=tf.einsum,
-                      **tf_einsum_kwargs,
-                      ) -> tf.Tensor:
-  """Performs einsum transpose in the backward pass."""
+def _get_einsum_transpose(eq: str, swap_ans: bool = False) -> str:
+  """Returns Einsum transpose equation used for a backward pass.
+
+  Assume equation is two-argument: x,y->out.
+
+  Args:
+    eq: einsum equation.
+    swap_ans: If not swap_ans, returns out,y->x; If swap_ans, returns out,x->y.
+
+  Returns:
+    Transpose equation.
+  """
   if swap_ans:
     y_dims, x_dims, out_dims = _parse_equation(eq)
   else:
     x_dims, y_dims, out_dims = _parse_equation(eq)
-  eq = '{},{}->{}'.format(out_dims, y_dims, x_dims)
-  x_bwd = einsum_op(eq, grad, y, **tf_einsum_kwargs)
-  return x_bwd
+  return '{},{}->{}'.format(out_dims, y_dims, x_dims)
+
+
+def _maybe_random(
+    random_gen: Optional[tf.random.Generator],
+    shape: Iterable[int],
+    dtype: tf.dtypes.DType,
+) -> Optional[tf.Tensor]:
+  """Maybe generate random floats in [-0.5, 0.5] to perturb gradients."""
+  if random_gen is None:
+    return None
+  return random_gen.uniform(shape, -0.5, 0.5, dtype=dtype)
+
+
+def _round(
+    x_quantizer: aqt_tensor.TensorQuantizer,
+    x: tf.Tensor,
+    random: Optional[tf.Tensor],
+    train: bool,
+) -> tf.Tensor:
+  if random is None:
+    return x_quantizer._to_quant(x, train=train)
+  assert x.shape == random.shape, (x.shape, random.shape)
+  return x_quantizer._to_quant(x + random, train=train)
 
 
 def einsum(
@@ -285,7 +354,12 @@ def einsum(
     rhs_quantizer: aqt_tensor.TensorQuantizer,
     rhs: tf.Tensor,
     train: bool = True,
-    **tf_einsum_kwargs) -> tf.Tensor:
+    quantize_bwd: bool = False,
+    lhs_grad_quantizer: Optional[aqt_tensor.TensorQuantizer] = None,
+    rhs_grad_quantizer: Optional[aqt_tensor.TensorQuantizer] = None,
+    random_gen: Optional[tf.random.Generator] = None,
+    **tf_einsum_kwargs,
+) -> tf.Tensor:
   """Performs a quantized two-argument :py:func:`tf.einsum`.
 
   Args:
@@ -301,6 +375,16 @@ def einsum(
       `TensorQuantizer.update()` in quantized operations rather than the float
       tensor input `lhs` or `rhs` provided to those operations at inference
       time.
+    quantize_bwd: Whether to quantize the backward pass. If true, both
+      lhs_grad_quantizer and rhs_grad_quantizer have to be conformal to dynamic
+      quantization (only `const_bound_coeff` and `max_dev_coeff` are non-zero).
+    lhs_grad_quantizer: A `TensorQuantizer` for grad, which is used to quantize
+      the einsum equation, `grad,rhs->lhs_grad`, in the backward pass.
+    rhs_grad_quantizer: A `TensorQuantizer` for grad, which is used to quantize
+      the einsum equation, `grad,lhs->rhs_grad`, in the backward pass.
+    random_gen: A `tf.random.Generator` used to generate random numbers between
+      [0.5, 0.5] added to the gradients before quantization in the backward
+      pass.
     **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
 
   Returns:
@@ -321,6 +405,63 @@ def einsum(
       lhs_quantizer.config.tensor_configs,
       'rhs_quantizer.config.tensor_configs',
       rhs_quantizer.config.tensor_configs)
+
+  if not quantize_bwd:
+    assert lhs_grad_quantizer is None
+    assert rhs_grad_quantizer is None
+  else:
+    assert lhs_grad_quantizer is not None
+    assert rhs_grad_quantizer is not None
+    lhs_bwd_eq = _get_einsum_transpose(eq, swap_ans=False)
+    _validate_equation(lhs_bwd_eq)
+    _validate_shared_axes(
+        lhs_grad_quantizer.config.stats_config,  #
+        None,  # only verify gradient quantizer in the backward pass
+        lhs_bwd_eq,
+    )
+    aqt_config_utils._validate_alignment(
+        'lhs_grad_quantizer.config.tensor_configs',  #
+        lhs_grad_quantizer.config.tensor_configs,
+        'rhs_quantizer.config.tensor_configs',
+        rhs_quantizer.config.tensor_configs,
+    )
+    # validate 'grad,lhs->rhs_grad'
+    rhs_bwd_eq = _get_einsum_transpose(eq, swap_ans=True)
+    _validate_equation(rhs_bwd_eq)
+    _validate_shared_axes(
+        rhs_grad_quantizer.config.stats_config,  #
+        None,  # only verify gradient quantizer in the backward pass
+        rhs_bwd_eq,
+    )
+    aqt_config_utils._validate_alignment(
+        'rhs_grad_quantizer.config.tensor_configs',  #
+        rhs_grad_quantizer.config.tensor_configs,
+        'lhs_quantizer.config.tensor_configs',
+        lhs_quantizer.config.tensor_configs,
+    )
+
+    def _is_dynamic_calibration(config: aqt_config.CalibrationConfig) -> bool:
+      return config.l1_dev_coeff == 0.0 and config.lp_dev_coeff == 0.0
+
+    for name, tensor_configs in [
+        (
+            'lhs_grad_calibration_config',
+            lhs_grad_quantizer.config.tensor_configs,
+        ),
+        (
+            'rhs_grad_calibration_config',
+            rhs_grad_quantizer.config.tensor_configs,
+        ),
+    ]:
+      for tensor_config in tensor_configs:
+        cali_config = tensor_config.calibration_config
+        if not _is_dynamic_calibration(cali_config):
+          raise ValueError(
+              'The backward-pass quantization assumes dynamic quant while the '
+              f'calibration config for {name} has l1_dev_coeff = '
+              f'{cali_config.l1_dev_coeff} and lp_dev_coeff = '
+              f'{cali_config.lp_dev_coeff}, both of which should be zero.'
+          )
 
   def fwd(lhs: tf.Tensor,
           rhs: tf.Tensor) -> tf.Tensor:
@@ -385,30 +526,103 @@ def einsum(
           lhs_scaled = lhs_scale * lhs
           rhs_scaled = rhs_scale * rhs
 
-          # parse the subscripts for backward props
-          lhs_dims, rhs_dims, out_dims = _parse_equation(eq)
+          def _bwd(
+              eq: str,
+              grad_quantizer: Optional[aqt_tensor.TensorQuantizer],
+              y_quantizer: aqt_tensor.TensorQuantizer,
+              grad: tf.Tensor,
+              qy: tf.Tensor,
+              y_inv_scale: tf.Tensor,
+              train: bool,
+          ) -> tf.Tensor:
+            grad_dims, y_dims, _ = _parse_equation(eq)
+            y_share_stats_axes = (
+                y_quantizer.config.stats_config.share_stats_axes
+            )
+            grad = _scale_grad(
+                grad,
+                y_inv_scale,
+                grad_dims,
+                y_dims,
+                y_share_stats_axes,
+                **tf_einsum_kwargs,
+            )
+            if grad_quantizer:
+              with tf.name_scope('to_quant_grad'):
+                # We assume the backward-pass quantization is dynamic so no need
+                # to pass weight when updating stats but still need _last_update
+                # to switch tensor configs.
+                update = grad_quantizer.update(
+                    grad,
+                    weight=None,
+                    event_count=lhs_quantizer._last_update,
+                )
+                with tf.control_dependencies([update]):
+                  grad_scale, grad_inv_scale = grad_quantizer._get_quant_scale(
+                      train
+                  )
+                  grad_scaled = grad_scale * grad
+                  random = _maybe_random(random_gen, grad.shape, grad.dtype)
+                  qgrad = _round(grad_quantizer, grad_scaled, random, train)
+                  assert len(grad_inv_scale.shape) == len(qgrad.shape)
+            else:
+              qgrad = grad
+              grad_inv_scale = None
+
+            with tf.name_scope('einsum'):
+              out = default_einsum(
+                  eq,
+                  grad_quantizer,
+                  y_quantizer,
+                  qgrad,
+                  qy,
+                  train,
+                  **tf_einsum_kwargs,
+              )
+
+            with tf.name_scope('inv_scale'):
+              if grad_quantizer:
+                grad_dims, _, x_dims = _parse_equation(eq)
+                grad_share_stats_axes = (
+                    grad_quantizer.config.stats_config.share_stats_axes
+                )
+                out = _scale_grad(
+                    out,
+                    grad_inv_scale,
+                    x_dims,
+                    grad_dims,
+                    grad_share_stats_axes,
+                    **tf_einsum_kwargs,
+                )
+            return out
 
           with tf.name_scope('lhs'):
             qrhs = rhs_quantizer._to_quant(rhs_scaled, train)
-            rhs_share_stats_axes = (
-                rhs_quantizer.config.stats_config.share_stats_axes
+            lhs_transpose_eq = _get_einsum_transpose(eq, swap_ans=False)
+            lhs_bwd = _bwd(
+                lhs_transpose_eq,
+                lhs_grad_quantizer,
+                rhs_quantizer,
+                grad,
+                qrhs,
+                rhs_inv_scale,
+                train,
             )
-            grad_scaled = _scale_grad(grad, rhs_inv_scale, out_dims, rhs_dims,
-                                      rhs_share_stats_axes, **tf_einsum_kwargs)
-            lhs_bwd = _einsum_transpose(eq, grad_scaled, qrhs, swap_ans=False,
-                                        **tf_einsum_kwargs)
             lhs_bwd = tf.where_v2(
                 lhs_quantizer._clip_mask(lhs_scaled, train), 0.0, lhs_bwd)
 
           with tf.name_scope('rhs'):
             qlhs = lhs_quantizer._to_quant(lhs_scaled, train)
-            lhs_share_stats_axes = (
-                lhs_quantizer.config.stats_config.share_stats_axes
+            rhs_transpose_eq = _get_einsum_transpose(eq, swap_ans=True)
+            rhs_bwd = _bwd(
+                rhs_transpose_eq,
+                rhs_grad_quantizer,
+                lhs_quantizer,
+                grad,
+                qlhs,
+                lhs_inv_scale,
+                train,
             )
-            grad_scaled = _scale_grad(grad, lhs_inv_scale, out_dims, lhs_dims,
-                                      lhs_share_stats_axes, **tf_einsum_kwargs)
-            rhs_bwd = _einsum_transpose(eq, grad_scaled, qlhs, swap_ans=True,
-                                        **tf_einsum_kwargs)
             rhs_bwd = tf.where_v2(
                 rhs_quantizer._clip_mask(rhs_scaled, train), 0.0, rhs_bwd)
 

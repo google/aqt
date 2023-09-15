@@ -90,13 +90,32 @@ def _einsum_op(
     rhs_weights: Optional[tf.Tensor] = None,
     varscope_name: str = "einsum",
     train: bool = True,
-    **einsum_kwargs) -> tf.Tensor:
+    quantize_bwd: bool = False,
+    lhs_bwd_config: Optional[aqt_config.AqtScheduleConfig] = None,
+    rhs_bwd_config: Optional[aqt_config.AqtScheduleConfig] = None,
+    random_noise_seed: Optional[int] = 1234,
+    **einsum_kwargs,
+) -> tf.Tensor:
   """Updates quantizers at event_count=0 and computes einsum."""
   with tf.variable_scope(varscope_name):
     lhs_tq = aqt_tensor.TensorQuantizer(
         lhs.shape, lhs_config, name="lhs")
     rhs_tq = aqt_tensor.TensorQuantizer(
         rhs.shape, rhs_config, name="rhs")
+    lhs_bwd_tq, rhs_bwd_tq = None, None
+    grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
+    if lhs_bwd_config:
+      lhs_bwd_tq = aqt_tensor.TensorQuantizer(
+          grad_shape, lhs_bwd_config, name="lhs_bwd"
+      )
+    if rhs_bwd_config:
+      rhs_bwd_tq = aqt_tensor.TensorQuantizer(
+          grad_shape, rhs_bwd_config, name="rhs_bwd"
+      )
+    if quantize_bwd and random_noise_seed is not None:
+      random_gen = tf.random.Generator.from_seed(random_noise_seed)
+    else:
+      random_gen = None
 
   event_count = tf.constant(0, tf.int64)
   updates = [
@@ -104,8 +123,19 @@ def _einsum_op(
       rhs_tq.update(rhs, rhs_weights, event_count)
   ]
   with tf.control_dependencies(updates):
-    return aqt_ops.aqt_einsum(eq, lhs_tq, lhs, rhs_tq, rhs, train,
-                              **einsum_kwargs)
+    return aqt_ops.aqt_einsum(
+        eq,
+        lhs_tq,
+        lhs,
+        rhs_tq,
+        rhs,
+        train,
+        quantize_bwd,
+        lhs_bwd_tq,
+        rhs_bwd_tq,
+        random_gen=random_gen,
+        **einsum_kwargs,
+    )
 
 
 def _generate_missing_shared_axes() -> Sequence[Dict[str, Any]]:
@@ -180,9 +210,10 @@ def _generate_bad_equation() -> Sequence[Dict[str, Any]]:
   return [dict(zip(keys, vals)) for vals in cases]
 
 
-def _generate_test_equations() -> Sequence[Dict[str, Any]]:
-  keys = ["testcase_name", "eq"]
-  cases = [
+def _generate_test_equations(
+    append_quantize_bwd: bool = True) -> Sequence[Dict[str, Any]]:
+  keys = ["testcase_name", "eq", "quantize_bwd"]
+  eq_cases = [
       ("transpose", ",ij->ji"),
       ("matmul", "ij,jk->ik"),
       ("batch_matmul", "bij,bjk->bik"),
@@ -194,6 +225,16 @@ def _generate_test_equations() -> Sequence[Dict[str, Any]]:
       ("batch_block_vec_mat_mult", "bnu,nuv->bnv"),
       ("batch_transpose_matmul", "bmu,nm->bnu"),
   ]
+
+  if not append_quantize_bwd:
+    return [dict(zip(keys, vals)) for vals in eq_cases]
+
+  cases = []
+  for name, eq in eq_cases:
+    # append a value indicate whether quantize backward pass
+    cases.append((name + "_quantize_bwd", eq, True))
+    cases.append((name, eq, False))
+
   return [dict(zip(keys, vals)) for vals in cases]
 
 
@@ -527,11 +568,15 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       rhs_config = config_from_schedule(rhs_intervals, [0])
       _einsum_op(eq, lhs, rhs, lhs_config, rhs_config)
 
-  def exact_int8_einsum_example(self,
-                                eq,
-                                quantize_lhs=False,
-                                quantize_rhs=False,
-                                scale=1.0):
+  def exact_int8_einsum_example(
+      self,
+      eq: str,
+      quantize_lhs: bool = False,
+      quantize_rhs: bool = False,
+      scale: float = 1.0,
+      quantize_bwd: bool = False,
+      dynamic_bwd_quant: bool = False,
+  ):
     """Returns a pair of tensors and config to einsum exactly."""
     lhs, rhs, _ = aqt_einsum._parse_equation(eq)
 
@@ -552,39 +597,100 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     lhs = make_tensor(lhs_shape) * scale
     rhs = make_tensor(rhs_shape) * scale
 
-    iqc = aqt_config.IntQuantConfig(bits=8, preserve_zero=True)
-    clip_bound = aqt_common.get_clip_bound(iqc)
-    assert symmetric_uniform_range <= clip_bound
+    def _exact_schedule_config(bits, eq, scale):
+      iqc = aqt_config.IntQuantConfig(bits=bits, preserve_zero=True)
+      clip_bound = aqt_common.get_clip_bound(iqc)
+      assert symmetric_uniform_range <= clip_bound
 
-    lhs_caxes, rhs_caxes = aqt_einsum.get_contracting_axes(eq)
+      lhs_caxes, rhs_caxes = aqt_einsum.get_contracting_axes(eq)
 
-    # to exactly represent quantized lhs and rhs
-    const_bound_coeff = scale * clip_bound
-    lhs_config = _schedule_config(8, const_bound_coeff, lhs_caxes)
-    rhs_config = _schedule_config(8, const_bound_coeff, rhs_caxes)
+      # to exactly represent quantized lhs and rhs
+      const_bound_coeff = scale * clip_bound
+      lhs_config = _schedule_config(bits, const_bound_coeff, lhs_caxes)
+      rhs_config = _schedule_config(bits, const_bound_coeff, rhs_caxes)
+      return lhs_config, rhs_config
+
+    lhs_config, rhs_config = _exact_schedule_config(8, eq, scale)
 
     lhs_config.use_quantized_variable = quantize_lhs
     rhs_config.use_quantized_variable = quantize_rhs
 
-    return lhs_config, lhs, rhs_config, rhs
+    def _get_grad_config(eq: str,
+                         swap_ans: bool
+                         ) -> Optional[aqt_config.AqtScheduleConfig]:
+      if not quantize_bwd:
+        return None
+      bwd_eq = aqt_einsum._get_einsum_transpose(eq, swap_ans=swap_ans)
+      # 16 bits to preserve gradients
+      grad_config, _ = _exact_schedule_config(16, bwd_eq, 1.0)
+      return grad_config
+
+    lhs_bwd_config = _get_grad_config(eq, False)
+    rhs_bwd_config = _get_grad_config(eq, True)
+
+    # Change calibration configs if dynamic quant in the backward pass
+    if lhs_bwd_config and dynamic_bwd_quant:
+      for tc in lhs_bwd_config.tensor_configs:
+        tc.calibration_config = aqt_config.CalibrationConfig(
+            const_bound_coeff=1.0,
+            max_dev_coeff=1.0,
+        )
+    if rhs_bwd_config and dynamic_bwd_quant:
+      for tc in rhs_bwd_config.tensor_configs:
+        tc.calibration_config = aqt_config.CalibrationConfig(
+            const_bound_coeff=1.0,
+            max_dev_coeff=1.0,
+        )
+
+    return lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_vars_dont_kill_grads(self, eq):
+  def test_vars_dont_kill_grads(self, eq, quantize_bwd):
     with self.subTest("scale_one"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, True, True, scale=1.0)
-      lhs_config_novar, _, rhs_config_novar, _ = self.exact_int8_einsum_example(
-          eq, True, True, scale=1.0)
+      lhs_config, lhs, rhs_config, rhs, lbwd_config, rbwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=1.0, quantize_bwd=quantize_bwd,
+          )
+      )
+      lhs_config_novar, _, rhs_config_novar, _, lbwd_config, rbwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=1.0, quantize_bwd=quantize_bwd
+          )
+      )
     with self.subTest("scale_two"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, True, True, scale=2.0)
-      lhs_config_novar, _, rhs_config_novar, _ = self.exact_int8_einsum_example(
-          eq, True, True, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lbwd_config, rbwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=2.0, quantize_bwd=quantize_bwd
+          )
+      )
+      lhs_config_novar, _, rhs_config_novar, _, lbwd_config, rbwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=2.0, quantize_bwd=quantize_bwd
+          )
+      )
 
     expected_op = _einsum_op(
-        eq, lhs, rhs, lhs_config_novar, rhs_config_novar, varscope_name="novar")
+        eq,
+        lhs,
+        rhs,
+        lhs_config_novar,
+        rhs_config_novar,
+        varscope_name="novar",
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lbwd_config,
+        rhs_bwd_config=rbwd_config,
+    )
     actual_op = _einsum_op(
-        eq, lhs, rhs, lhs_config, rhs_config, varscope_name="var")
+        eq,
+        lhs,
+        rhs,
+        lhs_config,
+        rhs_config,
+        varscope_name="var",
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lbwd_config,
+        rhs_bwd_config=rbwd_config,
+    )
 
     saved_grads = tf.gradients([expected_op], [lhs, rhs])
     unsaved_grads = tf.gradients([actual_op], [lhs, rhs])
@@ -597,16 +703,34 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
         self.assertAllEqual(actual_grad, expected_grad)
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_vars_over_inputs_at_inference(self, eq):
+  def test_vars_over_inputs_at_inference(self, eq, quantize_bwd):
     with self.subTest("scale_one"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, True, True, scale=1.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=1.0, quantize_bwd=quantize_bwd
+          )
+      )
     with self.subTest("scale_two"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, True, True, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=2.0, quantize_bwd=quantize_bwd
+          )
+      )
 
     lhs_tq = aqt_tensor.TensorQuantizer(lhs.shape, lhs_config, name="lhs")
     rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, rhs_config, name="rhs")
+    if quantize_bwd:
+      grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
+      lhs_bwd_tq = aqt_tensor.TensorQuantizer(
+          grad_shape, lhs_bwd_config, name="lhs_bwd"
+      )
+      rhs_bwd_tq = aqt_tensor.TensorQuantizer(
+          grad_shape, rhs_bwd_config, name="rhs_bwd"
+      )
+      random_gen = tf.random.Generator.from_seed(1234)
+    else:
+      lhs_bwd_tq = rhs_bwd_tq = None
+      random_gen = None
 
     # Update at least once to initialize scale, then grab the expected
     # value while in training mode.
@@ -616,29 +740,68 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
         rhs_tq.update(rhs, weight=None, event_count=event_count)
     ]
     with tf.control_dependencies(updates):
-      expected = aqt_ops.aqt_einsum(eq, lhs_tq, lhs, rhs_tq, rhs)
+      expected = aqt_ops.aqt_einsum(
+          eq,
+          lhs_tq,
+          lhs,
+          rhs_tq,
+          rhs,
+          train=True,
+          quantize_bwd=quantize_bwd,
+          lhs_grad_quantizer=lhs_bwd_tq,
+          rhs_grad_quantizer=rhs_bwd_tq,
+          random_gen=random_gen,
+      )
 
     with self.cached_session() as sess, sess.as_default():
       tf.global_variables_initializer().run()
       expected = expected.eval()
 
-      actual = aqt_ops.aqt_einsum(eq, lhs_tq, tf.zeros_like(lhs), rhs_tq,
-                                  tf.zeros_like(rhs), train=False)
+      actual = aqt_ops.aqt_einsum(
+          eq,
+          lhs_tq,
+          tf.zeros_like(lhs),
+          rhs_tq,
+          tf.zeros_like(rhs),
+          train=False,
+          quantize_bwd=quantize_bwd,
+          lhs_grad_quantizer=lhs_bwd_tq,
+          rhs_grad_quantizer=rhs_bwd_tq,
+          random_gen=random_gen,
+      )
 
       self.assertAllEqual(actual, expected)
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_float_config_not_save_quantized_var(self, eq):
+  def test_float_config_not_save_quantized_var(self, eq, quantize_bwd):
     with self.subTest("scale_one"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, True, True, scale=1.0)
-    with self.subTest("scale_one"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, True, True, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=1.0, quantize_bwd=quantize_bwd
+          )
+      )
+    with self.subTest("scale_two"):
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=2.0, quantize_bwd=quantize_bwd
+          )
+      )
 
     lhs_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
     lhs_tq = aqt_tensor.TensorQuantizer(lhs.shape, lhs_config, name="lhs")
     rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, rhs_config, name="rhs")
+    if quantize_bwd:
+      grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
+      lhs_bwd_tq = aqt_tensor.TensorQuantizer(
+          grad_shape, lhs_bwd_config, name="lhs_bwd"
+      )
+      rhs_bwd_tq = aqt_tensor.TensorQuantizer(
+          grad_shape, rhs_bwd_config, name="rhs_bwd"
+      )
+      random_gen = tf.random.Generator.from_seed(1234)
+    else:
+      lhs_bwd_tq = rhs_bwd_tq = None
+      random_gen = None
 
     event_count = tf.constant(0, tf.int64)
 
@@ -647,7 +810,18 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       lhs_tq.update(lhs, weight=None, event_count=event_count).run()
       rhs_tq.update(rhs, weight=None, event_count=event_count).run()
 
-      actual = aqt_ops.aqt_einsum(eq, lhs_tq, lhs, rhs_tq, rhs, train=False)
+      actual = aqt_ops.aqt_einsum(
+          eq,
+          lhs_tq,
+          lhs,
+          rhs_tq,
+          rhs,
+          train=False,
+          quantize_bwd=quantize_bwd,
+          lhs_grad_quantizer=lhs_bwd_tq,
+          rhs_grad_quantizer=rhs_bwd_tq,
+          random_gen=random_gen,
+      )
       # Although the input tensors are non-zeros, the result of einsum with
       # inference mode should be zeros because lhs uses zero-initialized
       # quantized var while rhs can restore its updated quantized variable.
@@ -656,15 +830,30 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       self.assertAllEqual(actual, expected)
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_exact(self, eq):
+  def test_exact(self, eq, quantize_bwd):
     with self.subTest("scale_one"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=1.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=1.0, quantize_bwd=quantize_bwd
+          )
+      )
     with self.subTest("scale_two"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=2.0, quantize_bwd=quantize_bwd
+          )
+      )
 
-    actual = _einsum_op(eq, lhs, rhs, lhs_config, rhs_config)
+    actual = _einsum_op(
+        eq,
+        lhs,
+        rhs,
+        lhs_config,
+        rhs_config,
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config,
+    )
     expected = tf.einsum(eq, lhs, rhs)
 
     with self.cached_session() as sess, sess.as_default():
@@ -672,15 +861,32 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       self.assertAllEqual(actual, expected)
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_exact_grads(self, eq):
+  def test_exact_grads(self, eq, quantize_bwd):
     with self.subTest("scale_one"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=1.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=1.0, quantize_bwd=quantize_bwd,
+          )
+      )
     with self.subTest("scale_two"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, True, True, scale=2.0, quantize_bwd=quantize_bwd,
+          )
+      )
 
-    actual_fwd = _einsum_op(eq, lhs, rhs, lhs_config, rhs_config)
+    random_noise_seed = 1234 if quantize_bwd else None
+    actual_fwd = _einsum_op(
+        eq,
+        lhs,
+        rhs,
+        lhs_config,
+        rhs_config,
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config,
+        random_noise_seed=random_noise_seed,
+    )
     expected_fwd = tf.einsum(eq, lhs, rhs)
 
     expected = tf.gradients([expected_fwd], [lhs, rhs])
@@ -689,20 +895,38 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     with self.cached_session() as sess, sess.as_default():
       tf.global_variables_initializer().run()
       for actual_grad, expected_grad in zip(actual, expected):
+        # Uniform noises in [-5, 5] while {-5, 5} has zero measure.
+        # Expect the gradient is still exact since (-5, 5) does not change
+        # rouding.
         self.assertAllEqual(actual_grad, expected_grad)
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_inexact(self, eq):
+  def test_inexact(self, eq, quantize_bwd):
     with self.subTest("larger_x_bound"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, scale=2.0, quantize_bwd=quantize_bwd
+              )
+      )
       lhs, rhs = lhs / 2.0, rhs / 2.0
     with self.subTest("smaller_x_bound"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=1.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, scale=1.0, quantize_bwd=quantize_bwd
+              )
+      )
       lhs, rhs = lhs * 2.0, rhs * 2.0
 
-    actual = _einsum_op(eq, lhs, rhs, lhs_config, rhs_config)
+    actual = _einsum_op(
+        eq,
+        lhs,
+        rhs,
+        lhs_config,
+        rhs_config,
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config,
+    )
     expected = tf.einsum(eq, lhs, rhs)
 
     with self.cached_session() as sess, sess.as_default():
@@ -710,17 +934,32 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       self.assertNotAllEqual(actual, expected)
 
   @parameterized.named_parameters(_generate_test_equations())
-  def test_inexact_grads(self, eq):
+  def test_inexact_grads(self, eq, quantize_bwd):
     with self.subTest("larger_x_bound"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=2.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, scale=2.0, quantize_bwd=quantize_bwd
+          )
+      )
       lhs, rhs = lhs / 2.0, rhs / 2.0
     with self.subTest("smaller_x_bound"):
-      lhs_config, lhs, rhs_config, rhs = self.exact_int8_einsum_example(
-          eq, scale=1.0)
+      lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+          self.exact_int8_einsum_example(
+              eq, scale=1.0, quantize_bwd=quantize_bwd
+          )
+      )
       lhs, rhs = lhs * 2.0, rhs * 2.0
 
-    actual_fwd = _einsum_op(eq, lhs, rhs, lhs_config, rhs_config)
+    actual_fwd = _einsum_op(
+        eq,
+        lhs,
+        rhs,
+        lhs_config,
+        rhs_config,
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config,
+    )
     expected_fwd = tf.einsum(eq, lhs, rhs)
 
     expected = tf.gradients([expected_fwd], [lhs, rhs])
@@ -730,6 +969,61 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       tf.global_variables_initializer().run()
       for actual_grad, expected_grad in zip(actual, expected):
         self.assertNotAllEqual(actual_grad, expected_grad)
+
+  @parameterized.named_parameters(_generate_test_equations(
+      # Testing bwd quant only, no need to include quantize_bwd in test cases.
+      append_quantize_bwd=False,
+      ))
+  def test_consistent_bwd_improves_grads(self, eq):
+    lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+        self.exact_int8_einsum_example(
+            eq, quantize_bwd=True, dynamic_bwd_quant=True,
+        )
+    )
+    def get_perturbed_gradients(random_noise_seed):
+      actual_fwd = _einsum_op(
+          eq,
+          lhs,
+          rhs,
+          lhs_config,
+          rhs_config,
+          quantize_bwd=True,
+          lhs_bwd_config=lhs_bwd_config,
+          rhs_bwd_config=rhs_bwd_config,
+          random_noise_seed=random_noise_seed,
+          varscope_name=f"einsum_seed_{random_noise_seed}",
+      )
+      return tf.gradients([actual_fwd], [lhs, rhs])
+
+    exact_fwd = tf.einsum(eq, lhs, rhs)
+    exact = tf.gradients([exact_fwd], [lhs, rhs])
+
+    biased = get_perturbed_gradients(None)
+    biased_errors = [tf.linalg.norm(i - j) for i, j in zip(biased, exact)]
+
+    num_samples = 8
+    qgrad_samples = [get_perturbed_gradients(i) for i in range(num_samples)]
+    estimate1 = qgrad_samples[0]
+    estimate8 = [tf.reduce_mean(g, axis=0) for g in zip(*qgrad_samples[:8])]
+
+    def get_error(estimate):
+      return [tf.linalg.norm(i - j) for i, j in zip(estimate, exact)]
+
+    sample_errors = get_error(estimate1)
+    ensemble_errors = get_error(estimate8)
+
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+
+      for biased_g, exact_g, sample_error, ensemble_err, biased_err in zip(
+          biased, exact, sample_errors, ensemble_errors, biased_errors
+          ):
+        # Check dynamic backward quant is inexact
+        self.assertNotAllEqual(biased_g, exact_g)
+        # unbiased estimate should have smaller errors than the biased one
+        self.assertAllLess(ensemble_err, biased_err)
+        # the unbiased estimate should eventually converge or make improvement
+        self.assertAllLess(ensemble_err, sample_error)
 
   @parameterized.named_parameters(_generate_equations_with_axes())
   def test_equations_with_axes(self, eq,
