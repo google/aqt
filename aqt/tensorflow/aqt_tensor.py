@@ -20,7 +20,7 @@ This module provides configurable functions for single-tensor calibration and
 quantization.
 """
 import dataclasses
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from aqt.common import aqt_common
 from aqt.common import aqt_config
@@ -89,6 +89,173 @@ def default_get_variable(name: str, shape: Iterable[int],
       use_resource=True)
 
 
+_DivideFn = Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
+
+
+def _lp_dev(
+    sum_of_lp_vals: tf.Tensor,  #
+    sum_of_ones: tf.Tensor,
+    lp_order: int,
+    divide_fn: _DivideFn = tf.math.divide_no_nan,
+) -> tf.Tensor:
+  """Computes lp deviation."""
+  if lp_order == 2:
+    # sqrt() is numerically more accurate
+    return tf.sqrt(
+        divide_fn(sum_of_lp_vals.read_value(), sum_of_ones.read_value())
+    )
+  else:
+    # TODO(b/205769820): Make sure if the output of pow op below is
+    # numerically valid
+    return divide_fn(sum_of_lp_vals.read_value(), sum_of_ones.read_value()) ** (
+        1.0 / lp_order
+    )
+
+
+def _reduce_fn(
+    stats_config: aqt_config.StatsConfig,
+    s: tf.Tensor,
+    weight: Optional[tf.Tensor],
+    reduce_max=False,
+) -> tf.Tensor:
+  """Reduce function to calculate statistics."""
+  if weight is not None:
+    if reduce_max:
+      # A maximum is a maximum, regardless of its nonzero weight.
+      s = tf.where_v2(weight > 0, s, 0)
+    else:
+      s = s * weight
+  reduce_fn = tf.math.reduce_max if reduce_max else tf.math.reduce_sum
+  s = reduce_fn(s, axis=list(stats_config.share_stats_axes), keepdims=True)
+  if stats_config.tpu_cross_replica_sum:
+    raise NotImplementedError(
+        'support for tpu_cross_replica_sum=True is not implemented'
+    )
+    s = tpu_ops.cross_replica_sum(s)  # pylint:disable=unreachable
+  return s
+
+
+def _sum_of_ones(
+    stats_config: aqt_config.StatsConfig,
+    x: tf.Tensor,
+    weight: Optional[tf.Tensor],
+) -> tf.Tensor:
+  """Computes the number of entries along non-shared stats axes (maybe filter zeros)."""
+  # Layers such as ReLU emit zeros often. In such cases, we can model
+  # the non-sparse distribution of weights separately, resulting in
+  # unbiased estimation of non-sparse mean l1 and lp.
+  # This clips away less of the distribution of inputs.
+  if stats_config.filter_zeros:
+    ones = tf.cast(tf.math.not_equal(x, 0), dtype=tf.float32)
+  else:
+    ones = tf.ones_like(x)
+  return _reduce_fn(stats_config, ones, weight)
+
+
+def _sum_of_vals(
+    stats_config: aqt_config.StatsConfig,
+    x: tf.Tensor,
+    weight: Optional[tf.Tensor],
+) -> tf.Tensor:
+  return _reduce_fn(stats_config, x, weight)
+
+
+def _max_of_abs_vals(
+    stats_config: aqt_config.StatsConfig,
+    x: tf.Tensor,
+    weight: Optional[tf.Tensor],
+) -> tf.Tensor:
+  return _reduce_fn(stats_config, tf.abs(x), weight, reduce_max=True)
+
+
+def _sum_of_l1_vals(
+    stats_config: aqt_config.StatsConfig,
+    x: tf.Tensor,
+    weight: Optional[tf.Tensor],
+) -> tf.Operation:
+  return _reduce_fn(stats_config, tf.abs(x), weight)
+
+
+def _sum_of_lp_vals(
+    stats_config: aqt_config.StatsConfig,
+    x: tf.Tensor,
+    weight: Optional[tf.Tensor],
+) -> tf.Operation:
+  # Below, we need not excerpt the zeros from updates to sum of
+  # vals, l1, and lp, because zeros do not affect those aggregates.
+
+  # Avoid unnecessary tf.abs for even powers.
+  px = x if stats_config.lp_order % 2 == 0 else tf.abs(x)
+
+  return _reduce_fn(stats_config, px**stats_config.lp_order, weight)
+
+
+def _stats_shape(
+    stats_config: aqt_config.StatsConfig, data_shape: Iterable[int]
+) -> List[int]:
+  stats_shape = list(data_shape)[:]
+  for axis in stats_config.share_stats_axes:
+    stats_shape[axis] = 1
+  return stats_shape
+
+
+def _bound(
+    calibration_config: aqt_config.CalibrationConfig,
+    stats_shape: Iterable[int],
+    sum_of_ones: Optional[tf.Tensor],
+    max_of_abs_vals: Optional[tf.Tensor],
+    sum_of_l1_vals: Optional[tf.Tensor],
+    sum_of_lp_vals: Optional[tf.Tensor],
+    divide_fn: _DivideFn,
+) -> tf.Tensor:
+  """Computes the upper bound."""
+  bound = tf.ones(stats_shape) * calibration_config.const_bound_coeff
+  if calibration_config.l1_dev_coeff:
+    l1_dev = divide_fn(sum_of_l1_vals, sum_of_ones)
+    bound += calibration_config.l1_dev_coeff * l1_dev
+  if calibration_config.lp_dev_coeff:
+    lp_dev = divide_fn(sum_of_lp_vals, sum_of_ones)
+    bound += calibration_config.lp_dev_coeff * lp_dev
+  if calibration_config.max_dev_coeff:
+    max_dev = max_of_abs_vals
+    bound += calibration_config.max_dev_coeff * max_dev
+  return bound
+
+
+def dynamic_bound(
+    config: aqt_config.StatsConfig,
+    calibration_config: aqt_config.CalibrationConfig,
+    x: tf.Tensor,
+    weight: Optional[tf.Tensor],
+) -> tf.Tensor:
+  """Comput the upper bound on input tensor values dynamically."""
+  config.validate(x.shape.as_list())
+  stats_shape = _stats_shape(config, x.shape.as_list())
+  divide_fn = tf.math.divide_no_nan if config.safe_divide else tf.divide
+  sum_of_ones = max_of_abs_vals = sum_of_l1_vals = sum_of_lp_vals = None
+  if any([
+      calibration_config.l1_dev_coeff,
+      calibration_config.lp_dev_coeff,
+      calibration_config.max_dev_coeff,
+  ]):
+    sum_of_ones = _sum_of_ones(config, x, weight)
+  if calibration_config.max_dev_coeff:
+    max_of_abs_vals = _max_of_abs_vals(config, x, weight)
+  if calibration_config.l1_dev_coeff:
+    sum_of_l1_vals = _sum_of_l1_vals(config, x, weight)
+  if calibration_config.lp_dev_coeff:
+    sum_of_lp_vals = _sum_of_lp_vals(config, x, weight)
+  return _bound(
+      calibration_config,
+      stats_shape,
+      sum_of_ones,
+      max_of_abs_vals,
+      sum_of_l1_vals,
+      sum_of_lp_vals,
+      divide_fn,
+  )
+
+
 class Stats:
   """Manages efficient gathering of running statistics."""
 
@@ -105,9 +272,7 @@ class Stats:
     self._config = config
     self._ema_update_count = self._config.ema_update_count
 
-    self.stats_shape = self._data_shape[:]
-    for axis in self._config.share_stats_axes:
-      self.stats_shape[axis] = 1
+    self.stats_shape = _stats_shape(self._config, self._data_shape)
 
     self.divide = (tf.math.divide_no_nan if self._config.safe_divide
                    else tf.math.divide)
@@ -136,44 +301,17 @@ class Stats:
           f'expected rank(x)={len(x.shape)} == rank(weight)={len(weight.shape)}'
       )
 
-    def update_var(var, s, reduce_max=False):
-      assert len(s.shape) == len(self._data_shape), (s.shape, self._data_shape)
-      if weight is not None:
-        if reduce_max:
-          # A maximum is a maximum, regardless of its nonzero weight.
-          s = tf.where_v2(weight > 0, s, 0)
-        else:
-          s = s * weight
-      reduce_fn = tf.math.reduce_max if reduce_max else tf.math.reduce_sum
-      s = reduce_fn(s, axis=list(self._config.share_stats_axes), keepdims=True)
-      if self._config.tpu_cross_replica_sum:
-        raise NotImplementedError(
-            'support for tpu_cross_replica_sum=True is not implemented')
-        s = tpu_ops.cross_replica_sum(s)  # pylint:disable=unreachable
+    def update_var(var, update_fn):
+      s = update_fn(self._config, x, weight)
       rate = 1.0 / self._ema_update_count
       return var.assign((1.0 - rate) * var.read_value() + rate * s)
 
-    # Layers such as ReLU emit zeros often. In such cases, we can model
-    # the non-sparse distribution of weights separately, resulting in
-    # unbiased estimation of non-sparse mean l1 and lp.
-    # This clips away less of the distribution of inputs.
-    if self._config.filter_zeros:
-      ones = tf.cast(tf.math.not_equal(x, 0), dtype=tf.float32)
-    else:
-      ones = tf.ones_like(x)
-
-    # Below, we need not excerpt the zeros from updates to sum of
-    # vals, l1, and lp, because zeros do not affect those aggregates.
-
-    # Avoid unnecessary tf.abs for even powers.
-    px = x if self._config.lp_order % 2 == 0 else tf.abs(x)
-
     return tf.group([
-        update_var(self._sum_of_ones, ones),
-        update_var(self._sum_of_vals, x),
-        update_var(self._max_of_abs_vals, tf.abs(x), reduce_max=True),
-        update_var(self._sum_of_l1_vals, tf.abs(x)),
-        update_var(self._sum_of_lp_vals, px**self._config.lp_order)
+        update_var(self._sum_of_ones, _sum_of_ones),
+        update_var(self._sum_of_vals, _sum_of_vals),
+        update_var(self._max_of_abs_vals, _max_of_abs_vals),
+        update_var(self._sum_of_l1_vals, _sum_of_l1_vals),
+        update_var(self._sum_of_lp_vals, _sum_of_lp_vals),
     ])
 
   def mean(self) -> tf.Tensor:
@@ -185,16 +323,12 @@ class Stats:
                        self._sum_of_ones.read_value())
 
   def lp_dev(self) -> tf.Tensor:
-    if self._config.lp_order == 2:
-      # sqrt() is numerically more accurate
-      return tf.sqrt(self.divide(self._sum_of_lp_vals.read_value(),
-                                 self._sum_of_ones.read_value()))
-    else:
-      # TODO(b/205769820): Make sure if the output of pow op below is
-      # numerically valid
-      return self.divide(self._sum_of_lp_vals.read_value(),
-                         self._sum_of_ones.read_value()
-                         )**(1.0 / self._config.lp_order)
+    return _lp_dev(
+        self._sum_of_lp_vals,
+        self._sum_of_ones,
+        self._config.lp_order,
+        self.divide,
+    )
 
   def max_dev(self) -> tf.Tensor:
     return self._max_of_abs_vals
@@ -202,10 +336,15 @@ class Stats:
   def bound(  #
       self, calibration_config: aqt_config.CalibrationConfig) -> tf.Tensor:
     """Compute the upper bound on input tensor values, broadcastable to input."""
-    return (calibration_config.l1_dev_coeff * self.l1_dev() +  #
-            calibration_config.lp_dev_coeff * self.lp_dev() +  #
-            calibration_config.max_dev_coeff * self.max_dev() +  #
-            calibration_config.const_bound_coeff)
+    return _bound(
+        calibration_config,
+        self.stats_shape,
+        self._sum_of_ones.read_value(),
+        self._max_of_abs_vals.read_value(),
+        self._sum_of_l1_vals.read_value(),
+        self._sum_of_lp_vals.read_value(),
+        self.divide,
+    )
 
   def calibration_variables(self) -> Dict[str, tf.Variable]:
     """Returns variables used for self.bound()."""
@@ -257,6 +396,22 @@ def _should_update_scale(
   return was_previously_inactive | first_event
 
 
+def _config_case(
+    tensor_configs: Iterable[aqt_config.AqtTensorConfig],  #
+    case_fn: Callable[[aqt_config.AqtTensorConfig], tf.Tensor],
+    event_count: tf.Tensor,
+) -> tf.Tensor:
+  """Switches over configs, applying case_fn to active one at event_count."""
+  assert tensor_configs, 'There must be at least one config.'
+
+  def make_case(config):
+    pred = is_config_active(config, event_count)
+    return pred, lambda: case_fn(config)
+
+  cases = [make_case(c) for c in tensor_configs]
+  return tf.case(cases, exclusive=True)
+
+
 class TensorQuantizer:
   """Maintains state associated with the quantization of an input tensor.
 
@@ -300,23 +455,32 @@ class TensorQuantizer:
     self.config = config
 
     with tf.variable_scope(name):
-      self._stats = Stats(
-          data_shape=self.data_shape,  #
-          config=self.config.stats_config,
-          get_variable=get_variable)
+      if not self.config.stats_config.dynamic:
+        self._stats = Stats(
+            data_shape=self.data_shape,  #
+            config=self.config.stats_config,
+            get_variable=get_variable,
+        )
 
-      # We intentionally initialize scale to zero to fail loudly if someone uses
-      # a parameter such as scale without properly update()-ing it.
-      self._scale = get_variable('scale', self._stats.stats_shape, tf.float32,
-                                 0)
-      # Save the inverse scale so that we don't recompute it at inference time.
-      self._inv_scale = get_variable('inv_scale', self._stats.stats_shape,
-                                     tf.float32, 0)
+        # We intentionally initialize scale to zero to fail loudly if someone
+        # uses a parameter such as scale without properly update()-ing it.
+        self._scale = get_variable(
+            'scale', self._stats.stats_shape, tf.float32, 0
+        )
+        # Save the inverse scale so that we don't recompute it at inference
+        # time.
+        self._inv_scale = get_variable(
+            'inv_scale', self._stats.stats_shape, tf.float32, 0
+        )
 
-      # Variable to save or read quantized tensors to, if the config says so.
-      if self.config.use_quantized_variable:
-        self.quantized_variable = get_variable('quantized_variable',
-                                               self.data_shape, tf.int8, 0)
+        # Variable to save or read quantized tensors to, if the config says so.
+        if self.config.use_quantized_variable:
+          self.quantized_variable = get_variable(
+              'quantized_variable', self.data_shape, tf.int8, 0
+          )
+      else:
+        # we still want to validate
+        self.config.stats_config.validate(self.data_shape)
 
       # This variable maintains the most recent event count at which this
       # TensorQuantizer was updated. This determines which quantization config
@@ -326,6 +490,12 @@ class TensorQuantizer:
       # active, we must update the scale, a calculation requiring this variable.
       self._last_update = get_variable('last_update', [], tf.int64,
                                        tf.int64.min)
+
+  def validate_static(self, msg: str):
+    if self.config.stats_config.dynamic:
+      raise ValueError('Cannot store statistics for dynamic quantization due '
+                       f'to possible unknown dimensions. {msg}'
+                       )
 
   def tracked_variables(self) -> Dict[str, tf.Variable]:
     """Returns variables used to track updates and calibration variables."""
@@ -339,6 +509,9 @@ class TensorQuantizer:
 
   def calibration_variables(self) -> Dict[str, tf.Variable]:
     """Returns scale and stats variables used to calibrate tensors."""
+    if self.config.stats_config.dynamic:
+      # if dynamic no calibration variables are stored
+      return {}
     return {
         'scale': self._scale,
         'inv_scale': self._inv_scale,
@@ -366,6 +539,8 @@ class TensorQuantizer:
   def clip_range(self) -> tf.Tensor:
     """Returns the tensor clip range or zeros if no int config is active."""
 
+    self.validate_static('Use dynamic_clip_range instead.')
+
     def case_fn(config: aqt_config.AqtTensorConfig) -> tf.Tensor:
       if isinstance(config.quant_config, aqt_config.FloatConfig):
         return tf.zeros(self._stats.stats_shape)
@@ -379,6 +554,38 @@ class TensorQuantizer:
       # stats values, which are updated regardless of freezing.
       clip_bound = aqt_common.get_clip_bound(config.quant_config)
       return self._inv_scale.read_value() * clip_bound
+
+    return self._config_case(case_fn, self._last_update.read_value())
+
+  def dynamic_clip_range(
+      self,
+      sample: tf.Tensor,
+      weight: Optional[tf.Tensor],
+      event_count: tf.Tensor,
+      train: bool,
+  ) -> tf.Tensor:
+    """Returns the tensor clip range or zeros if no int config is active."""
+    assert self.config.stats_config.dynamic
+    _, inv_scale = self._get_dynamic_quant_scale(
+        sample, weight, event_count, train
+    )
+
+    def case_fn(config: aqt_config.AqtTensorConfig) -> tf.Tensor:
+      if isinstance(config.quant_config, aqt_config.FloatConfig):
+        stats_shape = _stats_shape(
+            self.config.stats_config, sample.shape.as_list()
+        )
+        return tf.zeros(stats_shape)
+
+      # We return the range derived from the inverse scale, rather than
+      # from the stats themselves, to respect freezing settings and
+      # report the clipping range that's actually used at all times.
+      #
+      # The counterfactual clipping range that would have been used
+      # if we didn't freeze the scale can be re-derived from the current
+      # stats values, which are updated regardless of freezing.
+      clip_bound = aqt_common.get_clip_bound(config.quant_config)
+      return inv_scale * clip_bound
 
     return self._config_case(case_fn, self._last_update.read_value())
 
@@ -597,8 +804,8 @@ class TensorQuantizer:
       _, clip_bound, _, _, _, _, _, _ = self._quantization_params(train)
       return tf.abs(x) > clip_bound
 
-  def _get_quant_scale(self, train: bool) -> tf.Tensor:
-    """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
+  def _should_scale(self, train: bool) -> tf.Tensor:
+    """Returns True if any non-float quant config is active."""
     if not train and self.config.inference_config_index is not None:
       inference_config = self.config.tensor_configs[
           self.config.inference_config_index]
@@ -612,12 +819,110 @@ class TensorQuantizer:
 
         config_active = is_config_active(config, self._last_update)
         should_scale |= config_active
+    return should_scale
 
+  def _maybe_fallback_to_ones(
+      self,
+      should_scale: tf.Tensor,
+      scale: tf.Tensor,
+      inv_scale: tf.Tensor,
+  ) -> Tuple[tf.Tensor, tf.Tensor]:
+    """Fallback to ones if should not scale."""
     # TODO(lew): We can simplify the scopes to just 'compute scales'
     with tf.variable_scope('to_quant'):
       scale = tf.where_v2(  #
-          should_scale, self._scale, tf.ones_like(self._scale))
+          should_scale, scale, tf.ones_like(scale))
     with tf.variable_scope('from_quant'):
       inv_scale = tf.where_v2(  #
-          should_scale, self._inv_scale, tf.ones_like(self._inv_scale))
+          should_scale, inv_scale, tf.ones_like(inv_scale)
+      )
     return scale, inv_scale
+
+  def _get_quant_scale(self, train: bool) -> tf.Tensor:
+    """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
+    self.validate_static('_get_dynamic_quant_scale to calculate quant scale '
+                         'on the fly.')
+    should_scale = self._should_scale(train)
+
+    return self._maybe_fallback_to_ones(
+        should_scale,
+        self._scale,
+        self._inv_scale,
+    )
+
+  def _fresh_dynamic_scale(
+      self,
+      tensor_config: aqt_config.AqtTensorConfig,
+      sample: tf.Tensor,
+      weight: tf.Tensor,
+  ) -> Tuple[tf.Tensor, tf.Tensor]:
+    """Returns new scale, inverse scale for a given config and stats, if any."""
+    assert self.config.stats_config.dynamic
+    if isinstance(tensor_config.quant_config, aqt_config.FloatConfig):
+      # We shouldn't return the scale if the given config contains FloatConfig
+      # and no emulation;
+      # fill with a poison value if we get into this situation.
+      nan = tf.constant(
+          float('nan'),
+          sample.dtype,
+          _stats_shape(self.config.stats_config, sample.shape.as_list()),
+      )
+      return nan, nan
+
+    x_bound = dynamic_bound(
+        self.config.stats_config,
+        tensor_config.calibration_config,
+        sample,
+        weight,
+    )
+
+    clip_bound = aqt_common.get_clip_bound(tensor_config.quant_config)
+
+    new_scale = clip_bound / x_bound
+    inv_scale = x_bound / clip_bound
+    return new_scale, inv_scale
+
+  def _get_dynamic_quant_scale(
+      self,
+      sample: tf.Tensor,
+      weight: Optional[tf.Tensor],
+      event_count: tf.Tensor,
+      train: bool,
+  ) -> tf.Tensor:
+    """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
+    assert self.config.stats_config.dynamic
+
+    # We intentionally initialize scale to zero to fail loudly if someone uses
+    # a parameter such as scale without properly update()-ing it.
+    zeros = tf.zeros(
+        _stats_shape(self.config.stats_config, sample.shape.as_list()),
+        dtype=sample.dtype,
+    )
+
+    def case_fn(config):
+      # only need to update the event_count for dynamic quantizer
+      updates = []
+
+      # Ensure we read _last_update before we update it.
+      last_update = self._last_update.read_value()
+      with tf.control_dependencies([last_update]):
+        should_update_scale = _should_update_scale(
+            config, prev_event_count=last_update, new_event_count=event_count  #
+        )
+        updates.append(self._last_update.assign(event_count))
+
+      with tf.control_dependencies(updates):
+        scale, inv_scale = tf.cond(
+            should_update_scale,  #
+            lambda: self._fresh_dynamic_scale(config, sample, weight),
+            lambda: (zeros, zeros),
+        )
+        return scale, inv_scale
+
+    scale, inv_scale = self._config_case(case_fn, event_count)
+
+    # make sure the scale is updated
+    with tf.control_dependencies([scale.op, inv_scale.op]):
+      should_scale = self._should_scale(train)
+
+    return self._maybe_fallback_to_ones(should_scale, scale, inv_scale)

@@ -145,6 +145,7 @@ class StatsConfig(_BaseConfig):
   tpu_cross_replica_sum: bool = True
 
   safe_divide: bool = False
+  dynamic: Optional[bool] = False
 
   def validate(self, data_shape: List[Optional[int]]):  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
     """Validates this StatsConfig for the provided data shape.
@@ -169,12 +170,24 @@ class StatsConfig(_BaseConfig):
       raise ConfigError(
           f'share_stats_axes ({self.share_stats_axes}) must be strictly sorted')
 
-    unknown_axes = {i for i, dim in enumerate(data_shape) if dim is None}
-    shared_axes = set(self.share_stats_axes)
-    if not unknown_axes.issubset(shared_axes):
-      raise ConfigError(f'expected share_stats_axes ({self.share_stats_axes}) '
-                        'to contain unknown axes for given data shape '
-                        f'({data_shape})')
+    if self.dynamic:
+      if self.ema_update_count != 1:
+        raise ConfigError(
+            f'expected ema_update_count={self.ema_update_count} '
+            'to be 1 for dynamic quantization.'
+        )
+    else:
+      # if not dynamic, Stats needs to store stats so the shape has to be fully
+      # defined.
+      unknown_axes = {i for i, dim in enumerate(data_shape) if dim is None}
+      shared_axes = set(self.share_stats_axes)
+      if not unknown_axes.issubset(shared_axes):
+        raise ConfigError(
+            f'expected share_stats_axes ({self.share_stats_axes}) '
+            'to contain unknown axes for given data shape '
+            f'({data_shape}), otherwise one should use dynamic_bound which is'
+            ' stateless and does not requires stats storage.'
+        )
 
     if self.ema_update_count < 1:
       raise ConfigError(
@@ -332,6 +345,23 @@ class AqtScheduleConfig(_BaseConfig):
           f'inference_config_index ({self.inference_config_index}) must be '
           'at least 0 and less than len(tensor_configs) '
           f'({len(self.tensor_configs)})')
+    self.validate_dynamic()
+
+  def validate_dynamic(self):
+    if not self.stats_config.dynamic:
+      return
+    if self.use_quantized_variable:
+      raise ConfigError(
+          'dynamic quantization cannot use cache quantized '
+          'variables as it is input-dependent.'
+      )
+    for tensor_config in self.tensor_configs:
+      if tensor_config.freeze_scale_at_begin and not isinstance(
+          tensor_config.quant_config, FloatConfig
+      ):
+        raise ConfigError(
+            'dynamic quantization cannot freeze scale as it is input-dependent.'
+        )
 
   def fill_gaps_with_float_config(self):
     """Fills gaps with FloatConfig to always have one active config."""
