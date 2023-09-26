@@ -338,7 +338,7 @@ class TensorQuantizer(nn.Module):
 
     first_event = jnp.array(self._last_update.value == jnp.iinfo(jnp.int32).min)
 
-    return was_previously_inactive | first_event
+    return was_previously_inactive | first_event  # pytype: disable=bad-return-type  # jnp-type
 
   def _to_quant(self, x: jnp.ndarray, train: bool) -> jnp.ndarray:
     """Quantizes x with active quant config, if any, else act as identity."""
