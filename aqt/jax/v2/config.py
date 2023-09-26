@@ -39,7 +39,11 @@ class NoNumerics:
 class IntNumerics:
   bits: int
   preserve_zero: bool
+  # false = map max val on the end of the last bucket
+  # true = map max val on the middle of the last
   preserve_max_val: bool
+  clip: bool
+  round: bool
 
 
 Numerics = Union[NoNumerics, IntNumerics]
@@ -53,10 +57,6 @@ class Tensor:
   calib_shared_axes: Optional[list[int]]
   bound: Optional[float]
   bound_stop_grad: bool
-  # false = map max val on the end of the last bucket
-  # true = map max val on the middle of the last
-  clip: bool
-  round: bool
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
   clip_and_round: Optional[ClipAndRoundFn]
@@ -80,6 +80,8 @@ class Tensor:
           bits=bits,
           preserve_zero=pz,
           preserve_max_val=False,
+          clip=True,
+          round=True,
       )
 
     return Tensor(
@@ -87,8 +89,6 @@ class Tensor:
         calib_shared_axes=None,
         bound=None,
         bound_stop_grad=True,
-        clip=True,
-        round=True,
         clip_and_round=None,
         fresh_scale=None,
         noise_fn=None,
@@ -127,15 +127,6 @@ class DotGeneralRaw:
     ):
       dg_in_dtype = jnp.int8
       dg_accumulator_dtype = jnp.int32
-
-      if lhs_cfg.clip_and_round is None and rhs_cfg.clip_and_round is None:
-        msg = 'Need xhs.clip and xhs.round to use HW int8'
-        assert lhs_cfg.round and lhs_cfg.clip, msg
-        assert rhs_cfg.round and rhs_cfg.clip, msg
-      else:
-        # TODO(lew): This will never fail. This test is too early.
-        # It should be config validation already in dot_general call.
-        assert False, "For now, we don't allow HW int8 with clip_and_round"
     else:
       # Use None to determine the dtype on the fly in aqt_dot_general
       dg_in_dtype = None

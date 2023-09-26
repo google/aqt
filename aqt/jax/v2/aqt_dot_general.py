@@ -121,19 +121,19 @@ def _make_int_quant(cfg: config.Tensor):
       x = (x + cfg.noise_fn(x.shape, context.key)).astype(x.dtype)
 
     # Maybe clip
-    if cfg.clip:
+    if cfg.numerics.clip:
       # If we are not rounding, we just clip to bucket edges.
       fwd_clip_bound = edge_of_last_bucket
       # If, after clip, we are rounding, we need to make sure that
       # we won't round values at the edge_of_last_bucket away to the
       # non-existing bucket.
-      if cfg.round:
+      if cfg.numerics.round:
         # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
         fwd_clip_bound -= 0.5
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
 
     # Maybe round
-    if cfg.round:
+    if cfg.numerics.round:
       # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
       round_to_halves = not cfg.numerics.preserve_zero
       if round_to_halves:

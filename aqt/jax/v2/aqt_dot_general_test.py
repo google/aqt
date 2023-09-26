@@ -299,12 +299,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         # that the scales are not too large.
         def disable_quant(c):
           disable_quant_types(c)
-          c.lhs.round = False
-          c.rhs.round = False
+          c.lhs.numerics.round = False
+          c.rhs.numerics.round = False
           assert c.lhs.clip_and_round is None
           assert c.rhs.clip_and_round is None
-          # c.lhs.clip = False
-          # c.rhs.clip = False
+          # c.lhs.numerics.clip = False
+          # c.rhs.numerics.clip = False
         disable_quant(cfg.fwd)
         disable_quant(cfg.dlhs)
         disable_quant(cfg.drhs)
