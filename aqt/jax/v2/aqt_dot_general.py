@@ -72,10 +72,6 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     abs_max = jnp.asarray(cfg.bound).reshape((1,) * len(x.shape))
   # Attention: This line will change dtype of abs_max to float32
   abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
-  if cfg.bound_stop_grad:
-    # TODO(lew): Does not matter in DG, because we are using custom gradient.
-    #   We should take that into account somehow.
-    abs_max = lax.stop_gradient(abs_max)
 
   abs_max_mapped_to = _get_edge_of_last_int_bucket(cfg.numerics)
   if cfg.numerics.preserve_max_val:
@@ -185,6 +181,11 @@ def _scale_quant(x, *, cfg, ca, context):
     # With floor the biggest value (we are using jnp.max) is in the range of
     # clipping and therefore have a correct gradinet.
     scale = 2 ** jnp.floor(jnp.log2(scale))
+  if cfg.scale_stop_grad:
+    # TODO(lew): Does not matter in DG, because we are using custom gradient.
+    #   We should take that into account somehow.
+    scale = lax.stop_gradient(scale)
+
   x_s = _maybe_mul(x, scale)
   quant = cfg.clip_and_round or _make_int_quant(cfg)
   quant = functools.partial(quant, context=context)

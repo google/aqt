@@ -56,7 +56,7 @@ class Tensor:
   numerics: Numerics
   calib_shared_axes: Optional[list[int]]
   bound: Optional[float]
-  bound_stop_grad: bool
+  scale_stop_grad: bool
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
   clip_and_round: Optional[ClipAndRoundFn]
@@ -88,7 +88,7 @@ class Tensor:
         numerics=numerics,
         calib_shared_axes=None,
         bound=None,
-        bound_stop_grad=True,
+        scale_stop_grad=True,
         clip_and_round=None,
         fresh_scale=None,
         noise_fn=None,
