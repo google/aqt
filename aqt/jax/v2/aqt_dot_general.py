@@ -78,7 +78,7 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     abs_max = lax.stop_gradient(abs_max)
 
   abs_max_mapped_to = _get_edge_of_last_int_bucket(cfg.numerics)
-  if cfg.preserve_max_val:
+  if cfg.numerics.preserve_max_val:
     # In this case we are mapping abs_max onto center of the last bucket
     # Lose half of last bucket
     abs_max_mapped_to -= 0.5

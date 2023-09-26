@@ -39,6 +39,7 @@ class NoNumerics:
 class IntNumerics:
   bits: int
   preserve_zero: bool
+  preserve_max_val: bool
 
 
 Numerics = Union[NoNumerics, IntNumerics]
@@ -54,7 +55,6 @@ class Tensor:
   bound_stop_grad: bool
   # false = map max val on the end of the last bucket
   # true = map max val on the middle of the last
-  preserve_max_val: bool
   clip: bool
   round: bool
   # noise+clip+round
@@ -76,14 +76,17 @@ class Tensor:
       numerics = NoNumerics()
     else:
       pz = False if bits == 1 else True
-      numerics = IntNumerics(bits=bits, preserve_zero=pz)
+      numerics = IntNumerics(
+          bits=bits,
+          preserve_zero=pz,
+          preserve_max_val=False,
+      )
 
     return Tensor(
         numerics=numerics,
         calib_shared_axes=None,
         bound=None,
         bound_stop_grad=True,
-        preserve_max_val=False,
         clip=True,
         round=True,
         clip_and_round=None,
