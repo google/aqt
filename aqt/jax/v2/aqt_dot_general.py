@@ -94,10 +94,6 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   # T, T, 127.0, 1.0, 0.0  # bucket count is odd;  map onto the center of the last bucket
 
   new_scale = abs_max_mapped_to / abs_max
-  if cfg.po2_scale:
-    # With floor the bigges value (we are using jnp.max) is in the range of
-    # clipping and therefore have a correct gradinet.
-    new_scale = 2 ** jnp.floor(jnp.log2(new_scale))
   return new_scale
 
 
@@ -185,6 +181,10 @@ def _scale_quant(x, *, cfg, ca, context):
       _int_fresh_scale, cfg=cfg
   )
   scale = fresh_scale_fn(x)
+  if cfg.po2_scale:
+    # With floor the biggest value (we are using jnp.max) is in the range of
+    # clipping and therefore have a correct gradinet.
+    scale = 2 ** jnp.floor(jnp.log2(scale))
   x_s = _maybe_mul(x, scale)
   quant = cfg.clip_and_round or _make_int_quant(cfg)
   quant = functools.partial(quant, context=context)
@@ -597,32 +597,20 @@ However if there is any other use, we will drop that assumption."""
     # we need to share these axes: lhs[1:] , rhs[:-1]
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
 
-    if isinstance(cfg.lhs.numerics, config.NoNumerics):
-      pass
-    elif isinstance(cfg.lhs.numerics, config.IntNumerics):
-      # Flax assumptions.
-      assert cfg.lhs.calib_shared_axes == list(range(1, rank))
-      lhs_scale = _int_fresh_scale(lhs, cfg.lhs)
-      lhs = lhs * lhs_scale
-      quant = cfg.lhs.clip_and_round or _make_int_quant(cfg.lhs)
-      lhs = quant(lhs, None)
-    else:
-      assert False, cfg.lhs.numerics
+    # Flax assumptions.
+    assert cfg.lhs.calib_shared_axes == list(range(1, rank))
+    assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
 
-    if isinstance(cfg.rhs.numerics, config.NoNumerics):
-      pass
-    elif isinstance(cfg.rhs.numerics, config.IntNumerics):
-      assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
-      rhs_scale = _int_fresh_scale(rhs, cfg.rhs)
-      rhs = rhs * rhs_scale
-      quant = cfg.rhs.clip_and_round or _make_int_quant(cfg.rhs)
-      rhs = quant(rhs, None)
-    else:
-      assert False, cfg.rhs.numerics
+    lhs_q, lhs_inv_scale, _ = _scale_quant(
+        lhs, cfg=cfg.lhs, ca=None, context=None
+    )
+    rhs_q, rhs_inv_scale, _ = _scale_quant(
+        rhs, cfg=cfg.rhs, ca=None, context=None
+    )
 
     out = lax.conv_general_dilated(
-        lhs=lhs,
-        rhs=rhs,
+        lhs=lhs_q,
+        rhs=rhs_q,
         window_strides=window_strides,
         padding=padding,
         lhs_dilation=lhs_dilation,
@@ -634,19 +622,9 @@ However if there is any other use, we will drop that assumption."""
         preferred_element_type=preferred_element_type,
     )
 
-    if isinstance(cfg.lhs.numerics, config.NoNumerics):
-      pass
-    elif isinstance(cfg.lhs.numerics, config.IntNumerics):
-      out /= lhs_scale
-    else:
-      assert False
+    out = _maybe_mul(out, lhs_inv_scale)
+    out = _maybe_mul(out, rhs_inv_scale)
 
-    if isinstance(cfg.rhs.numerics, config.NoNumerics):
-      pass
-    elif isinstance(cfg.rhs.numerics, config.IntNumerics):
-      out /= rhs_scale
-    else:
-      assert False
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales
     # in 1xN (rows x colums) conv each row can have different scale, but
