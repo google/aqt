@@ -93,7 +93,6 @@ def _einsum_op(
     quantize_bwd: bool = False,
     lhs_bwd_config: Optional[aqt_config.AqtScheduleConfig] = None,
     rhs_bwd_config: Optional[aqt_config.AqtScheduleConfig] = None,
-    random_noise_seed: Optional[int] = 1234,
     **einsum_kwargs,
 ) -> tf.Tensor:
   """Updates quantizers at event_count=0 and computes einsum."""
@@ -105,17 +104,13 @@ def _einsum_op(
     lhs_bwd_tq, rhs_bwd_tq = None, None
     grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
     if lhs_bwd_config:
-      lhs_bwd_tq = aqt_tensor.TensorQuantizer(
+      lhs_bwd_tq = aqt_tensor.DynamicTensorQuantizer(
           grad_shape, lhs_bwd_config, name="lhs_bwd"
       )
     if rhs_bwd_config:
-      rhs_bwd_tq = aqt_tensor.TensorQuantizer(
+      rhs_bwd_tq = aqt_tensor.DynamicTensorQuantizer(
           grad_shape, rhs_bwd_config, name="rhs_bwd"
       )
-    if quantize_bwd and random_noise_seed is not None:
-      random_gen = tf.random.Generator.from_seed(random_noise_seed)
-    else:
-      random_gen = None
 
   event_count = tf.constant(0, tf.int64)
   updates = [
@@ -133,7 +128,6 @@ def _einsum_op(
         quantize_bwd,
         lhs_bwd_tq,
         rhs_bwd_tq,
-        random_gen=random_gen,
         **einsum_kwargs,
     )
 
@@ -623,6 +617,9 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       bwd_eq = aqt_einsum.get_einsum_transpose(eq, swap_ans=swap_ans)
       # 16 bits to preserve gradients
       grad_config, _ = _exact_schedule_config(16, bwd_eq, 1.0)
+      grad_config.use_quantized_variable = False
+      for tc in grad_config.tensor_configs:
+        tc.freeze_scale_at_begin = False
       return grad_config
 
     lhs_bwd_config = _get_grad_config(eq, False)
@@ -721,16 +718,14 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, rhs_config, name="rhs")
     if quantize_bwd:
       grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
-      lhs_bwd_tq = aqt_tensor.TensorQuantizer(
+      lhs_bwd_tq = aqt_tensor.DynamicTensorQuantizer(
           grad_shape, lhs_bwd_config, name="lhs_bwd"
       )
-      rhs_bwd_tq = aqt_tensor.TensorQuantizer(
+      rhs_bwd_tq = aqt_tensor.DynamicTensorQuantizer(
           grad_shape, rhs_bwd_config, name="rhs_bwd"
       )
-      random_gen = tf.random.Generator.from_seed(1234)
     else:
       lhs_bwd_tq = rhs_bwd_tq = None
-      random_gen = None
 
     # Update at least once to initialize scale, then grab the expected
     # value while in training mode.
@@ -750,7 +745,6 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
           quantize_bwd=quantize_bwd,
           lhs_grad_quantizer=lhs_bwd_tq,
           rhs_grad_quantizer=rhs_bwd_tq,
-          random_gen=random_gen,
       )
 
     with self.cached_session() as sess, sess.as_default():
@@ -767,7 +761,6 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
           quantize_bwd=quantize_bwd,
           lhs_grad_quantizer=lhs_bwd_tq,
           rhs_grad_quantizer=rhs_bwd_tq,
-          random_gen=random_gen,
       )
 
       self.assertAllEqual(actual, expected)
@@ -792,16 +785,14 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     rhs_tq = aqt_tensor.TensorQuantizer(rhs.shape, rhs_config, name="rhs")
     if quantize_bwd:
       grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
-      lhs_bwd_tq = aqt_tensor.TensorQuantizer(
+      lhs_bwd_tq = aqt_tensor.DynamicTensorQuantizer(
           grad_shape, lhs_bwd_config, name="lhs_bwd"
       )
-      rhs_bwd_tq = aqt_tensor.TensorQuantizer(
+      rhs_bwd_tq = aqt_tensor.DynamicTensorQuantizer(
           grad_shape, rhs_bwd_config, name="rhs_bwd"
       )
-      random_gen = tf.random.Generator.from_seed(1234)
     else:
       lhs_bwd_tq = rhs_bwd_tq = None
-      random_gen = None
 
     event_count = tf.constant(0, tf.int64)
 
@@ -820,7 +811,6 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
           quantize_bwd=quantize_bwd,
           lhs_grad_quantizer=lhs_bwd_tq,
           rhs_grad_quantizer=rhs_bwd_tq,
-          random_gen=random_gen,
       )
       # Although the input tensors are non-zeros, the result of einsum with
       # inference mode should be zeros because lhs uses zero-initialized
@@ -875,7 +865,6 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
           )
       )
 
-    random_noise_seed = 1234 if quantize_bwd else None
     actual_fwd = _einsum_op(
         eq,
         lhs,
@@ -885,7 +874,6 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
         quantize_bwd=quantize_bwd,
         lhs_bwd_config=lhs_bwd_config,
         rhs_bwd_config=rhs_bwd_config,
-        random_noise_seed=random_noise_seed,
     )
     expected_fwd = tf.einsum(eq, lhs, rhs)
 
@@ -980,7 +968,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
             eq, quantize_bwd=True, dynamic_bwd_quant=True,
         )
     )
-    def get_perturbed_gradients(random_noise_seed):
+    def get_perturbed_gradients(step_i):
       actual_fwd = _einsum_op(
           eq,
           lhs,
@@ -990,16 +978,12 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
           quantize_bwd=True,
           lhs_bwd_config=lhs_bwd_config,
           rhs_bwd_config=rhs_bwd_config,
-          random_noise_seed=random_noise_seed,
-          varscope_name=f"einsum_seed_{random_noise_seed}",
+          varscope_name=f"einsum_seed_{step_i}",
       )
       return tf.gradients([actual_fwd], [lhs, rhs])
 
     exact_fwd = tf.einsum(eq, lhs, rhs)
     exact = tf.gradients([exact_fwd], [lhs, rhs])
-
-    biased = get_perturbed_gradients(None)
-    biased_errors = [tf.linalg.norm(i - j) for i, j in zip(biased, exact)]
 
     num_samples = 8
     qgrad_samples = [get_perturbed_gradients(i) for i in range(num_samples)]
@@ -1015,13 +999,11 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     with self.cached_session() as sess, sess.as_default():
       tf.global_variables_initializer().run()
 
-      for biased_g, exact_g, sample_error, ensemble_err, biased_err in zip(
-          biased, exact, sample_errors, ensemble_errors, biased_errors
-          ):
-        # Check dynamic backward quant is inexact
-        self.assertNotAllEqual(biased_g, exact_g)
-        # unbiased estimate should have smaller errors than the biased one
-        self.assertAllLess(ensemble_err, biased_err)
+      for estimate1_g, exact_g, sample_error, ensemble_err in zip(
+          estimate1, exact, sample_errors, ensemble_errors
+      ):
+        # Check dynamic backward quant should be close
+        self.assertAllClose(estimate1_g, exact_g, rtol=1e-2)
         # the unbiased estimate should eventually converge or make improvement
         self.assertAllLess(ensemble_err, sample_error)
 

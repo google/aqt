@@ -15,7 +15,9 @@
 
 from typing import Set
 
+from absl import logging
 from absl.testing import absltest
+from absl.testing import parameterized
 from aqt.common import aqt_config
 from aqt.tensorflow import aqt_tensor
 from aqt.test import aqt_stats_test_base
@@ -32,6 +34,14 @@ def f32(x):
 def i64(x):
   """Cast input to i64."""
   return tf.cast(x, dtype=tf.int64)
+
+
+def padded_weight(data_shape):
+  rweight = np.random.uniform(low=0.0, high=1.0, size=data_shape)
+  return np.where(rweight > 0.5, rweight, np.zeros_like(rweight))
+
+
+none_weight = lambda _: None
 
 
 class StatsTest(aqt_stats_test_base.StatsTest):
@@ -91,9 +101,18 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
   Refer to aqt_tensor_test_base.AqtTensorQuantizerTest for more details.
   """
 
-  def make_tensor_quantizer(self, data_shape, config, name='tq'):
-    return aqt_tensor.TensorQuantizer(
-        data_shape=data_shape, config=config, name=name)
+  def make_tensor_quantizer(
+      self,
+      data_shape,
+      config,
+      name='tq',
+      quantizer_class=aqt_tensor.TensorQuantizer,
+  ):
+    return quantizer_class(
+        data_shape=data_shape,
+        config=config,
+        name=name,
+    )
 
   def update_quantizer(self, quant, sample, weight, event_count):
     with self.cached_session() as sess, sess.as_default():
@@ -107,6 +126,21 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
     with self.cached_session() as sess, sess.as_default():
       scale, inv_scale = quant._get_quant_scale(train)
       return scale.eval(), inv_scale.eval()
+
+  def get_dynamic_quant_scale(
+      self, quant, sample, weight, event_count, train=True
+  ):
+    with self.cached_session() as sess, sess.as_default():
+      scale, inv_scale = quant._get_dynamic_quant_scale(
+          sample, weight, event_count, train
+      )
+      return scale.eval(), inv_scale.eval()
+
+  def get_dynamic_clip_range(
+      self, quant, sample, weight, event_count, train=True
+  ):
+    with self.cached_session() as sess, sess.as_default():
+      return quant.dynamic_clip_range(sample, weight, event_count, train).eval()
 
   def init(self):
     with self.cached_session() as sess, sess.as_default():
@@ -228,6 +262,96 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
         with self.cached_session():
           tf.global_variables_initializer().run()
           self.assertAllEqual(var_qx, alt_qx)
+
+  @parameterized.product(
+      get_weight=[
+          none_weight,
+          padded_weight,
+      ],
+      calibration_config=[
+          aqt_config.CalibrationConfig(
+              max_dev_coeff=1,
+          ),
+          aqt_config.CalibrationConfig(
+              const_bound_coeff=2,
+          ),
+          aqt_config.CalibrationConfig(
+              l1_dev_coeff=3,
+          ),
+          aqt_config.CalibrationConfig(
+              lp_dev_coeff=4,
+          ),
+      ],
+  )
+  def test_dynamic_quant_consistent(self, get_weight, calibration_config):
+    """Tests basic dynamic quantization behavior is consistent whether toggle dynamic."""
+    bits = 8
+    x_bound = 16.0
+
+    sc = aqt_config.StatsConfig(
+        ema_update_count=1, share_stats_axes=[1], tpu_cross_replica_sum=False
+    )
+    tensor_config = aqt_config.AqtTensorConfig(
+        quant_config=aqt_config.IntQuantConfig(bits),
+        freeze_scale_at_begin=False,
+        calibration_config=calibration_config,
+        begin_at_event=10,
+        end_at_event=20,
+    )
+    config = aqt_config.AqtScheduleConfig(sc, [tensor_config])
+
+    data_shape = [128, 256]
+    # replace a non-shared stats axis to None to test dynamic shape
+    dynamic_data_shape = [None, data_shape[1]]
+    assert sc.share_stats_axes == [1]
+
+    weight = get_weight(data_shape)
+    if weight is not None:
+      weight = f32(weight)
+
+    quant = self.make_tensor_quantizer(data_shape, config, 'tq')
+    dyn_quant = self.make_tensor_quantizer(
+        dynamic_data_shape,
+        config,
+        'dtq',
+        quantizer_class=aqt_tensor.DynamicTensorQuantizer,
+    )
+    self.init()
+    for new_event_count, should_quantize in [
+        (9, False),
+        (10, True),
+        (19, True),
+        (20, False),
+    ]:
+      logging.info('loop: %s', (new_event_count, should_quantize))
+      x_init = np.random.uniform(low=-x_bound, high=x_bound, size=data_shape)
+      x_with_zeros = np.where(x_init > 0.5, x_init, np.zeros_like(x_init))
+      x = f32(x_with_zeros)
+      new_event_count = np.array(new_event_count, dtype=np.int64)
+      self.update_quantizer(quant, x, weight, new_event_count)
+
+      self.assertAllEqual(self.get_last_update(quant), new_event_count)
+
+      scale, inv_scale = self.get_quant_scale(quant)
+      clip_range = self.get_clip_range(quant)
+      ix = self.to_quant(quant, scale * x)
+
+      dyn_scale, dyn_inv_scale = self.get_dynamic_quant_scale(
+          dyn_quant, x, weight, new_event_count
+      )
+      dyn_clip_range = self.get_dynamic_clip_range(
+          dyn_quant, x, weight, new_event_count
+      )
+      dyn_ix = self.to_quant(dyn_quant, dyn_scale * x)
+
+      with self.subTest('scale'):
+        self.assertAllEqual(scale, dyn_scale)
+      with self.subTest('inv_scale'):
+        self.assertAllEqual(inv_scale, dyn_inv_scale)
+      with self.subTest('clip_range'):
+        self.assertAllEqual(clip_range, dyn_clip_range)
+      with self.subTest('to_quant'):
+        self.assertAllEqual(ix, dyn_ix)
 
 
 def extract_referenced_variables(t: tf.Tensor) -> Set[str]:

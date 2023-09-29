@@ -324,29 +324,6 @@ def get_einsum_transpose(eq: str, swap_ans: bool = False) -> str:
   return '{},{}->{}'.format(out_dims, y_dims, x_dims)
 
 
-def _maybe_random(
-    random_gen: Optional[tf.random.Generator],
-    shape: Iterable[int],
-    dtype: tf.dtypes.DType,
-) -> Optional[tf.Tensor]:
-  """Maybe generate random floats in [-0.5, 0.5] to perturb gradients."""
-  if random_gen is None:
-    return None
-  return random_gen.uniform(shape, -0.5, 0.5, dtype=dtype)
-
-
-def _round(
-    x_quantizer: aqt_tensor.TensorQuantizer,
-    x: tf.Tensor,
-    random: Optional[tf.Tensor],
-    train: bool,
-) -> tf.Tensor:
-  if random is None:
-    return x_quantizer._to_quant(x, train=train)
-  assert x.shape == random.shape, (x.shape, random.shape)
-  return x_quantizer._to_quant(x + random, train=train)
-
-
 def einsum(
     eq: str,  #
     lhs_quantizer: aqt_tensor.TensorQuantizer,
@@ -355,9 +332,8 @@ def einsum(
     rhs: tf.Tensor,
     train: bool = True,
     quantize_bwd: bool = False,
-    lhs_grad_quantizer: Optional[aqt_tensor.TensorQuantizer] = None,
-    rhs_grad_quantizer: Optional[aqt_tensor.TensorQuantizer] = None,
-    random_gen: Optional[tf.random.Generator] = None,
+    lhs_grad_quantizer: Optional[aqt_tensor.DynamicTensorQuantizer] = None,
+    rhs_grad_quantizer: Optional[aqt_tensor.DynamicTensorQuantizer] = None,
     **tf_einsum_kwargs,
 ) -> tf.Tensor:
   """Performs a quantized two-argument :py:func:`tf.einsum`.
@@ -382,9 +358,6 @@ def einsum(
       the einsum equation, `grad,rhs->lhs_grad`, in the backward pass.
     rhs_grad_quantizer: A `TensorQuantizer` for grad, which is used to quantize
       the einsum equation, `grad,lhs->rhs_grad`, in the backward pass.
-    random_gen: A `tf.random.Generator` used to generate random numbers between
-      [0.5, 0.5] added to the gradients before quantization in the backward
-      pass.
     **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
 
   Returns:
@@ -526,9 +499,17 @@ def einsum(
           lhs_scaled = lhs_scale * lhs
           rhs_scaled = rhs_scale * rhs
 
+          if quantize_bwd:
+            # Stochastic rounding is necessary for gradient quantization. We
+            # call uniform() once and share it across both scaled gradients to
+            # avoid potential bottlenecks with random number generation.
+            random = tf.random.uniform(
+                tf.shape(grad), -0.5, 0.5, dtype=grad.dtype
+            )
+
           def _bwd(
               eq: str,
-              grad_quantizer: Optional[aqt_tensor.TensorQuantizer],
+              grad_quantizer: Optional[aqt_tensor.DynamicTensorQuantizer],
               y_quantizer: aqt_tensor.TensorQuantizer,
               grad: tf.Tensor,
               qy: tf.Tensor,
@@ -552,19 +533,18 @@ def einsum(
                 # We assume the backward-pass quantization is dynamic so no need
                 # to pass weight when updating stats but still need _last_update
                 # to switch tensor configs.
-                update = grad_quantizer.update(
-                    grad,
-                    weight=None,
-                    event_count=lhs_quantizer._last_update,
+                grad_scale, grad_inv_scale = (
+                    grad_quantizer._get_dynamic_quant_scale(
+                        grad,
+                        weight=None,
+                        event_count=lhs_quantizer._last_update,
+                        train=train,
+                    )
                 )
-                with tf.control_dependencies([update]):
-                  grad_scale, grad_inv_scale = grad_quantizer._get_quant_scale(
-                      train
-                  )
-                  grad_scaled = grad_scale * grad
-                  random = _maybe_random(random_gen, grad.shape, grad.dtype)
-                  qgrad = _round(grad_quantizer, grad_scaled, random, train)
-                  assert len(grad_inv_scale.shape) == len(qgrad.shape)
+                grad_scaled = grad_scale * grad
+                grad_scaled = grad_scaled + random
+                qgrad = grad_quantizer._to_quant(grad_scaled, train=train)
+                assert len(grad_inv_scale.shape) == len(qgrad.shape)
             else:
               qgrad = grad
               grad_inv_scale = None

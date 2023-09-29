@@ -181,18 +181,26 @@ class StatsTest(tf.test.TestCase, parameterized.TestCase):
     config = aqt_test_shared_base.test_stats_config()
     config.filter_zeros = True
     calibration_config = aqt_config.CalibrationConfig(
-        const_bound_coeff=10, l1_dev_coeff=3, lp_dev_coeff=4, max_dev_coeff=100)
+        const_bound_coeff=1,
+        l1_dev_coeff=10,
+        lp_dev_coeff=100,
+        max_dev_coeff=1000,
+    )
 
     with self.cached_session():
-      self.set_stats([1, 5], config)
-      self.update([[1, 1, 1, -1, 0]], [[42]])
-      self.check_mean([[0.5]])
-      self.check_l1_dev([[1]])
-      self.check_lp_dev([[1]])
-      self.check_max_dev([[1]])
+      self.set_stats([1, 4], config)
+      self.update([[-3, 3, 15, 0]], [[42]])
+      self.check_mean([[5]])
+      # a non-trivial case where l1_dev, lp_dev and max_dev of different
+      # values to test each of them matches expected.
+      self.check_l1_dev([[7]])
+      self.check_lp_dev([[9]])
+      self.check_max_dev([[15]])
       # bound
       self.assertAllEqual(
-          self.bound(calibration_config), f32([[10 + 3 * 1 + 4 * 1 + 100 * 1]]))
+          self.bound(calibration_config),
+          f32([[1 + 10 * 7 + 100 * 9 + 1000 * 15]])
+          )
 
   @parameterized.named_parameters(
       dict(inp=[[0, 0, 0, 0, 0]], w=[[42]], mean=0, l1=0, lp=0, mx=0, bd=10,
