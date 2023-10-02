@@ -128,19 +128,37 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
       return scale.eval(), inv_scale.eval()
 
   def get_dynamic_quant_scale(
-      self, quant, sample, weight, event_count, train=True
+      self, quant, sample, weight, event_count, train,
+      data_shape,
   ):
-    with self.cached_session() as sess, sess.as_default():
-      scale, inv_scale = quant._get_dynamic_quant_scale(
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=data_shape, dtype=sample.dtype),
+            ]
+    )
+    def _get_dynamic_quant_scale(sample):
+      return quant._get_dynamic_quant_scale(
           sample, weight, event_count, train
       )
+    with self.cached_session() as sess, sess.as_default():
+      scale, inv_scale = _get_dynamic_quant_scale(sample)
       return scale.eval(), inv_scale.eval()
 
   def get_dynamic_clip_range(
-      self, quant, sample, weight, event_count, train=True
+      self, quant, sample, weight, event_count, train,
+      data_shape,
   ):
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=data_shape, dtype=sample.dtype),
+            ]
+    )
+    def _get_dynamic_clip_range(sample):
+      return quant.dynamic_clip_range(
+          sample, weight, event_count, train
+      )
     with self.cached_session() as sess, sess.as_default():
-      return quant.dynamic_clip_range(sample, weight, event_count, train).eval()
+      return _get_dynamic_clip_range(sample).eval()
 
   def init(self):
     with self.cached_session() as sess, sess.as_default():
@@ -337,10 +355,12 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
       ix = self.to_quant(quant, scale * x)
 
       dyn_scale, dyn_inv_scale = self.get_dynamic_quant_scale(
-          dyn_quant, x, weight, new_event_count
+          dyn_quant, x, weight, new_event_count, train=True,
+          data_shape=dynamic_data_shape,
       )
       dyn_clip_range = self.get_dynamic_clip_range(
-          dyn_quant, x, weight, new_event_count
+          dyn_quant, x, weight, new_event_count, train=True,
+          data_shape=dynamic_data_shape
       )
       dyn_ix = self.to_quant(dyn_quant, dyn_scale * x)
 

@@ -146,13 +146,15 @@ class StatsConfig(_BaseConfig):
 
   safe_divide: bool = False
 
-  def validate(self, data_shape: List[Optional[int]]):  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+  def validate(self, data_shape: List[Optional[int]],  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+               dynamic: bool = False):
     """Validates this StatsConfig for the provided data shape.
 
     Args:
       data_shape: the shape of the input tensor which will be quantized with
         self as the statistics configuration. If an entry is None, this
         indicates a dimension whose size is unknown at graph compilation time.
+      dynamic: whether the quantization is dynamic.
 
     Raises:
       ConfigError: if any of the specified share_stats_axes are not between
@@ -169,12 +171,13 @@ class StatsConfig(_BaseConfig):
       raise ConfigError(
           f'share_stats_axes ({self.share_stats_axes}) must be strictly sorted')
 
-    unknown_axes = {i for i, dim in enumerate(data_shape) if dim is None}
-    shared_axes = set(self.share_stats_axes)
-    if not unknown_axes.issubset(shared_axes):
-      raise ConfigError(f'expected share_stats_axes ({self.share_stats_axes}) '
-                        'to contain unknown axes for given data shape '
-                        f'({data_shape})')
+    if not dynamic:
+      unknown_axes = {i for i, dim in enumerate(data_shape) if dim is None}
+      shared_axes = set(self.share_stats_axes)
+      if not unknown_axes.issubset(shared_axes):
+        raise ConfigError(f'expected share_stats_axes ({self.share_stats_axes})'
+                          ' to contain unknown axes for given data shape '
+                          f'({data_shape})')
 
     if self.ema_update_count < 1:
       raise ConfigError(

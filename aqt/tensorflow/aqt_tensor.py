@@ -192,10 +192,29 @@ def _get_stats_shape(
   return stats_shape
 
 
+def _init_dynamic_stats(
+    stats_config: aqt_config.StatsConfig,
+    x: tf.Tensor,
+    init_value: float = 0.0,
+) -> tf.Tensor:
+  """Initializes a dynamic statistical tensor."""
+  # assume x is of dynamic shape and we want to have a constant tensor with the
+  # shape of x except for shared statistics axes where dimensions are ones.
+  rank = len(x.shape.as_list())
+  indices = []
+  for i in range(rank):
+    if i in stats_config.share_stats_axes:
+      indices.append(slice(0, 1))
+    else:
+      indices.append(slice(None))
+  ones = tf.ones_like(x[indices], dtype=x.dtype)
+  return ones * init_value
+
+
 def _bound(
     calibration_config: aqt_config.CalibrationConfig,
     lp_order: int,
-    stats_shape: Iterable[int],
+    init_bound: tf.Tensor,
     sum_of_ones: Optional[tf.Tensor],
     max_of_abs_vals: Optional[tf.Tensor],
     sum_of_l1_vals: Optional[tf.Tensor],
@@ -203,7 +222,7 @@ def _bound(
     divide_fn: _DivideFn,
 ) -> tf.Tensor:
   """Computes the upper bound."""
-  bound = tf.ones(stats_shape) * calibration_config.const_bound_coeff
+  bound = init_bound + calibration_config.const_bound_coeff
   if calibration_config.l1_dev_coeff:
     l1_dev = divide_fn(sum_of_l1_vals, sum_of_ones)
     bound += calibration_config.l1_dev_coeff * l1_dev
@@ -223,8 +242,8 @@ def _dynamic_bound(
     weight: Optional[tf.Tensor],
 ) -> tf.Tensor:
   """Compute the upper bound on input tensor values dynamically."""
-  config.validate(x.shape.as_list())
-  stats_shape = _get_stats_shape(config, x.shape.as_list())
+  config.validate(x.shape.as_list(), dynamic=True)
+  init_bound = _init_dynamic_stats(config, x, init_value=0.0)
   divide_fn = tf.math.divide_no_nan if config.safe_divide else tf.divide
   sum_of_ones = max_of_abs_vals = sum_of_l1_vals = sum_of_lp_vals = None
   if any([
@@ -242,7 +261,7 @@ def _dynamic_bound(
   return _bound(
       calibration_config,
       config.lp_order,
-      stats_shape,
+      init_bound,
       sum_of_ones,
       max_of_abs_vals,
       sum_of_l1_vals,
@@ -336,7 +355,7 @@ class Stats:
     return _bound(
         calibration_config,
         self._config.lp_order,
-        self.stats_shape,
+        tf.zeros(self.stats_shape, dtype=tf.float32),
         self._sum_of_ones.read_value(),
         self._max_of_abs_vals,
         self._sum_of_l1_vals.read_value(),
@@ -917,8 +936,7 @@ class DynamicTensorQuantizer(TensorQuantizerBase):
 
     def case_fn(config: aqt_config.AqtTensorConfig) -> tf.Tensor:
       if isinstance(config.quant_config, aqt_config.FloatConfig):
-        stats_shape = _get_stats_shape(self.config.stats_config, sample.shape)
-        return tf.zeros(stats_shape, dtype=sample.dtype)
+        return tf.zeros_like(inv_scale, dtype=inv_scale.dtype)
 
       # We return the range derived from the inverse scale, rather than
       # from the stats themselves, to respect freezing settings and
@@ -943,12 +961,8 @@ class DynamicTensorQuantizer(TensorQuantizerBase):
       # We shouldn't return the scale if the given config contains FloatConfig
       # and no emulation;
       # fill with a poison value if we get into this situation.
-      stats_shape = _get_stats_shape(self.config.stats_config, sample.shape)
-      nan = tf.constant(
-          float('nan'),
-          sample.dtype,
-          stats_shape,
-      )
+      nan = _init_dynamic_stats(
+          self.config.stats_config, sample, init_value=float('nan'))
       return nan, nan
 
     x_bound = _dynamic_bound(
@@ -975,9 +989,7 @@ class DynamicTensorQuantizer(TensorQuantizerBase):
 
     # We intentionally initialize scale to zero to fail loudly if someone uses
     # a parameter such as scale without properly update()-ing it.
-    stats_shape = _get_stats_shape(self.config.stats_config, sample.shape)
-    zeros = tf.zeros(stats_shape, dtype=sample.dtype)
-
+    zeros = _init_dynamic_stats(self.config.stats_config, sample, init_value=0)
     def case_fn(config):
       # only need to update the event_count for dynamic quantizer
       updates = []
