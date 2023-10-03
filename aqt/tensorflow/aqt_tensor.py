@@ -183,11 +183,22 @@ def _sum_of_lp_vals(
   return _reduce_fn(stats_config, px**stats_config.lp_order, weight)
 
 
-def _get_stats_shape(
-    stats_config: aqt_config.StatsConfig, data_shape: Iterable[int]
-) -> List[int]:
+def get_stats_shape(
+    share_stats_axes: Iterable[int], data_shape: Iterable[Optional[int]]
+) -> List[Optional[int]]:
+  """Returns the shape of the statistics.
+
+  Replaces the dimensions in the data shape with ones where we share statistics.
+
+  Args:
+    share_stats_axes: axes where statistics are shared.
+    data_shape: shape of a tensor.
+
+  Returns:
+    the shape of statistics.
+  """
   stats_shape = list(data_shape)
-  for axis in stats_config.share_stats_axes:
+  for axis in share_stats_axes:
     stats_shape[axis] = 1
   return stats_shape
 
@@ -286,9 +297,10 @@ class Stats:
     self._config = config
     self._ema_update_count = self._config.ema_update_count
 
-    self.stats_shape = self._data_shape[:]
-    for axis in self._config.share_stats_axes:
-      self.stats_shape[axis] = 1
+    self.stats_shape = get_stats_shape(
+        self._config.share_stats_axes,
+        self._data_shape,
+    )
 
     self.divide = (tf.math.divide_no_nan if self._config.safe_divide
                    else tf.math.divide)
