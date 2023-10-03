@@ -144,9 +144,9 @@ def _sum_of_ones(
   # unbiased estimation of non-sparse mean l1 and lp.
   # This clips away less of the distribution of inputs.
   if stats_config.filter_zeros:
-    ones = tf.cast(tf.math.not_equal(x, 0), dtype=tf.float32)
+    ones = tf.cast(tf.math.not_equal(x, 0), dtype=x.dtype)
   else:
-    ones = tf.ones_like(x)
+    ones = tf.ones_like(x, dtype=x.dtype)
   return _reduce_fn(stats_config, ones, weight)
 
 
@@ -183,11 +183,22 @@ def _sum_of_lp_vals(
   return _reduce_fn(stats_config, px**stats_config.lp_order, weight)
 
 
-def _get_stats_shape(
-    stats_config: aqt_config.StatsConfig, data_shape: Iterable[int]
-) -> List[int]:
+def get_stats_shape(
+    share_stats_axes: Iterable[int], data_shape: Iterable[Optional[int]]
+) -> List[Optional[int]]:
+  """Returns the shape of the statistics.
+
+  Replaces the dimensions in the data shape with ones where we share statistics.
+
+  Args:
+    share_stats_axes: axes where statistics are shared.
+    data_shape: shape of a tensor.
+
+  Returns:
+    the shape of statistics.
+  """
   stats_shape = list(data_shape)
-  for axis in stats_config.share_stats_axes:
+  for axis in share_stats_axes:
     stats_shape[axis] = 1
   return stats_shape
 
@@ -278,7 +289,8 @@ class Stats:
       *,
       data_shape: Iterable[Optional[int]],
       config: aqt_config.StatsConfig,
-      get_variable: GetVariable):
+      get_variable: GetVariable,
+      dtype=tf.float32):
     self._data_shape = list(data_shape)
     config.validate(self._data_shape)
     if config.lp_order > 30:
@@ -286,15 +298,17 @@ class Stats:
     self._config = config
     self._ema_update_count = self._config.ema_update_count
 
-    self.stats_shape = self._data_shape[:]
-    for axis in self._config.share_stats_axes:
-      self.stats_shape[axis] = 1
+    self.stats_shape = get_stats_shape(
+        self._config.share_stats_axes,
+        self._data_shape,
+    )
 
     self.divide = (tf.math.divide_no_nan if self._config.safe_divide
                    else tf.math.divide)
+    self.dtype = dtype
 
     def mk_var(name, init_val):
-      return get_variable(name, self.stats_shape, tf.float32, init_val)
+      return get_variable(name, self.stats_shape, self.dtype, init_val)
 
     self._sum_of_ones = mk_var('sum_of_ones', self._config.update_count_prior)
     self._sum_of_vals = mk_var(
@@ -320,7 +334,8 @@ class Stats:
     def update_var(var, update_fn):
       s = update_fn(self._config, x, weight)
       rate = 1.0 / self._ema_update_count
-      return var.assign((1.0 - rate) * var.read_value() + rate * s)
+      ema = (1.0 - rate) * var.read_value() + rate * s
+      return var.assign(tf.cast(ema, var.dtype))
 
     return tf.group([
         update_var(self._sum_of_ones, _sum_of_ones),
@@ -355,7 +370,7 @@ class Stats:
     return _bound(
         calibration_config,
         self._config.lp_order,
-        tf.zeros(self.stats_shape, dtype=tf.float32),
+        tf.zeros(self.stats_shape, dtype=self.dtype),
         self._sum_of_ones.read_value(),
         self._max_of_abs_vals,
         self._sum_of_l1_vals.read_value(),
@@ -441,11 +456,13 @@ class TensorQuantizerBase:
       config: aqt_config.AqtScheduleConfig,
       get_variable: GetVariable = default_get_variable,
       name: str = 'tensor_quantizer_base',
+      dtype: tf.dtypes.DType = tf.float32,
   ):
     self.data_shape = list(data_shape)
     config.fill_gaps_with_float_config()
     config.validate(self.data_shape)
     self.config = config
+    self._dtype = dtype
 
     with tf.variable_scope(name):
       # This variable maintains the most recent event count at which this
@@ -514,7 +531,7 @@ class TensorQuantizerBase:
       if isinstance(config.quant_config, aqt_config.FloatConfig):
         params.clip_bound = tf.where_v2(config_active, float('inf'), 0.0)
       elif isinstance(config.quant_config, aqt_config.IntQuantConfig):
-        config_active = tf.cast(config_active, tf.float32)
+        config_active = tf.cast(config_active, self._dtype)
         params.should_quantize += config_active
 
         # TODO(vladf): some serving environments, such as adbrain,
@@ -538,7 +555,7 @@ class TensorQuantizerBase:
         params.should_use_small_float += config_active
 
         params.clip_bound += (
-            tf.cast(config_active, tf.float32) *
+            tf.cast(config_active, self._dtype) *
             aqt_common.get_clip_bound(config.quant_config))
 
         params.mantissa_bits += (
@@ -687,12 +704,14 @@ class TensorQuantizer(TensorQuantizerBase):
       config: aqt_config.AqtScheduleConfig,
       get_variable: GetVariable = default_get_variable,
       name: str = 'tensor_quantizer',
+      dtype: tf.DType = tf.float32,
   ):
     super().__init__(
         data_shape=data_shape,
         config=config,
         get_variable=get_variable,
         name=name,
+        dtype=dtype,
     )
 
     with tf.variable_scope(name):
@@ -705,11 +724,11 @@ class TensorQuantizer(TensorQuantizerBase):
       # We intentionally initialize scale to zero to fail loudly if someone uses
       # a parameter such as scale without properly update()-ing it.
       self._scale = get_variable(
-          'scale', self._stats.stats_shape, tf.float32, 0
+          'scale', self._stats.stats_shape, self._dtype, 0
       )
       # Save the inverse scale so that we don't recompute it at inference time.
       self._inv_scale = get_variable(
-          'inv_scale', self._stats.stats_shape, tf.float32, 0
+          'inv_scale', self._stats.stats_shape, self._dtype, 0
       )
 
       # Variable to save or read quantized tensors to, if the config says so.
@@ -742,7 +761,7 @@ class TensorQuantizer(TensorQuantizerBase):
       # We shouldn't update the scale if the given config contains FloatConfig
       # and no emulation;
       # fill with a poison value if we get into this situation.
-      nan = tf.constant(float('nan'), tf.float32, self._stats.stats_shape)
+      nan = tf.constant(float('nan'), self._dtype, self._stats.stats_shape)
       return nan, nan
 
     x_bound = self._stats.bound(config.calibration_config)
@@ -909,6 +928,7 @@ class DynamicTensorQuantizer(TensorQuantizerBase):
       config: aqt_config.AqtScheduleConfig,
       get_variable: GetVariable = default_get_variable,
       name: str = 'dynamic_tensor_quantizer',
+      dtype: tf.DType = tf.float32,
   ):
     validate_dynamic(config)
     super().__init__(
@@ -916,6 +936,7 @@ class DynamicTensorQuantizer(TensorQuantizerBase):
         config=config,
         get_variable=get_variable,
         name=name,
+        dtype=dtype,
     )
 
   def calibration_variables(self) -> Dict[str, tf.Variable]:
