@@ -41,12 +41,16 @@ def _stats_config(share_stats_axes: Sequence[int]) -> aqt_config.StatsConfig:
 
 def _schedule_config(
     bits: int, const_bound_coeff: float,
-    share_stats_axes: Sequence[int]) -> aqt_config.AqtScheduleConfig:
+    share_stats_axes: Sequence[int],
+    freeze_scale_at_begin: bool = True) -> aqt_config.AqtScheduleConfig:
   """Creates schedule config with dynamic quantization."""
   iqc = aqt_config.IntQuantConfig(bits=bits)
   cc = aqt_config.CalibrationConfig(const_bound_coeff=const_bound_coeff)
   tc = aqt_config.AqtTensorConfig(
-      quant_config=iqc, calibration_config=cc, freeze_scale_at_begin=True)
+      quant_config=iqc,
+      calibration_config=cc,
+      freeze_scale_at_begin=freeze_scale_at_begin
+      )
   sc = _stats_config(share_stats_axes)
   return aqt_config.AqtScheduleConfig(sc, [tc])
 
@@ -93,13 +97,18 @@ def _einsum_op(
     quantize_bwd: bool = False,
     lhs_bwd_config: Optional[aqt_config.AqtScheduleConfig] = None,
     rhs_bwd_config: Optional[aqt_config.AqtScheduleConfig] = None,
+    dynamic_fwd_quant: bool = False,
     **einsum_kwargs,
 ) -> tf.Tensor:
   """Updates quantizers at event_count=0 and computes einsum."""
   with tf.variable_scope(varscope_name):
-    lhs_tq = aqt_tensor.TensorQuantizer(
+    tensor_quantizer_cls = (
+        aqt_tensor.DynamicTensorQuantizer if dynamic_fwd_quant
+        else aqt_tensor.TensorQuantizer
+    )
+    lhs_tq = tensor_quantizer_cls(
         lhs.shape, lhs_config, name="lhs")
-    rhs_tq = aqt_tensor.TensorQuantizer(
+    rhs_tq = tensor_quantizer_cls(
         rhs.shape, rhs_config, name="rhs")
     lhs_bwd_tq, rhs_bwd_tq = None, None
     grad_shape = aqt_einsum.get_out_shape(eq, lhs.shape, rhs.shape)
@@ -113,10 +122,14 @@ def _einsum_op(
       )
 
   event_count = tf.constant(0, tf.int64)
-  updates = [
-      lhs_tq.update(lhs, lhs_weights, event_count),
-      rhs_tq.update(rhs, rhs_weights, event_count)
-  ]
+  updates = []
+  for argument, weights, tq in [
+      (lhs, lhs_weights, lhs_tq),
+      (rhs, rhs_weights, rhs_tq),
+  ]:
+    # update statistics only if the quantizer is not dynamic
+    if isinstance(tq, aqt_tensor.TensorQuantizer):
+      updates.append(tq.update(argument, weights, event_count))
   with tf.control_dependencies(updates):
     return aqt_ops.aqt_einsum(
         eq,
@@ -128,6 +141,7 @@ def _einsum_op(
         quantize_bwd,
         lhs_bwd_tq,
         rhs_bwd_tq,
+        event_count=tf.constant(0, tf.int64) if dynamic_fwd_quant else None,
         **einsum_kwargs,
     )
 
@@ -570,6 +584,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       scale: float = 1.0,
       quantize_bwd: bool = False,
       dynamic_bwd_quant: bool = False,
+      dynamic_fwd_quant: bool = False,
   ):
     """Returns a pair of tensors and config to einsum exactly."""
     lhs, rhs, _ = aqt_einsum._parse_equation(eq)
@@ -591,7 +606,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     lhs = make_tensor(lhs_shape) * scale
     rhs = make_tensor(rhs_shape) * scale
 
-    def _exact_schedule_config(bits, eq, scale):
+    def _exact_schedule_config(bits, eq, scale, freeze_scale):
       iqc = aqt_config.IntQuantConfig(bits=bits, preserve_zero=True)
       clip_bound = aqt_common.get_clip_bound(iqc)
       assert symmetric_uniform_range <= clip_bound
@@ -600,14 +615,17 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
 
       # to exactly represent quantized lhs and rhs
       const_bound_coeff = scale * clip_bound
-      lhs_config = _schedule_config(bits, const_bound_coeff, lhs_caxes)
-      rhs_config = _schedule_config(bits, const_bound_coeff, rhs_caxes)
+      lhs_config = _schedule_config(bits, const_bound_coeff, lhs_caxes,
+                                    freeze_scale_at_begin=freeze_scale)
+      rhs_config = _schedule_config(bits, const_bound_coeff, rhs_caxes,
+                                    freeze_scale_at_begin=freeze_scale)
       return lhs_config, rhs_config
 
-    lhs_config, rhs_config = _exact_schedule_config(8, eq, scale)
+    lhs_config, rhs_config = _exact_schedule_config(8, eq, scale,
+                                                    not dynamic_fwd_quant)
 
-    lhs_config.use_quantized_variable = quantize_lhs
-    rhs_config.use_quantized_variable = quantize_rhs
+    lhs_config.use_quantized_variable = quantize_lhs and not dynamic_fwd_quant
+    rhs_config.use_quantized_variable = quantize_rhs and not dynamic_fwd_quant
 
     def _get_grad_config(eq: str,
                          swap_ans: bool
@@ -616,7 +634,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
         return None
       bwd_eq = aqt_einsum.get_einsum_transpose(eq, swap_ans=swap_ans)
       # 16 bits to preserve gradients
-      grad_config, _ = _exact_schedule_config(16, bwd_eq, 1.0)
+      grad_config, _ = _exact_schedule_config(16, bwd_eq, 1.0, False)
       grad_config.use_quantized_variable = False
       for tc in grad_config.tensor_configs:
         tc.freeze_scale_at_begin = False
@@ -887,6 +905,42 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
         # Expect the gradient is still exact since (-5, 5) does not change
         # rouding.
         self.assertAllEqual(actual_grad, expected_grad)
+
+  @parameterized.named_parameters(_generate_test_equations())
+  def test_exact_grads_dynamic(self, eq, quantize_bwd):
+    lhs_config, lhs, rhs_config, rhs, lhs_bwd_config, rhs_bwd_config = (
+        self.exact_int8_einsum_example(
+            eq, True, True, scale=2.0, quantize_bwd=quantize_bwd,
+            dynamic_fwd_quant=True
+        )
+    )
+
+    actual_fwd = _einsum_op(
+        eq,
+        lhs,
+        rhs,
+        lhs_config,
+        rhs_config,
+        quantize_bwd=quantize_bwd,
+        lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config,
+        dynamic_fwd_quant=True,
+    )
+    expected_fwd = tf.einsum(eq, lhs, rhs)
+
+    expected = tf.gradients([expected_fwd], [lhs, rhs])
+    actual = tf.gradients([actual_fwd], [lhs, rhs])
+
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+      with self.subTest("fwd"):
+        self.assertAllEqual(actual_fwd, expected_fwd)
+      with self.subTest("bwd"):
+        for actual_grad, expected_grad in zip(actual, expected):
+          # Uniform noises in [-5, 5] while {-5, 5} has zero measure.
+          # Expect the gradient is still exact since (-5, 5) does not change
+          # rouding.
+          self.assertAllEqual(actual_grad, expected_grad)
 
   @parameterized.named_parameters(_generate_test_equations())
   def test_inexact(self, eq, quantize_bwd):
