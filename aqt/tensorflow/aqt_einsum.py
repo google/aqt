@@ -593,8 +593,9 @@ def einsum(
                     )
                 )
                 grad_scaled = grad_scale * grad
-                grad_scaled = grad_scaled + random
-                qgrad = grad_quantizer._to_quant(grad_scaled, train=train)
+                qgrad = grad_quantizer._to_quant(
+                    grad_scaled, train=train, random=random
+                )
                 assert len(grad_inv_scale.shape) == len(qgrad.shape)
             else:
               qgrad = grad

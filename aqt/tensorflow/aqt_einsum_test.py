@@ -471,7 +471,11 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       tf.global_variables_initializer().run()
       self.assertAllEqual(expected, actual)
 
-  def test_no_quantization(self):
+  @parameterized.named_parameters(
+      {"testcase_name": "no_bwd_quant", "quantize_bwd": False},
+      {"testcase_name": "bwd_quant", "quantize_bwd": True},
+  )
+  def test_no_quantization(self, quantize_bwd: bool):
     lhs = tf.constant(self.randn(3, 4))
     rhs = tf.constant(self.randn(4, 2))
     eq = "ij,jk->ik"
@@ -484,11 +488,33 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
     lhs_float_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
     rhs_float_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
 
+    def _get_grad_config(eq: str,
+                         swap_ans: bool
+                         ) -> Optional[aqt_config.AqtScheduleConfig]:
+      if not quantize_bwd:
+        return None
+      bwd_eq = aqt_einsum.get_einsum_transpose(eq, swap_ans=swap_ans)
+      grad_caxes, _ = aqt_einsum.get_contracting_axes(bwd_eq)
+      # 16 bits to preserve gradients
+      grad_config = _schedule_config(8, 1.0, grad_caxes,
+                                     freeze_scale_at_begin=False)
+      grad_config.use_quantized_variable = False
+      grad_config.tensor_configs[0].quant_config = aqt_config.FloatConfig()
+      return grad_config
+
+    lhs_bwd_config = _get_grad_config(eq, False)
+    rhs_bwd_config = _get_grad_config(eq, True)
+
     actual_fwd = _einsum_op(
-        eq, lhs, rhs, lhs_config, rhs_config, varscope_name="no_quant_einsum")
-    float_config_actual_fwd = _einsum_op(eq, lhs, rhs, lhs_float_config,
-                                         rhs_float_config,
-                                         varscope_name="float_config_einsum")
+        eq, lhs, rhs, lhs_config, rhs_config, varscope_name="no_quant_einsum",
+        quantize_bwd=quantize_bwd, lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config)
+    float_config_actual_fwd = _einsum_op(
+        eq, lhs, rhs, lhs_float_config, rhs_float_config,
+        varscope_name="float_config_einsum",
+        quantize_bwd=quantize_bwd, lhs_bwd_config=lhs_bwd_config,
+        rhs_bwd_config=rhs_bwd_config,
+        )
     expected_fwd = tf.einsum(eq, lhs, rhs)
 
     actual_lgrad, actual_rgrad = tf.gradients([actual_fwd], [lhs, rhs])

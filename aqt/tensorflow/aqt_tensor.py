@@ -584,10 +584,18 @@ class TensorQuantizerBase:
     params = self._quantization_params(train)
     return params.should_quantize
 
-  def _to_quant(self, x: tf.Tensor, train: bool) -> tf.Tensor:
+  def _to_quant(
+      self, x: tf.Tensor, train: bool, random: tf.Tensor | None = None
+  ) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity."""
     with tf.variable_scope('to_quant'):
       params = self._quantization_params(train)
+
+      def _round(t: tf.Tensor, random: tf.Tensor | None) -> tf.Tensor:
+        if random is not None:
+          assert t.shape == random.shape, (t.shape, random.shape)
+          t = t + random
+        return tf.math.floor(t)
 
       def maybe_floor_or_small_float(y):
         # Static check for whether int and small float can coexist in schedule
@@ -605,7 +613,7 @@ class TensorQuantizerBase:
                 _emulated_fp(y, params.mantissa_bits, params.min_exp,
                              params.max_exp), y)
           else:
-            return tf.where_v2(params.should_quantize, tf.math.floor(y), y)
+            return tf.where_v2(params.should_quantize, _round(y, random), y)
 
       # Note that backprop does not depend directly on the value of _last_update
       # or any_config_active; only scales and constants need to be maintained
