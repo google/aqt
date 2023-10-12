@@ -585,16 +585,28 @@ class TensorQuantizerBase:
     return params.should_quantize
 
   def _to_quant(
-      self, x: tf.Tensor, train: bool, random: tf.Tensor | None = None
+      self,
+      x: tf.Tensor,
+      train: bool,
+      use_stochastic_rounding: bool = False,
   ) -> tf.Tensor:
-    """Quantizes x with active quant config, if any, else act as identity."""
+    """Quantizes x with active quant config, if any, else act as identity.
+
+    Args:
+      x: tensor to quantize
+      train: whether training
+      use_stochastic_rounding: whether to add random numbers in [-0.5, 0.5]
+        before integer quantization.
+
+    Returns:
+      quantized tensor
+    """
     with tf.variable_scope('to_quant'):
       params = self._quantization_params(train)
 
-      def _round(t: tf.Tensor, random: tf.Tensor | None) -> tf.Tensor:
-        if random is not None:
-          assert t.shape == random.shape, (t.shape, random.shape)
-          t = t + random
+      def _floor(t: tf.Tensor, use_stochastic_rounding: bool) -> tf.Tensor:
+        if use_stochastic_rounding:
+          t = t + tf.random.uniform(tf.shape(t), -0.5, 0.5, dtype=t.dtype)
         return tf.math.floor(t)
 
       def maybe_floor_or_small_float(y):
@@ -613,7 +625,9 @@ class TensorQuantizerBase:
                 _emulated_fp(y, params.mantissa_bits, params.min_exp,
                              params.max_exp), y)
           else:
-            return tf.where_v2(params.should_quantize, _round(y, random), y)
+            return tf.where_v2(
+                params.should_quantize, _floor(y, use_stochastic_rounding), y
+            )
 
       # Note that backprop does not depend directly on the value of _last_update
       # or any_config_active; only scales and constants need to be maintained

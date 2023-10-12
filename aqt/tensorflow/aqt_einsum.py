@@ -550,14 +550,6 @@ def einsum(
           lhs_scaled = lhs_scale * lhs
           rhs_scaled = rhs_scale * rhs
 
-          if quantize_bwd:
-            # Stochastic rounding is necessary for gradient quantization. We
-            # call uniform() once and share it across both scaled gradients to
-            # avoid potential bottlenecks with random number generation.
-            random = tf.random.uniform(
-                tf.shape(grad), -0.5, 0.5, dtype=grad.dtype
-            )
-
           def _bwd(
               eq: str,
               grad_quantizer: DynamicTensorQuantizer | None,
@@ -593,8 +585,11 @@ def einsum(
                     )
                 )
                 grad_scaled = grad_scale * grad
+                # Stochastic rounding is necessary for gradient quantization.
                 qgrad = grad_quantizer._to_quant(
-                    grad_scaled, train=train, random=random
+                    grad_scaled,
+                    train=train,
+                    use_stochastic_rounding=True,
                 )
                 assert len(grad_inv_scale.shape) == len(qgrad.shape)
             else:
