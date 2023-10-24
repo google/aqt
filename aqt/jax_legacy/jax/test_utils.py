@@ -19,7 +19,7 @@ import typing
 from typing import Any, Mapping, Union
 from aqt.jax_legacy.jax import quantization
 from aqt.jax_legacy.jax import stats
-from jax.config import config
+from jax import config
 import jax.numpy as jnp
 import numpy as np
 
