@@ -14,6 +14,8 @@
 """Mnist example."""
 
 from absl import app
+from aqt.jax.v2 import config as aqt_config
+from aqt.jax.v2.flax import aqt_dot_general
 from flax import linen as nn
 from flax.metrics import tensorboard
 from flax.training import train_state
@@ -30,6 +32,8 @@ class CNN(nn.Module):
 
   @nn.compact
   def __call__(self, x):
+    aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+    aqt_dg = aqt_dot_general.AqtDotGeneral(aqt_cfg)
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
@@ -37,9 +41,9 @@ class CNN(nn.Module):
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = x.reshape((x.shape[0], -1))  # flatten
-    x = nn.Dense(features=256)(x)
+    x = nn.Dense(features=256, dot_general=aqt_dg)(x)
     x = nn.relu(x)
-    x = nn.Dense(features=10)(x)
+    x = nn.Dense(features=10, dot_general=aqt_dg)(x)
     return x
 
 
