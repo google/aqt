@@ -101,8 +101,12 @@ def _scale_quant(x, *, cfg, ca, context):
     scale = lax.stop_gradient(scale)
 
   x_s = _maybe_mul(x, scale)
-  quant = cfg.clip_and_round or numerics.make_quant_function()
+
+  quant = jax.custom_vjp(numerics.fwd)
+  quant.defvjp(numerics.vjp_fwd, numerics.vjp_bwd)
+  quant = cfg.clip_and_round or quant
   quant = functools.partial(quant, context=context)
+
   x_q, quant_grad = jax.vjp(quant, x_s)
   # We are passing quant_grad (and not more) ot the backward pass.
   # That is equivalent to having:

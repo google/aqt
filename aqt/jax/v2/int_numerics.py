@@ -17,7 +17,6 @@ import dataclasses
 from typing import Optional
 from aqt.jax.v2 import stochastic_rounding
 import flax.struct
-import jax
 from jax import lax
 import jax.numpy as jnp
 
@@ -66,67 +65,53 @@ class IntNumerics:
     else:
       return self.get_edge_of_last_int_bucket()
 
-  def make_quant_function(self):
-    """Function make_quant."""
-    # This function is supposed to round values in a bucket to its center.
-    # The way to check for correctness is to check that the values between
-    # the buckets are "hard to decide".
-    # Let's look at 0 or 0.5 (depending on preserve zero),
-    # and lets look at the edge of the last bucket (table in fresh_scale_).
-
+  def fwd(self, x, context):
+    """Forward pass."""
     assert isinstance(self.cfg, Config)
     assert self.cfg.bits <= 22, 'Too many bits, float32 has less precision.'
 
-    # preserve_max_val does not affect the edge of the last bucket.
-
     edge_of_last_bucket = self.get_edge_of_last_int_bucket()
+    # Maybe noise
+    if self.cfg.noise_fn:
+      assert context.key is not None, (
+          'noise_fn is set, requestic stochastic rounding, but RNG was not '
+          'passed in Context.key'
+      )
+      x = (x + self.cfg.noise_fn(x.shape, context.key)).astype(x.dtype)
 
-    def fwd(x, context):
-      # Maybe noise
-      if self.cfg.noise_fn:
-        assert context.key is not None, (
-            'noise_fn is set, requestic stochastic rounding, but RNG was not '
-            'passed in Context.key'
-        )
-        x = (x + self.cfg.noise_fn(x.shape, context.key)).astype(x.dtype)
-
-      # Maybe clip
-      if self.cfg.clip:
-        # If we are not rounding, we just clip to bucket edges.
-        fwd_clip_bound = edge_of_last_bucket
-        # If, after clip, we are rounding, we need to make sure that
-        # we won't round values at the edge_of_last_bucket away to the
-        # non-existing bucket.
-        if self.cfg.round:
-          # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
-          fwd_clip_bound -= 0.5
-        x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
-
-      # Maybe round
+    # Maybe clip
+    if self.cfg.clip:
+      # If we are not rounding, we just clip to bucket edges.
+      fwd_clip_bound = edge_of_last_bucket
+      # If, after clip, we are rounding, we need to make sure that
+      # we won't round values at the edge_of_last_bucket away to the
+      # non-existing bucket.
       if self.cfg.round:
-        # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
-        round_to_halves = not self.cfg.preserve_zero
-        if round_to_halves:
-          x = jnp.floor(x) + 0.5
-        else:
-          x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
+        # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
+        fwd_clip_bound -= 0.5
+      x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
 
-      return x
+    # Maybe round
+    if self.cfg.round:
+      # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
+      round_to_halves = not self.cfg.preserve_zero
+      if round_to_halves:
+        x = jnp.floor(x) + 0.5
+      else:
+        x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
 
-    def vjp_fwd(x, context):
-      res = (x,)
-      return fwd(x, context), res
+    return x
 
-    def vjp_bwd(res, grad):
-      # This is gradient of clip.
-      # For boundary values we will have full graindent.
-      # We might use something like this for calibrations other than abs(max(x))
-      # (x,) = res
-      # ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
-      del res
-      ret = grad
-      return (ret, None)
+  def vjp_fwd(self, x, context):
+    res = (x,)
+    return self.fwd(x, context), res
 
-    vjp = jax.custom_vjp(fwd)
-    vjp.defvjp(vjp_fwd, vjp_bwd)
-    return vjp
+  def vjp_bwd(self, res, grad):
+    # This is gradient of clip.
+    # For boundary values we will have full graindent.
+    # We might use something like this for calibrations other than abs(max(x))
+    # (x,) = res
+    # ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
+    del res
+    ret = grad
+    return (ret, None)
