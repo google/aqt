@@ -11,15 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Efficient stochastic rounding implementation.
-"""
+"""Efficient stochastic rounding implementation."""
 
+from typing import Callable
 import jax
 import jax.numpy as jnp
 
 
+NoiseFn = Callable[[tuple[int, ...], jax.Array], jnp.ndarray]
+
+
 def random_centered_uniform(
-    shape: tuple[int, ...], key: jax.Array) -> jnp.ndarray:
+    shape: tuple[int, ...], key: jax.Array
+) -> jnp.ndarray:
   """Generates uniform number in [-0.5, 0.5]."""
   dtype = jnp.dtype('uint16')
   nbits = jnp.iinfo(dtype).bits

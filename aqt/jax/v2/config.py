@@ -15,8 +15,8 @@
 
 import dataclasses
 from typing import Any, Callable, Optional, Union
-
-from aqt.jax.v2.stochastic_rounding import random_centered_uniform
+from aqt.jax.v2 import int_numerics
+from aqt.jax.v2 import stochastic_rounding
 import jax
 import jax.numpy as jnp
 
@@ -25,7 +25,6 @@ Context = Any  # TODO(lew): We could put Context in a separate file.
 
 FreshScaleFn = Callable[[jnp.ndarray], jnp.ndarray]
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
-NoiseFn = Callable[[tuple[int, ...], jax.Array], jnp.ndarray]
 
 
 @dataclasses.dataclass
@@ -35,19 +34,7 @@ class NoNumerics:
   pass
 
 
-@dataclasses.dataclass
-class IntNumerics:
-  bits: int
-  preserve_zero: bool
-  # false = map max val on the end of the last bucket
-  # true = map max val on the middle of the last
-  preserve_max_val: bool
-  clip: bool
-  round: bool
-  noise_fn: Optional[NoiseFn]
-
-
-Numerics = Union[NoNumerics, IntNumerics]
+Numerics = Union[NoNumerics, int_numerics.Config]
 
 
 @dataclasses.dataclass
@@ -76,7 +63,7 @@ class Tensor:
       numerics = NoNumerics()
     else:
       pz = False if bits == 1 else True
-      numerics = IntNumerics(
+      numerics = int_numerics.Config(
           bits=bits,
           preserve_zero=pz,
           preserve_max_val=False,
@@ -261,7 +248,7 @@ def set_stochastic_rounding(
   """Configure stochastic rounding implementation."""
   noise_implementations = {
       'jax.uniform': lambda shape, key: jax.random.uniform(key, shape) - 0.5,
-      'custom-1': random_centered_uniform,
+      'custom-1': stochastic_rounding.random_centered_uniform,
   }
   msg = f'{implementation} not supported.'
   assert implementation in noise_implementations.keys(), msg

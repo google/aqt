@@ -27,6 +27,7 @@ import copy
 import functools
 from typing import Callable, Optional, Union
 from aqt.jax.v2 import config
+from aqt.jax.v2 import int_numerics
 import flax.struct
 import jax
 from jax import lax
@@ -43,24 +44,15 @@ class Context:
 def _context_split(context: Context) -> tuple[Context, Context]:
   def mk_ctx(key):
     return Context(key=key, train_step=context.train_step)
+
   if context.key is not None:
     key1, key2 = jax.random.split(context.key)
     return mk_ctx(key1), mk_ctx(key2)
   return mk_ctx(None), mk_ctx(None)
 
 
-def _get_edge_of_last_int_bucket(cfg: config.IntNumerics):
-  ret = 2.0 ** (cfg.bits - 1)
-  if cfg.preserve_zero:
-    # Lose one bucket.
-    ret -= 0.5
-  return ret
-
-
-def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
-  """Calibration scale."""
-  assert isinstance(cfg.numerics, config.IntNumerics)
-  assert cfg.numerics.bits <= 22, 'Too many bits, float32 has less precision.'
+def _compute_scales(x, cfg: config.Tensor, numerics) -> jnp.ndarray:
+  """Calibration scales."""
   msg = 'Perhaps you are using fake_quant and forgot to set them.'
   assert cfg.calib_shared_axes is not None, msg
 
@@ -71,90 +63,11 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
     assert cfg.bound > 0, 'Static quantization bound should be positive.'
     abs_max = jnp.asarray(cfg.bound).reshape((1,) * len(x.shape))
   # Attention: This line will change dtype of abs_max to float32
+
   abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
-
-  abs_max_mapped_to = _get_edge_of_last_int_bucket(cfg.numerics)
-  if cfg.numerics.preserve_max_val:
-    # In this case we are mapping abs_max onto center of the last bucket
-    # Lose half of last bucket
-    abs_max_mapped_to -= 0.5
-  # Now abs_max_mapped_to is either center or edge of the last bucket.
-
-  # Verifying the correctness of this function amounts to verifying this table:
-  # pylint: disable=line-too-long
-  # if preserve_zero == F, zero might be rounded either to [-1, 0] bucket or to [0, 1] bucket
-  # preserve_zero, preserve_max_val, 8b, 2b, 1b
-  # F, F, 128.0, 2.0, 1.0  # bucket count is even; map onto the far edge of the last bucket
-  # F, T, 127.5, 1.5, 0.5  # bucket count is even; map onto the center of the last bucket
-  # T, F, 127.5, 1.5, 0.5  # bucket count is odd;  map onto the far edge of the last bucket
-  # T, T, 127.0, 1.0, 0.0  # bucket count is odd;  map onto the center of the last bucket
-
+  abs_max_mapped_to = numerics.abs_val_mapped_to()
   new_scale = abs_max_mapped_to / abs_max
   return new_scale
-
-
-def _make_int_quant(numerics: config.IntNumerics):
-  """Function make_quant."""
-  # This function is supposed to round values in a bucket to its center.
-  # The way to check for correctness is to check that the values between
-  # the buckets are "hard to decide".
-  # Let's look at 0 or 0.5 (depending on preserve zero),
-  # and lets look at the edge of the last bucket (table in fresh_scale_).
-
-  assert isinstance(numerics, config.IntNumerics)
-  assert numerics.bits <= 22, 'Too many bits, float32 has less precision.'
-
-  # preserve_max_val does not affect the edge of the last bucket.
-  edge_of_last_bucket = _get_edge_of_last_int_bucket(numerics)
-
-  def fwd(x, context):
-    # Maybe noise
-    if numerics.noise_fn:
-      assert context.key is not None, (
-          'noise_fn is set, requestic stochastic rounding, but RNG was not '
-          'passed in Context.key'
-      )
-      x = (x + numerics.noise_fn(x.shape, context.key)).astype(x.dtype)
-
-    # Maybe clip
-    if numerics.clip:
-      # If we are not rounding, we just clip to bucket edges.
-      fwd_clip_bound = edge_of_last_bucket
-      # If, after clip, we are rounding, we need to make sure that
-      # we won't round values at the edge_of_last_bucket away to the
-      # non-existing bucket.
-      if numerics.round:
-        # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
-        fwd_clip_bound -= 0.5
-      x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
-
-    # Maybe round
-    if numerics.round:
-      # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
-      round_to_halves = not numerics.preserve_zero
-      if round_to_halves:
-        x = jnp.floor(x) + 0.5
-      else:
-        x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
-
-    return x
-
-  def vjp_fwd(x, context):
-    res = (x,)
-    return fwd(x, context), res
-
-  def vjp_bwd(res, grad):
-    # This is gradient of clip. For boundary values we will have full graindent.
-    # We might use something like this for calibrations other than abs(max(x))
-    # (x,) = res
-    # ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
-    del res
-    ret = grad
-    return (ret, None)
-
-  vjp = jax.custom_vjp(fwd)
-  vjp.defvjp(vjp_fwd, vjp_bwd)
-  return vjp
 
 
 def _scale_quant(x, *, cfg, ca, context):
@@ -173,8 +86,9 @@ def _scale_quant(x, *, cfg, ca, context):
     return x, None, None
   if cfg.calib_shared_axes is None:
     cfg.calib_shared_axes = ca
+  numerics = int_numerics.IntNumerics(cfg.numerics)
   fresh_scale_fn = cfg.fresh_scale or functools.partial(
-      _int_fresh_scale, cfg=cfg
+      _compute_scales, cfg=cfg, numerics=numerics
   )
   scale = fresh_scale_fn(x)
   if cfg.po2_scale:
@@ -187,7 +101,7 @@ def _scale_quant(x, *, cfg, ca, context):
     scale = lax.stop_gradient(scale)
 
   x_s = _maybe_mul(x, scale)
-  quant = cfg.clip_and_round or _make_int_quant(cfg.numerics)
+  quant = cfg.clip_and_round or numerics.make_quant_function()
   quant = functools.partial(quant, context=context)
   x_q, quant_grad = jax.vjp(quant, x_s)
   # We are passing quant_grad (and not more) ot the backward pass.

@@ -17,6 +17,7 @@ import copy
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
+from aqt.jax.v2 import int_numerics
 import aqt.jax.v2.aqt_dot_general as aqt
 from aqt.jax.v2.stochastic_rounding import random_centered_uniform
 import flax.linen.linear as fl
@@ -458,7 +459,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ("lax_dg_248", lax_dg_248, dict(mult=(2.0, 4.0, 8.0))),
     ])
 
-    if isinstance(readonly_cfg.fwd.lhs.numerics, config.IntNumerics):
+    if isinstance(readonly_cfg.fwd.lhs.numerics, int_numerics.Config):
       check([
           (
               "check_fwd_lhs_tricky_clip_and_round",
