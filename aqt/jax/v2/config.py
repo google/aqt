@@ -44,6 +44,7 @@ class IntNumerics:
   preserve_max_val: bool
   clip: bool
   round: bool
+  noise_fn: Optional[NoiseFn]
 
 
 Numerics = Union[NoNumerics, IntNumerics]
@@ -61,7 +62,6 @@ class Tensor:
   # We apply gradient of clip_and_round in bwd pass.
   clip_and_round: Optional[ClipAndRoundFn]
   fresh_scale: Optional[FreshScaleFn]
-  noise_fn: Optional[NoiseFn]
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
   use_fake_quant: bool
@@ -82,6 +82,7 @@ class Tensor:
           preserve_max_val=False,
           clip=True,
           round=True,
+          noise_fn=None,
       )
 
     return Tensor(
@@ -91,7 +92,6 @@ class Tensor:
         scale_stop_grad=True,
         clip_and_round=None,
         fresh_scale=None,
-        noise_fn=None,
         po2_scale=False,
         use_fake_quant=False,
         # dtype_x=dtype,

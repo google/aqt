@@ -93,7 +93,7 @@ def _int_fresh_scale(x, cfg: config.Tensor) -> jnp.ndarray:
   return new_scale
 
 
-def _make_int_quant(cfg: config.Tensor):
+def _make_int_quant(numerics: config.IntNumerics):
   """Function make_quant."""
   # This function is supposed to round values in a bucket to its center.
   # The way to check for correctness is to check that the values between
@@ -101,37 +101,37 @@ def _make_int_quant(cfg: config.Tensor):
   # Let's look at 0 or 0.5 (depending on preserve zero),
   # and lets look at the edge of the last bucket (table in fresh_scale_).
 
-  assert isinstance(cfg.numerics, config.IntNumerics)
-  assert cfg.numerics.bits <= 22, 'Too many bits, float32 has less precision.'
+  assert isinstance(numerics, config.IntNumerics)
+  assert numerics.bits <= 22, 'Too many bits, float32 has less precision.'
 
   # preserve_max_val does not affect the edge of the last bucket.
-  edge_of_last_bucket = _get_edge_of_last_int_bucket(cfg.numerics)
+  edge_of_last_bucket = _get_edge_of_last_int_bucket(numerics)
 
   def fwd(x, context):
     # Maybe noise
-    if cfg.noise_fn:
+    if numerics.noise_fn:
       assert context.key is not None, (
-          'noise_fn is set, requestic stochastic rounding, but key key was not'
-          ' passed.'
+          'noise_fn is set, requestic stochastic rounding, but RNG was not '
+          'passed in Context.key'
       )
-      x = (x + cfg.noise_fn(x.shape, context.key)).astype(x.dtype)
+      x = (x + numerics.noise_fn(x.shape, context.key)).astype(x.dtype)
 
     # Maybe clip
-    if cfg.numerics.clip:
+    if numerics.clip:
       # If we are not rounding, we just clip to bucket edges.
       fwd_clip_bound = edge_of_last_bucket
       # If, after clip, we are rounding, we need to make sure that
       # we won't round values at the edge_of_last_bucket away to the
       # non-existing bucket.
-      if cfg.numerics.round:
+      if numerics.round:
         # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
         fwd_clip_bound -= 0.5
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
 
     # Maybe round
-    if cfg.numerics.round:
+    if numerics.round:
       # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
-      round_to_halves = not cfg.numerics.preserve_zero
+      round_to_halves = not numerics.preserve_zero
       if round_to_halves:
         x = jnp.floor(x) + 0.5
       else:
@@ -187,7 +187,7 @@ def _scale_quant(x, *, cfg, ca, context):
     scale = lax.stop_gradient(scale)
 
   x_s = _maybe_mul(x, scale)
-  quant = cfg.clip_and_round or _make_int_quant(cfg)
+  quant = cfg.clip_and_round or _make_int_quant(cfg.numerics)
   quant = functools.partial(quant, context=context)
   x_q, quant_grad = jax.vjp(quant, x_s)
   # We are passing quant_grad (and not more) ot the backward pass.
