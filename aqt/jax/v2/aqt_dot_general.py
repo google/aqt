@@ -27,7 +27,6 @@ import copy
 import functools
 from typing import Callable, Optional, Union
 from aqt.jax.v2 import config
-from aqt.jax.v2 import int_numerics
 import flax.struct
 import jax
 from jax import lax
@@ -86,9 +85,8 @@ def _scale_quant(x, *, cfg, ca, context):
     return x, None, None
   if cfg.calib_shared_axes is None:
     cfg.calib_shared_axes = ca
-  numerics = int_numerics.IntNumerics(cfg.numerics)
   fresh_scale_fn = cfg.fresh_scale or functools.partial(
-      _compute_scales, cfg=cfg, numerics=numerics
+      _compute_scales, cfg=cfg, numerics=cfg.numerics
   )
   scale = fresh_scale_fn(x)
   if cfg.po2_scale:
@@ -102,8 +100,8 @@ def _scale_quant(x, *, cfg, ca, context):
 
   x_s = _maybe_mul(x, scale)
 
-  quant = jax.custom_vjp(numerics.fwd)
-  quant.defvjp(numerics.vjp_fwd, numerics.vjp_bwd)
+  quant = jax.custom_vjp(cfg.numerics.fwd)
+  quant.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
   quant = cfg.clip_and_round or quant
   quant = functools.partial(quant, context=context)
 

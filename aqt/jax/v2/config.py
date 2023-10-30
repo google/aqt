@@ -34,7 +34,7 @@ class NoNumerics:
   pass
 
 
-Numerics = Union[NoNumerics, int_numerics.Config]
+Numerics = Union[NoNumerics, int_numerics.IntNumerics]
 
 
 @dataclasses.dataclass
@@ -63,7 +63,7 @@ class Tensor:
       numerics = NoNumerics()
     else:
       pz = False if bits == 1 else True
-      numerics = int_numerics.Config(
+      numerics = int_numerics.IntNumerics(
           bits=bits,
           preserve_zero=pz,
           preserve_max_val=False,

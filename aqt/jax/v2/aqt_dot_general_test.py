@@ -112,7 +112,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           for seed in range(10):
             key = jax.random.PRNGKey(seed)
             cfg = config.Tensor.make(prec)
-            cfg.numerics.preserve_zero = preserve_zero
+            if isinstance(cfg.numerics, int_numerics.IntNumerics):
+              cfg.numerics = cfg.numerics.replace(preserve_zero=preserve_zero)
             cfg.calib_shared_axes = (0,)
             sample_size = 10000
             shape = (sample_size,)
@@ -300,8 +301,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         # that the scales are not too large.
         def disable_quant(c):
           disable_quant_types(c)
-          c.lhs.numerics.round = False
-          c.rhs.numerics.round = False
+          if isinstance(c.lhs.numerics, int_numerics.IntNumerics):
+            c.lhs.numerics = c.lhs.numerics.replace(round=False)
+          if isinstance(c.rhs.numerics, int_numerics.IntNumerics):
+            c.rhs.numerics = c.rhs.numerics.replace(round=False)
           assert c.lhs.clip_and_round is None
           assert c.rhs.clip_and_round is None
           # c.lhs.numerics.clip = False
@@ -459,7 +462,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ("lax_dg_248", lax_dg_248, dict(mult=(2.0, 4.0, 8.0))),
     ])
 
-    if isinstance(readonly_cfg.fwd.lhs.numerics, int_numerics.Config):
+    if isinstance(readonly_cfg.fwd.lhs.numerics, int_numerics.IntNumerics):
       check([
           (
               "check_fwd_lhs_tricky_clip_and_round",

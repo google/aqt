@@ -13,7 +13,6 @@
 # limitations under the License.
 """Numerics for int8, int4, binary and other integer types."""
 
-import dataclasses
 from typing import Optional
 from aqt.jax.v2 import stochastic_rounding
 import flax.struct
@@ -21,8 +20,9 @@ from jax import lax
 import jax.numpy as jnp
 
 
-@dataclasses.dataclass
-class Config:
+class IntNumerics(flax.struct.PyTreeNode):
+  """Numerics for int8, int4, binary, etc."""
+
   bits: int
   preserve_zero: bool
   # false = map max val on the end of the last bucket
@@ -31,13 +31,6 @@ class Config:
   clip: bool
   round: bool
   noise_fn: Optional[stochastic_rounding.NoiseFn]
-
-
-@flax.struct.dataclass
-class IntNumerics:
-  """Numerics for int8, int4, binary, etc."""
-
-  cfg: Config
 
   # pylint: disable=line-too-long
   # Verifying the correctness of these functions amounts to verifying this table:
@@ -50,8 +43,8 @@ class IntNumerics:
   # pylint: enable=line-too-long
 
   def get_edge_of_last_int_bucket(self):
-    ret = 2.0 ** (self.cfg.bits - 1)
-    if self.cfg.preserve_zero:
+    ret = 2.0 ** (self.bits - 1)
+    if self.preserve_zero:
       # Lose one bucket.
       ret -= 0.5
     return ret
@@ -60,41 +53,40 @@ class IntNumerics:
     return self.get_edge_of_last_int_bucket() - 0.5
 
   def abs_val_mapped_to(self):
-    if self.cfg.preserve_max_val:
+    if self.preserve_max_val:
       return self.get_center_of_last_int_bucket()
     else:
       return self.get_edge_of_last_int_bucket()
 
   def fwd(self, x, context):
     """Forward pass."""
-    assert isinstance(self.cfg, Config)
-    assert self.cfg.bits <= 22, 'Too many bits, float32 has less precision.'
+    assert self.bits <= 22, 'Too many bits, float32 has less precision.'
 
     edge_of_last_bucket = self.get_edge_of_last_int_bucket()
     # Maybe noise
-    if self.cfg.noise_fn:
+    if self.noise_fn:
       assert context.key is not None, (
           'noise_fn is set, requestic stochastic rounding, but RNG was not '
           'passed in Context.key'
       )
-      x = (x + self.cfg.noise_fn(x.shape, context.key)).astype(x.dtype)
+      x = (x + self.noise_fn(x.shape, context.key)).astype(x.dtype)
 
     # Maybe clip
-    if self.cfg.clip:
+    if self.clip:
       # If we are not rounding, we just clip to bucket edges.
       fwd_clip_bound = edge_of_last_bucket
       # If, after clip, we are rounding, we need to make sure that
       # we won't round values at the edge_of_last_bucket away to the
       # non-existing bucket.
-      if self.cfg.round:
+      if self.round:
         # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
         fwd_clip_bound -= 0.5
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
 
     # Maybe round
-    if self.cfg.round:
+    if self.round:
       # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
-      round_to_halves = not self.cfg.preserve_zero
+      round_to_halves = not self.preserve_zero
       if round_to_halves:
         x = jnp.floor(x) + 0.5
       else:
