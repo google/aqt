@@ -18,8 +18,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2 import int_numerics
+from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
-from aqt.jax.v2.stochastic_rounding import random_centered_uniform
 import flax.linen.linear as fl
 import jax
 import jax.numpy as jnp
@@ -144,7 +144,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     jax_uniform_noise = jax.random.uniform(jax.random.PRNGKey(10), shape) - 0.5
     assert_clt(jax_uniform_noise)
     # customized more efficient implementation
-    custom_1_noise = random_centered_uniform(shape, jax.random.PRNGKey(11))
+    custom_1_noise = stochastic_rounding.random_centered_uniform(
+        shape, jax.random.PRNGKey(11)
+    )
     assert_clt(custom_1_noise)
 
   @parameterized.parameters([
@@ -241,26 +243,26 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg = copy.deepcopy(readonly_cfg)
       if fwd_lhs_tricky_clip_and_round:
         # Tricky means that we have zero gradient on x < 0
-        def tricky_clip_and_round():
-          def fwd(x, context):
+        class TrickyNumerics:
+
+          def abs_val_mapped_to(self) -> jnp.ndarray:
+            return jnp.array(1.0)
+
+          def fwd(self, x, context):
             del context
             return jax.lax.round(x, jax.lax.RoundingMethod.TO_NEAREST_EVEN)
             # return x
 
-          def vjp_fwd(x, context):
+          def vjp_fwd(self, x, context):
             res = (x,)
-            return fwd(x, context), res
+            return self.fwd(x, context), res
 
-          def vjp_bwd(res, grad):
+          def vjp_bwd(self, res, grad):
             (x,) = res
             ret = grad * (x >= 0)
             return (ret, None)
 
-          vjp = jax.custom_vjp(fwd)
-          vjp.defvjp(vjp_fwd, vjp_bwd)
-          return vjp
-
-        cfg.fwd.lhs.clip_and_round = tricky_clip_and_round()
+        cfg.fwd.lhs.numerics = TrickyNumerics()
         # Needed because int8 casting would do additional clip and round.
         cfg.fwd.dg_in_dtype = None
 
@@ -305,8 +307,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             c.lhs.numerics = c.lhs.numerics.replace(round=False)
           if isinstance(c.rhs.numerics, int_numerics.IntNumerics):
             c.rhs.numerics = c.rhs.numerics.replace(round=False)
-          assert c.lhs.clip_and_round is None
-          assert c.rhs.clip_and_round is None
           # c.lhs.numerics.clip = False
           # c.rhs.numerics.clip = False
         disable_quant(cfg.fwd)

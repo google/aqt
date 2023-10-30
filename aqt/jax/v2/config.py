@@ -15,6 +15,7 @@
 
 import dataclasses
 from typing import Any, Callable, Optional, Union
+from aqt.jax.v2 import calibration
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import jax
@@ -23,7 +24,6 @@ import jax.numpy as jnp
 DType = Any
 Context = Any  # TODO(lew): We could put Context in a separate file.
 
-FreshScaleFn = Callable[[jnp.ndarray], jnp.ndarray]
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
 
@@ -47,8 +47,7 @@ class Tensor:
   scale_stop_grad: bool
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
-  clip_and_round: Optional[ClipAndRoundFn]
-  fresh_scale: Optional[FreshScaleFn]
+  calibration: calibration.AbsMaxCalibration
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
   use_fake_quant: bool
@@ -77,8 +76,7 @@ class Tensor:
         calib_shared_axes=None,
         bound=None,
         scale_stop_grad=True,
-        clip_and_round=None,
-        fresh_scale=None,
+        calibration=calibration.AbsMaxCalibration(),
         po2_scale=False,
         use_fake_quant=False,
         # dtype_x=dtype,

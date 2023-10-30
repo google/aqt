@@ -50,25 +50,6 @@ def _context_split(context: Context) -> tuple[Context, Context]:
   return mk_ctx(None), mk_ctx(None)
 
 
-def _compute_scales(x, cfg: config.Tensor, numerics) -> jnp.ndarray:
-  """Calibration scales."""
-  msg = 'Perhaps you are using fake_quant and forgot to set them.'
-  assert cfg.calib_shared_axes is not None, msg
-
-  if cfg.bound is None:
-    # If you want to use different calibration, modify _make_int_quant.vjp_bwd.
-    abs_max = jnp.max(jnp.abs(x), axis=cfg.calib_shared_axes, keepdims=True)
-  else:
-    assert cfg.bound > 0, 'Static quantization bound should be positive.'
-    abs_max = jnp.asarray(cfg.bound).reshape((1,) * len(x.shape))
-  # Attention: This line will change dtype of abs_max to float32
-
-  abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
-  abs_max_mapped_to = numerics.abs_val_mapped_to()
-  new_scale = abs_max_mapped_to / abs_max
-  return new_scale
-
-
 def _scale_quant(x, *, cfg, ca, context):
   """The core quantizing function."""
   msg = (
@@ -83,12 +64,11 @@ def _scale_quant(x, *, cfg, ca, context):
 
   if isinstance(cfg.numerics, config.NoNumerics):
     return x, None, None
-  if cfg.calib_shared_axes is None:
-    cfg.calib_shared_axes = ca
-  fresh_scale_fn = cfg.fresh_scale or functools.partial(
-      _compute_scales, cfg=cfg, numerics=cfg.numerics
-  )
-  scale = fresh_scale_fn(x)
+  shared_axes = cfg.calib_shared_axes or ca
+  bound = cfg.calibration.get_bound(x, shared_axes)
+  abs_max_mapped_to = cfg.numerics.abs_val_mapped_to()
+  scale = abs_max_mapped_to / bound
+
   if cfg.po2_scale:
     # With floor the biggest value (we are using jnp.max) is in the range of
     # clipping and therefore have a correct gradinet.
@@ -102,7 +82,6 @@ def _scale_quant(x, *, cfg, ca, context):
 
   quant = jax.custom_vjp(cfg.numerics.fwd)
   quant.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
-  quant = cfg.clip_and_round or quant
   quant = functools.partial(quant, context=context)
 
   x_q, quant_grad = jax.vjp(quant, x_s)
