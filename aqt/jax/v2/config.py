@@ -43,11 +43,10 @@ class Tensor:
 
   numerics: Numerics
   calib_shared_axes: Optional[list[int]]
-  bound: Optional[float]
   scale_stop_grad: bool
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
-  calibration: calibration.AbsMaxCalibration
+  calibration: calibration.Calibration
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
   use_fake_quant: bool
@@ -74,7 +73,6 @@ class Tensor:
     return Tensor(
         numerics=numerics,
         calib_shared_axes=None,
-        bound=None,
         scale_stop_grad=True,
         calibration=calibration.AbsMaxCalibration(),
         po2_scale=False,
@@ -268,12 +266,12 @@ def set_stochastic_rounding(
 
 
 def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
-  cfg.fwd.lhs.bound = bound
-  cfg.fwd.rhs.bound = bound
-  cfg.drhs.lhs.bound = bound
-  cfg.drhs.rhs.bound = bound
-  cfg.dlhs.lhs.bound = bound
-  cfg.dlhs.rhs.bound = bound
+  cfg.fwd.lhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.fwd.rhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.drhs.lhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.drhs.rhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.dlhs.lhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.dlhs.rhs.calibration = calibration.ConstantCalibration(bound)
 
 
 def int8_ttf_quant_v1(use_stochastic_rounding=True) -> DotGeneral:
