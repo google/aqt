@@ -20,8 +20,8 @@
 # - ba - batch axes
 # - ra - remaining axes
 
-
 # pylint: disable=g-explicit-bool-comparison
+# pylint: disable=g-explicit-length-test
 
 import copy
 import functools
@@ -137,9 +137,12 @@ class DotGeneralRes:
 
 
 def _scale_trans(x, ca, ba):
+  """Transposes x to output dimension order."""
+  ca = list(ca)
+  ba = list(ba)
   for i in ca:
     assert x.shape[i] == 1
-  ra = tuple(i for i in range(len(x.shape)) if i not in ba + ca)
+  ra = list(i for i in range(len(x.shape)) if i not in ba + ca)
   x = jnp.transpose(x, ba + ra + ca)
   # TODO(lew): x = jnp.squeeze(x, axis=range(len(ba+ra): len(x.shape))
   shape_ba = x.shape[: len(ba)]
@@ -196,13 +199,18 @@ def _maybe_inv(x):
 def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
-  def my_dot_general(
+  msg = 'Custom calib_shared_axes not implemented for local AQT.'
+  assert gcfg.lhs.calib_shared_axes is None, msg
+  assert gcfg.rhs.calib_shared_axes is None, msg
+
+  def dot_general_raw(
       lhs: jnp.ndarray,
       rhs: Union[jnp.ndarray, MultiTensor],
       dimension_numbers,
       context,
   ):
-    """Creates a fake_quant function."""
+    """Creates a dot_general function without custom gradient."""
+    (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
     # We need to copy because we modify cfg to populate some defaults.
     cfg = copy.deepcopy(gcfg)
 
@@ -229,8 +237,30 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
     else:
       assert cfg.rhs.use_fwd_quant is None, 'cannot set use_fwd_quant in fwd'
 
+    if cfg.local_aqt is not None:
+
+      def factor_reshape(x, ca, ba):
+        factor = cfg.local_aqt.contraction_axis_shard_count
+        assert factor is not None
+        if len(ca) == 0:
+          return x, ca, ba
+        shape = list(x.shape)
+        ax = ca[0]
+        orig_size = shape[ax]
+        assert orig_size % factor == 0
+        shape[ax] = factor
+        shape.insert(ax + 1, orig_size // factor)
+        new_ca = [(b + int(b >= ax)) for b in ca]
+        assert new_ca[0] == ax + 1
+        new_ba = [ax] + [(b + int(b > ax)) for b in ba]
+        return x.reshape(shape), new_ca, new_ba
+
+      lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba)
+      rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba)
+
+      dimension_numbers = (lhs_ca, rhs_ca), (lhs_ba, rhs_ba)
+
     assert isinstance(rhs, jnp.ndarray)
-    (lhs_ca, rhs_ca), _ = dimension_numbers
 
     context, context_bwd = _context_split(context)
     context_lhs, context_rhs = _context_split(context)
@@ -307,9 +337,15 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
         lhs=lhs_res,
         rhs=rhs_res,
     )
+    if cfg.local_aqt is not None:
+      assert len(lhs_ca) == len(rhs_ca)
+      if len(lhs_ca) > 0:
+        out = jnp.sum(out, axis=0)
+      # We are not supporting local AQT in fwd pass, so no res needed.
+      res = None
     return out, res
 
-  return my_dot_general
+  return dot_general_raw
 
 
 def _dot_general_raw_attach_gradient(

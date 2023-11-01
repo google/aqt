@@ -90,10 +90,12 @@ def test_eq(name, a, b):
     assert False
 
 
-def fqt_param_dict(s, use_fwd_quant):
+def fqt_param_dict(s, use_fwd_quant, **kwargs):
   return dict(
       cfg=config.fully_quantized(
-          use_fwd_quant=use_fwd_quant, use_stochastic_rounding=False
+          use_fwd_quant=use_fwd_quant,
+          use_stochastic_rounding=False,
+          **kwargs,
       ),
       seed=s,
   )
@@ -185,6 +187,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.DotGeneral.make(2, 1)),
       dict(cfg=config.DotGeneral.make(2, 2)),
       dict(cfg=config.DotGeneral.make(8, 8)),
+      dict(cfg=config.DotGeneral.make(8, 8, dlhs_local_aqt=config.LocalAqt(2))),
+      dict(cfg=config.DotGeneral.make(8, 8, drhs_local_aqt=config.LocalAqt(2))),
       # That test could fail numerically because bf16
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
@@ -195,6 +199,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.DotGeneral.make(8, None)),
       dict(
           cfg=fqt_param_dict(s=10, use_fwd_quant=True)["cfg"],
+          dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
+          # contraction: 2, 5; batch: 4, 3
+          lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
+          rhs_shape=(5, 2, 4, 6, 3),  # non-contr: 4, 6, 3
+          gra_shape=(4, 3, 6),
+      ),
+      dict(
+          cfg=fqt_param_dict(
+              s=10,
+              use_fwd_quant=True,
+              dlhs_local_aqt=config.LocalAqt(2),
+          )["cfg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -239,6 +255,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         use_fake_quant=False,
         use_fwd_quant=None,
         fwd_lhs_tricky_clip_and_round=False,
+        local_aqt=None,
     ):
       cfg = copy.deepcopy(readonly_cfg)
       if fwd_lhs_tricky_clip_and_round:
@@ -318,6 +335,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
         if rhs_quant:
           cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+      if local_aqt is not None:
+        # Currently we are not supporting local_aqt in fwd pass
+        # cfg.fwd.local_aqt = local_aqt
+        cfg.dlhs.local_aqt = local_aqt
+        cfg.drhs.local_aqt = local_aqt
       return cfg
 
     # test dot_general
@@ -329,11 +351,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         use_fake_quant,
         use_fwd_quant=None,
         fwd_lhs_tricky_clip_and_round=False,
+        local_aqt=None,
     ):
       cfg = modify_cfg(
           use_fake_quant=use_fake_quant,
           use_fwd_quant=use_fwd_quant,
           fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
+          local_aqt=local_aqt,
       )
       dg = aqt.make_dot_general(cfg)
       context = aqt.Context(key=None, train_step=None)
@@ -455,6 +479,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     check([
         ("fwd_quant=T", aqt_dg_full(False, use_fwd_quant=False), dict()),
         ("fwd_quant=F", aqt_dg_full(False, use_fwd_quant=True), dict()),
+    ])
+
+    check([
+        (
+            "default    ",
+            aqt_dg_full(False, local_aqt=config.LocalAqt(2)),
+            dict(),
+        ),
+        (
+            "default    ",
+            aqt_dg_full(True, local_aqt=config.LocalAqt(2)),
+            dict(),
+        ),
     ])
 
     check([

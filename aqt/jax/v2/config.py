@@ -83,6 +83,11 @@ class Tensor:
 
 
 @dataclasses.dataclass
+class LocalAqt:
+  contraction_axis_shard_count: int
+
+
+@dataclasses.dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
 
@@ -90,12 +95,14 @@ class DotGeneralRaw:
   rhs: Tensor
   dg_in_dtype: Optional[DType]
   dg_accumulator_dtype: Optional[DType]
+  local_aqt: Optional[LocalAqt]
 
   @classmethod
   def make(
       cls,
       lhs_bits=None,
       rhs_bits=None,
+      local_aqt=None,
   ) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
     lhs_cfg = Tensor.make(lhs_bits)
@@ -120,6 +127,7 @@ class DotGeneralRaw:
         rhs=rhs_cfg,
         dg_in_dtype=dg_in_dtype,
         dg_accumulator_dtype=dg_accumulator_dtype,
+        local_aqt=local_aqt,
     )
 
   @classmethod
@@ -154,11 +162,13 @@ class DotGeneral:
       rhs_bits: Optional[int] = None,
       bwd_bits: Optional[int] = None,
       use_fwd_quant: bool = True,
+      dlhs_local_aqt=None,
+      drhs_local_aqt=None,
   ) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
     fwd = DotGeneralRaw.make(lhs_bits, rhs_bits)
-    dlhs = DotGeneralRaw.make(bwd_bits, bwd_bits)
-    drhs = DotGeneralRaw.make(bwd_bits, bwd_bits)
+    dlhs = DotGeneralRaw.make(bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt)
+    drhs = DotGeneralRaw.make(bwd_bits, bwd_bits, local_aqt=drhs_local_aqt)
     cfg = cls(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
     # Surprising: lhs quantization determines what drhs can do.
@@ -183,6 +193,8 @@ def fully_quantized(
     vjp_rhs_stochastic_rounding: Optional[bool] = None,
     # The dummy static bound flag is temporary, for performance benchmarking.
     use_dummy_static_bound: bool = False,
+    dlhs_local_aqt: Optional[LocalAqt] = None,
+    drhs_local_aqt: Optional[LocalAqt] = None,
 ) -> DotGeneral:
   """Fully Quantized Training."""
   cfg = DotGeneral.make(
@@ -190,6 +202,8 @@ def fully_quantized(
       rhs_bits=fwd_bits,
       bwd_bits=bwd_bits,
       use_fwd_quant=use_fwd_quant,
+      dlhs_local_aqt=dlhs_local_aqt,
+      drhs_local_aqt=drhs_local_aqt,
   )
 
   # Stochastic Rounding
