@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long
 # Copyright 2022 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -120,6 +121,7 @@ class DenseAqt(nn.Module):
   precision: Optional[lax.Precision] = jax.lax.Precision.DEFAULT
   kernel_axis_names: Optional[Sequence[str]] = None
   possibly_use_quantized_vars: bool = False
+  is_train_mode: bool = True
 
   # TODO(shivaniagrawal): Changed the strategy to AQT if quant_type is aqt.
 
@@ -152,7 +154,7 @@ class DenseAqt(nn.Module):
 
     if self.dynamic_context.collect_acts_stats:
       stats_tag.StatsTag(
-          channel_axis=-1, name='inputs', update_stats=self.train)(
+          channel_axis=-1, name='inputs', update_stats=self.is_train_mode)(
               inputs, mask=padding_mask)
     hparams = self.hparams
 
@@ -186,7 +188,8 @@ class DenseAqt(nn.Module):
     #      kernel with int8 and quant_w = (qkernel, qscale).
     quant_w = None
     if (not self.possibly_use_quantized_vars) or (
-        self.possibly_use_quantized_vars and self.train):
+        self.possibly_use_quantized_vars and self.is_train_mode
+    ):
       kernel = partitioning.param_with_axes(
           'kernel',
           self.kernel_init,
@@ -204,7 +207,7 @@ class DenseAqt(nn.Module):
     if self.possibly_use_quantized_vars:
       qkernel_dtype = self.dtype
       qkernel_initializer = nn.initializers.zeros
-      if not self.train:
+      if not self.is_train_mode:
         qkernel_dtype = jax.numpy.int8
         qkernel_initializer = nn.initializers.zeros
 
@@ -224,7 +227,7 @@ class DenseAqt(nn.Module):
           self.bias_init, (1,) + features,
           axes=tuple(scale_axis_names))
       qscale = jnp.asarray(qscale, self.dtype)
-      if not self.train:
+      if not self.is_train_mode:
         quant_w = quantization.QuantW(qkernel, qscale)
         kernel = None
 
@@ -266,9 +269,10 @@ class DenseAqt(nn.Module):
       elif isinstance(hparams.quant_act.bounds, get_bounds.GetBounds.Hyper):
         bounds_params = get_bounds.GetBounds.Params(
             update_bounds=self.dynamic_context.update_bounds,
-            update_stats=self.train,
+            update_stats=self.is_train_mode,
             paxis_name=self.paxis_name,
-            mask=padding_mask)
+            mask=padding_mask,
+        )
 
     contracting_dims = ((inputs.ndim - 1,), (0,))
     # `((lhs_contracting_dims, rhs_contracting_dims),
@@ -384,6 +388,7 @@ class DenseGeneralAqt(nn.Module):
       _RESHAPED_KERNEL_AXIS_NAME_MAP)
   reshape_kernel: bool = True
   possibly_use_quantized_vars: bool = False
+  is_train_mode: bool = True
 
   @nn.compact
   def __call__(self, inputs: Array) -> Array:
@@ -447,7 +452,8 @@ class DenseGeneralAqt(nn.Module):
     #      kernel with int8 and quant_w = (qkernenl, qscale).
     quant_w = None
     if (not self.possibly_use_quantized_vars) or (
-        self.possibly_use_quantized_vars and self.train):
+        self.possibly_use_quantized_vars and self.is_train_mode
+    ):
       kernel = partitioning.param_with_axes(
           'kernel',
           self.kernel_init,
@@ -460,7 +466,7 @@ class DenseGeneralAqt(nn.Module):
     if self.possibly_use_quantized_vars:
       qkernel_dtype = self.dtype
       qkernel_initializer = nn.initializers.zeros
-      if not self.train:
+      if not self.is_train_mode:
         qkernel_dtype = jax.numpy.int8
         qkernel_initializer = nn.initializers.zeros
       qkernel = partitioning.param_with_axes(
@@ -485,7 +491,7 @@ class DenseGeneralAqt(nn.Module):
           axes=tuple(scale_axis_names))
       qscale = jnp.asarray(qscale, self.dtype)
       qscale = jnp.reshape(qscale, scale_shape)
-      if not self.train:
+      if not self.is_train_mode:
         quant_w = quantization.QuantW(qkernel, qscale)
         kernel = None
 
