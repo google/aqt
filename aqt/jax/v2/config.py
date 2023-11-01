@@ -16,6 +16,7 @@
 import dataclasses
 from typing import Any, Callable, Optional, Union
 from aqt.jax.v2 import calibration
+from aqt.jax.v2 import fp8_numerics
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import jax
@@ -34,7 +35,7 @@ class NoNumerics:
   pass
 
 
-Numerics = Union[NoNumerics, int_numerics.IntNumerics]
+Numerics = Union[NoNumerics, int_numerics.IntNumerics, fp8_numerics.Fp8Numerics]
 
 
 @dataclasses.dataclass
@@ -55,11 +56,11 @@ class Tensor:
   use_fwd_quant: Optional[bool]
 
   @classmethod
-  def make(cls, bits: Optional[int]) -> 'Tensor':
+  def make(cls, bits: Union[int, Numerics, None]) -> 'Tensor':
     """Makes."""
     if bits is None:
       numerics = NoNumerics()
-    else:
+    elif isinstance(bits, int):
       pz = False if bits == 1 else True
       numerics = int_numerics.IntNumerics(
           bits=bits,
@@ -69,6 +70,8 @@ class Tensor:
           round=True,
           noise_fn=None,
       )
+    else:
+      numerics = bits
 
     return Tensor(
         numerics=numerics,
@@ -100,20 +103,24 @@ class DotGeneralRaw:
   @classmethod
   def make(
       cls,
-      lhs_bits=None,
-      rhs_bits=None,
-      local_aqt=None,
+      lhs_bits: Union[int, Tensor, None] = None,
+      rhs_bits: Union[int, Tensor, None] = None,
+      local_aqt: Optional[LocalAqt] = None,
   ) -> 'DotGeneralRaw':
     """Create quantization configs for input matrices to a matmul."""
-    lhs_cfg = Tensor.make(lhs_bits)
-    rhs_cfg = Tensor.make(rhs_bits)
+    lhs_cfg = (
+        lhs_bits if isinstance(lhs_bits, Tensor) else Tensor.make(lhs_bits)
+    )
+    rhs_cfg = (
+        rhs_bits if isinstance(rhs_bits, Tensor) else Tensor.make(rhs_bits)
+    )
 
     # Binary uses 0.5 right now.
     if (
-        lhs_bits is not None
-        and rhs_bits is not None
-        and 2 <= lhs_bits <= 8
-        and 2 <= rhs_bits <= 8
+        isinstance(lhs_cfg.numerics, int_numerics.IntNumerics)
+        and isinstance(rhs_cfg.numerics, int_numerics.IntNumerics)
+        and 2 <= lhs_cfg.numerics.bits <= 8
+        and 2 <= rhs_cfg.numerics.bits <= 8
     ):
       dg_in_dtype = jnp.int8
       dg_accumulator_dtype = jnp.int32
@@ -134,8 +141,8 @@ class DotGeneralRaw:
   def make_conv_general_dilated(
       cls,
       spatial_dimensions=2,
-      lhs_bits: Optional[int] = None,
-      rhs_bits: Optional[int] = None,
+      lhs_bits: Union[int, Tensor, None] = None,
+      rhs_bits: Union[int, Tensor, None] = None,
   ) -> 'DotGeneralRaw':
     """Create quantization config conv_general_dilated."""
     config = cls.make(lhs_bits, rhs_bits)
@@ -158,9 +165,9 @@ class DotGeneral:
   @classmethod
   def make(
       cls,
-      lhs_bits: Optional[int] = None,
-      rhs_bits: Optional[int] = None,
-      bwd_bits: Optional[int] = None,
+      lhs_bits: Union[int, Tensor, None] = None,
+      rhs_bits: Union[int, Tensor, None] = None,
+      bwd_bits: Union[int, Tensor, None] = None,
       use_fwd_quant: bool = True,
       dlhs_local_aqt=None,
       drhs_local_aqt=None,
@@ -182,8 +189,8 @@ class DotGeneral:
 
 def fully_quantized(
     *,
-    fwd_bits: int | None = 8,
-    bwd_bits: int | None = 8,
+    fwd_bits: Union[int, Tensor, None] = 8,
+    bwd_bits: Union[int, Tensor, None] = 8,
     use_fwd_quant: bool = True,
     use_stochastic_rounding: Optional[bool] = True,
     # Typically we have (but it's a caller's responsibility to check):
