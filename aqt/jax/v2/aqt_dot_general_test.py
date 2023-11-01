@@ -17,14 +17,19 @@ import copy
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
+from aqt.jax.v2 import fp8_numerics
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
 import flax.linen.linear as fl
 import jax
+from jax._src import public_test_util
 import jax.numpy as jnp
 import numpy as np
 import scipy.stats
+
+
+_assert_numpy_allclose = public_test_util._assert_numpy_allclose
 
 
 def test_jaxpr_dtype(f, cfgs: list[config.DotGeneralRaw], float_dtype):
@@ -586,6 +591,45 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
+
+
+class AqtDotGeneralFp8Test(parameterized.TestCase):
+
+  @parameterized.parameters((4, 3, 5e-2, 1e-1), (5, 2, 5e-2, 1e-1))
+  def test_fully_quantized_fp8(self, exponent, mantissa, atol, rtol):
+    lhs = jnp.arange(0.0, 1.2, 0.2).reshape(3, 2).astype(jnp.bfloat16)
+    rhs = jnp.arange(0.0, 1.2, 0.2).reshape(2, 3).astype(jnp.bfloat16)
+    gra = jnp.arange(0.0, 1.8, 0.2).reshape(3, 3).astype(jnp.bfloat16)
+
+    dimension_numbers = (((1,), (0,)), ((), ()))
+
+    def fp8_full():
+      cfg = config.fully_quantized(
+          fwd_bits=config.Tensor.make(
+              fp8_numerics.Fp8Numerics(exponent, mantissa)
+          ),
+          bwd_bits=config.Tensor.make(
+              fp8_numerics.Fp8Numerics(exponent, mantissa)
+          ),
+      )
+      dg = aqt.make_dot_general(cfg)
+      ctx = aqt.Context(key=None, train_step=None)
+      return lambda l, r: dg(l, r, dimension_numbers, context=ctx)
+
+    dg_fp8 = fp8_full()
+    lrf_fp8 = dg_fp8(lhs, rhs)
+    lr_fp8, bp_fp8 = jax.vjp(dg_fp8, lhs, rhs)
+    gl_fp8, gr_fp8 = bp_fp8(gra)
+
+    dg = lambda l, r: jax.lax.dot_general(l, r, dimension_numbers)
+    lrf = dg(lhs, rhs)
+    lr, bp = jax.vjp(dg, lhs, rhs)
+    gl, gr = bp(gra)
+
+    _assert_numpy_allclose(lrf, lrf_fp8, atol=atol, rtol=rtol)
+    _assert_numpy_allclose(lr, lr_fp8, atol=atol, rtol=rtol)
+    _assert_numpy_allclose(gl, gl_fp8, atol=atol, rtol=rtol)
+    _assert_numpy_allclose(gr, gr_fp8, atol=atol, rtol=rtol)
 
 
 if __name__ == "__main__":
