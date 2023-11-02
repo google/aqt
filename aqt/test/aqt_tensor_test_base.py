@@ -611,3 +611,112 @@ class AqtTensorQuantizerTest(tf.test.TestCase, parameterized.TestCase):
     expected = np.ones_like(actual)
 
     self.assertAllClose(actual, expected)
+
+  def test_validates_freeze_scale_at_event(self):
+    """Checks that initializer validates the shape against config."""
+    bits = 8
+    freeze_scale_at_event = 10
+    ema_update_count = 2
+
+    calibration_config = aqt_config.CalibrationConfig(lp_dev_coeff=1)
+
+    sc = aqt_config.StatsConfig(
+        ema_update_count=ema_update_count,
+        share_stats_axes=[0, 1],
+        tpu_cross_replica_sum=False,
+    )
+
+    data_shape = [1, 1]
+    x = np.zeros(data_shape, dtype=np.float32)
+    event_count = np.array(0, dtype=np.int64)
+
+    def create_and_update_quant(begin_at_event=None,
+                                end_at_event=None,
+                                freeze_scale_at_begin=False,
+                                quantizer_name="tq"):
+      tensor_config = aqt_config.AqtTensorConfig(
+          quant_config=aqt_config.IntQuantConfig(bits),
+          calibration_config=calibration_config,
+          begin_at_event=begin_at_event,
+          end_at_event=end_at_event,
+          freeze_scale_at_begin=freeze_scale_at_begin,
+          freeze_scale_at_event=freeze_scale_at_event,
+      )
+      config = aqt_config.AqtScheduleConfig(sc, [tensor_config])
+      quant = self.make_tensor_quantizer(data_shape=data_shape, config=config,
+                                         name=quantizer_name)
+      self.update_quantizer(
+          quant,
+          x,
+          np.full((data_shape[0], 1), 1, dtype=np.float32),
+          event_count,
+      )
+
+    with self.subTest("freeze_scale_at_begin_not_False"):
+      with self.assertRaisesRegex(aqt_config.ConfigError,
+                                  "expected freeze_scale_at_begin.* False"):
+        create_and_update_quant(freeze_scale_at_begin=True,
+                                quantizer_name="tq1")
+
+    with self.subTest("freeze_before_begin"):
+      with self.assertRaisesRegex(aqt_config.ConfigError,
+                                  "expected freeze_scale_at_event.* "
+                                  ">= begin_at_event"):
+        create_and_update_quant(begin_at_event=freeze_scale_at_event + 1,
+                                quantizer_name="tq2")
+
+    with self.subTest("freeze_after_end"):
+      with self.assertRaisesRegex(aqt_config.ConfigError,
+                                  "expected freeze_scale_at_event.* "
+                                  "< end_at_event"):
+        create_and_update_quant(end_at_event=freeze_scale_at_event,
+                                quantizer_name="tq3")
+
+  def test_freeze_at_event(self):
+    """Ensure quant scales freezed at and after freeze_scale_at_event."""
+    bits = 8
+    freeze_scale_at_event = 10
+    ema_update_count = 2
+
+    calibration_config = aqt_config.CalibrationConfig(lp_dev_coeff=1)
+
+    sc = aqt_config.StatsConfig(
+        ema_update_count=ema_update_count,
+        share_stats_axes=[0],
+        tpu_cross_replica_sum=False,
+    )
+    tensor_config = aqt_config.AqtTensorConfig(
+        quant_config=aqt_config.IntQuantConfig(bits),
+        calibration_config=calibration_config,
+        freeze_scale_at_begin=False,
+        freeze_scale_at_event=freeze_scale_at_event,
+    )
+    config = aqt_config.AqtScheduleConfig(sc, [tensor_config])
+
+    data_shape = [1, 1]
+    quant = self.make_tensor_quantizer(data_shape, config, "tq")
+    self.init()
+    last_scale = self.get_scale(quant)
+    for new_event_count, should_be_frozen in [
+        (1, False),
+        (9, False),
+        (10, True),
+        (19, True),
+    ]:
+      logging.info("loop: %s", (new_event_count, should_be_frozen))
+      sample = 100.0 * new_event_count
+      x = f32([[sample]])
+      new_event_count = np.array(new_event_count, dtype=np.int64)
+      self.update_quantizer(
+          quant,
+          x,
+          np.full((data_shape[0], 1), 1, dtype=np.float32),
+          new_event_count,
+      )
+
+      self.assertAllEqual(self.get_last_update(quant), new_event_count)
+
+      curr_scale = self.get_scale(quant)
+      scale_not_changed = (curr_scale == last_scale).all()
+      self.assertEqual(scale_not_changed, should_be_frozen)
+      last_scale = curr_scale
