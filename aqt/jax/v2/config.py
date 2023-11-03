@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional, Union
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
+import flax.struct
 import jax
 import jax.numpy as jnp
 
@@ -27,8 +28,8 @@ Context = Any  # TODO(lew): We could put Context in a separate file.
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
 
-@dataclasses.dataclass
-class NoNumerics:
+class NoNumerics(flax.struct.PyTreeNode):
+
   """No quantization, use a native type such as bf16."""
   pass
 
@@ -39,6 +40,7 @@ Numerics = Union[NoNumerics, int_numerics.IntNumerics]
 @dataclasses.dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
+
   numerics: Numerics
   calib_shared_axes: Optional[list[int]]
   scale_stop_grad: bool
@@ -127,18 +129,18 @@ def set_stochastic_rounding(
   noise_fn = noise_implementations[implementation]
 
   if vjp_lhs_stochastic_rounding:
-    cfg.dlhs.lhs.noise_fn = noise_fn
-    cfg.drhs.lhs.noise_fn = noise_fn
+    cfg.dlhs.lhs.numerics = cfg.dlhs.lhs.numerics.replace(noise_fn=noise_fn)
+    cfg.drhs.lhs.numerics = cfg.drhs.lhs.numerics.replace(noise_fn=noise_fn)
   else:
-    cfg.dlhs.lhs.noise_fn = None
-    cfg.drhs.lhs.noise_fn = None
+    cfg.dlhs.lhs.numerics = cfg.dlhs.lhs.numerics.replace(noise_fn=None)
+    cfg.drhs.lhs.numerics = cfg.drhs.lhs.numerics.replace(noise_fn=None)
 
   if vjp_rhs_stochastic_rounding:
-    cfg.dlhs.rhs.noise_fn = noise_fn
-    cfg.drhs.rhs.noise_fn = noise_fn
+    cfg.dlhs.rhs.numerics = cfg.dlhs.rhs.numerics.replace(noise_fn=noise_fn)
+    cfg.drhs.rhs.numerics = cfg.drhs.rhs.numerics.replace(noise_fn=noise_fn)
   else:
-    cfg.dlhs.rhs.noise_fn = None
-    cfg.drhs.rhs.noise_fn = None
+    cfg.dlhs.rhs.numerics = cfg.dlhs.rhs.numerics.replace(noise_fn=None)
+    cfg.drhs.rhs.numerics = cfg.drhs.rhs.numerics.replace(noise_fn=None)
 
 
 def set_static_bound(cfg: DotGeneral, bound: float = 1.0):

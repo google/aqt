@@ -146,8 +146,8 @@ def train_and_evaluate(
     )
 
     print(
-        'epoch:% 3d, train_loss: %.4f, train_accuracy: %.2f, test_loss: %.4f,'
-        ' test_accuracy: %.2f'
+        'epoch:% 3d, train_loss: %.30f, train_accuracy: %.30f, test_loss:'
+        ' %.30f, test_accuracy: %.30f'
         % (
             epoch,
             train_loss,
