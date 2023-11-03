@@ -18,13 +18,14 @@ import functools
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import config
 import flax.linen as nn
+import jax.numpy as jnp
 
 
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
-  aqt_cfg: config.DotGeneral | None = None
-  track_train_step: bool = False
+  cfg: config.DotGeneral | None = None
+  use_prng: bool = True
 
   @nn.compact
   def __call__(
@@ -35,9 +36,9 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-    aqt_key = self.make_rng('params')
-    context = aqt_dot_general.Context(key=aqt_key, train_step=None)
-    aqt_dg = aqt_dot_general.make_dot_general(self.aqt_cfg)
+    key = self.make_rng('params') if self.use_prng else None
+    context = aqt_dot_general.Context(key=key, train_step=None)
+    aqt_dg = aqt_dot_general.make_dot_general(self.cfg)
     aqt_dg = functools.partial(aqt_dg, context=context)
     return aqt_dg(
         lhs,
@@ -46,3 +47,18 @@ class AqtDotGeneral(nn.Module):
         precision,
         preferred_element_type=preferred_element_type,
     )
+
+
+class AqtEinsum(nn.Module):
+  """Quantized Einsum class for model injection."""
+
+  cfg: config.DotGeneral | None = None
+  use_prng: bool = True
+
+  @nn.compact
+  def __call__(self, eqn, lhs, rhs):
+    key = self.make_rng('params') if self.use_prng else None
+    context = aqt_dot_general.Context(key=key, train_step=None)
+    aqt_dg = aqt_dot_general.make_dot_general(self.cfg)
+    aqt_dg = functools.partial(aqt_dg, context=context)
+    return jnp.einsum(eqn, lhs, rhs, _dot_general=aqt_dg)
