@@ -30,7 +30,6 @@ ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 @dataclasses.dataclass
 class NoNumerics:
   """No quantization, use a native type such as bf16."""
-
   pass
 
 
@@ -40,7 +39,6 @@ Numerics = Union[NoNumerics, int_numerics.IntNumerics]
 @dataclasses.dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
-
   numerics: Numerics
   calib_shared_axes: Optional[list[int]]
   scale_stop_grad: bool
@@ -57,29 +55,34 @@ class Tensor:
   @classmethod
   def make(cls, bits: Optional[int]) -> 'Tensor':
     """Makes."""
-    if bits is None:
-      numerics = NoNumerics()
-    else:
-      pz = False if bits == 1 else True
-      numerics = int_numerics.IntNumerics(
-          bits=bits,
-          preserve_zero=pz,
-          preserve_max_val=False,
-          clip=True,
-          round=True,
-          noise_fn=None,
-      )
+    return tensor_make(bits=bits)
 
-    return Tensor(
-        numerics=numerics,
-        calib_shared_axes=None,
-        scale_stop_grad=True,
-        calibration=calibration.AbsMaxCalibration(),
-        po2_scale=False,
-        use_fake_quant=False,
-        # dtype_x=dtype,
-        use_fwd_quant=None,
+
+def tensor_make(bits: Optional[int]) -> 'Tensor':
+  """Makes config.Tensor."""
+  if bits is None:
+    numerics = NoNumerics()
+  else:
+    pz = False if bits == 1 else True
+    numerics = int_numerics.IntNumerics(
+        bits=bits,
+        preserve_zero=pz,
+        preserve_max_val=False,
+        clip=True,
+        round=True,
+        noise_fn=None,
     )
+
+  return Tensor(
+      numerics=numerics,
+      calib_shared_axes=None,
+      scale_stop_grad=True,
+      calibration=calibration.AbsMaxCalibration(),
+      po2_scale=False,
+      use_fake_quant=False,
+      # dtype_x=dtype,
+      use_fwd_quant=None,
+  )
 
 
 @dataclasses.dataclass
@@ -90,7 +93,6 @@ class LocalAqt:
 @dataclasses.dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
-
   lhs: Tensor
   rhs: Tensor
   dg_in_dtype: Optional[DType]
@@ -104,29 +106,9 @@ class DotGeneralRaw:
       rhs_bits=None,
       local_aqt=None,
   ) -> 'DotGeneralRaw':
-    """Create quantization configs for input matrices to a matmul."""
-    lhs_cfg = Tensor.make(lhs_bits)
-    rhs_cfg = Tensor.make(rhs_bits)
-
-    # Binary uses 0.5 right now.
-    if (
-        lhs_bits is not None
-        and rhs_bits is not None
-        and 2 <= lhs_bits <= 8
-        and 2 <= rhs_bits <= 8
-    ):
-      dg_in_dtype = jnp.int8
-      dg_accumulator_dtype = jnp.int32
-    else:
-      # Use None to determine the dtype on the fly in aqt_dot_general
-      dg_in_dtype = None
-      dg_accumulator_dtype = None
-
-    return DotGeneralRaw(
-        lhs=lhs_cfg,
-        rhs=rhs_cfg,
-        dg_in_dtype=dg_in_dtype,
-        dg_accumulator_dtype=dg_accumulator_dtype,
+    return dot_general_raw_make(
+        lhs_bits=lhs_bits,
+        rhs_bits=rhs_bits,
         local_aqt=local_aqt,
     )
 
@@ -138,13 +120,58 @@ class DotGeneralRaw:
       rhs_bits: Optional[int] = None,
   ) -> 'DotGeneralRaw':
     """Create quantization config conv_general_dilated."""
-    config = cls.make(lhs_bits, rhs_bits)
-    # Hardcoding flax assumptions.
-    if config.lhs:
-      config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
-    if config.rhs:
-      config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
-    return config
+    return conv_general_dilated_make(
+        spatial_dimensions=spatial_dimensions,
+        lhs_bits=lhs_bits,
+        rhs_bits=rhs_bits,
+    )
+
+
+def dot_general_raw_make(
+    lhs_bits=None,
+    rhs_bits=None,
+    local_aqt=None,
+) -> 'DotGeneralRaw':
+  """Create quantization configs for input matrices to a matmul."""
+  lhs_cfg = tensor_make(lhs_bits)
+  rhs_cfg = tensor_make(rhs_bits)
+
+  # Binary uses 0.5 right now.
+  if (
+      lhs_bits is not None
+      and rhs_bits is not None
+      and 2 <= lhs_bits <= 8
+      and 2 <= rhs_bits <= 8
+  ):
+    dg_in_dtype = jnp.int8
+    dg_accumulator_dtype = jnp.int32
+  else:
+    # Use None to determine the dtype on the fly in aqt_dot_general
+    dg_in_dtype = None
+    dg_accumulator_dtype = None
+
+  return DotGeneralRaw(
+      lhs=lhs_cfg,
+      rhs=rhs_cfg,
+      dg_in_dtype=dg_in_dtype,
+      dg_accumulator_dtype=dg_accumulator_dtype,
+      local_aqt=local_aqt,
+  )
+
+
+def conv_general_dilated_make(
+    spatial_dimensions=2,
+    lhs_bits: Optional[int] = None,
+    rhs_bits: Optional[int] = None,
+) -> 'DotGeneralRaw':
+  """Create quantization config conv_general_dilated."""
+  config = dot_general_raw_make(lhs_bits, rhs_bits)
+  # Hardcoding flax assumptions.
+  if config.lhs:
+    config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
+  if config.rhs:
+    config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
+  return config
 
 
 @dataclasses.dataclass
@@ -166,18 +193,37 @@ class DotGeneral:
       drhs_local_aqt=None,
   ) -> 'DotGeneral':
     """Create quantization configs for input matrices to a matmul."""
-    fwd = DotGeneralRaw.make(lhs_bits, rhs_bits)
-    dlhs = DotGeneralRaw.make(bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt)
-    drhs = DotGeneralRaw.make(bwd_bits, bwd_bits, local_aqt=drhs_local_aqt)
-    cfg = cls(fwd=fwd, dlhs=dlhs, drhs=drhs)
+    return dot_general_make(
+        lhs_bits,
+        rhs_bits,
+        bwd_bits,
+        use_fwd_quant,
+        dlhs_local_aqt=dlhs_local_aqt,
+        drhs_local_aqt=drhs_local_aqt,
+    )
 
-    # Surprising: lhs quantization determines what drhs can do.
-    if lhs_bits is not None:
-      # Only rhs is accepting MultiTensor.
-      cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
-    if rhs_bits is not None:
-      cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
-    return cfg
+
+def dot_general_make(
+    lhs_bits: Optional[int] = None,
+    rhs_bits: Optional[int] = None,
+    bwd_bits: Optional[int] = None,
+    use_fwd_quant: bool = True,
+    dlhs_local_aqt=None,
+    drhs_local_aqt=None,
+) -> 'DotGeneral':
+  """Create quantization configs for input matrices to a matmul."""
+  fwd = dot_general_raw_make(lhs_bits, rhs_bits)
+  dlhs = dot_general_raw_make(bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt)
+  drhs = dot_general_raw_make(bwd_bits, bwd_bits, local_aqt=drhs_local_aqt)
+  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
+
+  # Surprising: lhs quantization determines what drhs can do.
+  if lhs_bits is not None:
+    # Only rhs is accepting MultiTensor.
+    cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+  if rhs_bits is not None:
+    cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+  return cfg
 
 
 def fully_quantized(
@@ -197,7 +243,7 @@ def fully_quantized(
     drhs_local_aqt: Optional[LocalAqt] = None,
 ) -> DotGeneral:
   """Fully Quantized Training."""
-  cfg = DotGeneral.make(
+  cfg = dot_general_make(
       lhs_bits=fwd_bits,
       rhs_bits=fwd_bits,
       bwd_bits=bwd_bits,
@@ -290,9 +336,9 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
 
 def int8_ttf_quant_v1(use_stochastic_rounding=True) -> DotGeneral:
   """Version 1 of 'TTF' int8 quantized training recipe."""
-  fwd = DotGeneralRaw.make(8, 8)
-  dlhs = DotGeneralRaw.make(8, 8)
-  drhs = DotGeneralRaw.make(None, None)
+  fwd = dot_general_raw_make(8, 8)
+  dlhs = dot_general_raw_make(8, 8)
+  drhs = dot_general_raw_make(None, None)
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
   # Surprising: lhs quantization determines what drhs can do.
