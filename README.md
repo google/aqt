@@ -1,16 +1,23 @@
 # AQT : Accurate Quantized Training
 
-AQT is a quantization library designed to allow utilization of
-low-bit and high-performance numerics of contemporary ML hardware accelerators.
-AQT supports both research and production[^research-vs-prod], but focuses on the latter.
+AQT is a software library designed for easy tensor opeartion quantization in JAX. AQT simultaneously provides:
 
-[^research-vs-prod]: The support for research is exemplified by having a state of the art quantization quality on standard models such as ResNet and Transformer. The production aspect is defined as high performance and robust out-of-the-box working results with good defaults.
+  * excellent quantized model quality with no hand-tuning,
+  * excellent training performance in production using contemporary ML accelerators,
+  * simple and flexible APIs suitable for both production and research.
+
+AQT is designed for both quantization researchers and production workloads. It has the following features:
+
+  * What you train is what you serve. AQT quantized models are bit-exact the same during training and serving. This side-steps the conventional issue of quantization-induced training-serving bias that typically happens for Post Training Quantization (PTQ).
+  * JAX universal and easy to use. AQT leverages quantization injection to quantize all JAX tensor ops. The injection method has been adopted by [Flax](https://github.com/google/flax), [Pax](https://github.com/google/paxml), and other frameworks at Google.
+
+**Note:  Users are recommended to use `aqt.jax.v2`. Other jax versions are obsolete.**
 
 ## Usage
 
 Tensor contraction operations in JAX-based neural network libraries, i.e., any form of (high-order) matrix multiplications, including but not limited to `jax.numpy.einsum` and `flax.linen.DenseGeneral`, call `lax.dot_general` as its core computation. Quantizing a neural network in JAX simply requires substituting `lax.dot_general` with a quantized variant and keeping other parts as-is, which we call "quantization injection". JAX-based NN libraries, such as [Flax](https://github.com/google/flax) and [Pax](https://github.com/google/paxml), provide an API for this substitution when creating layers.
 
-In this section, we show how AQT produces a quantized `dot_general` and inject it into a neural network defined in JAX. The toy example below can be found in [examples.ipynb](./examples.ipynb).
+In this section, we show how AQT produces a quantized `dot_general` and inject it into a neural network defined in JAX. The toy example below can be found in [examples.ipynb](./aqt/jax/v2/examples/examples.ipynb).
 
 First, install the AQT package named as `aqtp` in PyPI and import necessary files.
 ```python
