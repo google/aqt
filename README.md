@@ -83,6 +83,43 @@ mlp_int8:
 
 We can see that the quantized MLP produces similar outputs as the unquantized one.
 
+## Flexible Quantization Configs
+
+The example in [usage](#usage) uses the default configuration that quantizes both forward and backward passes to 8-bit, but AQT provides a much more flexible configuration system. The `DotGeneral` class can configure forward and backward tensor contraction operations separately.
+```python
+@dataclasses.dataclass
+class DotGeneral:
+  """Configuration of quantization of dot_general and its gradients."""
+  fwd: DotGeneralRaw
+  dlhs: DotGeneralRaw
+  drhs: DotGeneralRaw
+```
+
+In each `DotGeneral.DotGeneralRaw`, we can configure quantization of each input tensor of those ops separately and the hardware dtype to use (eg. jnp.bfloat16, jnp.float16, jnp.float8_e4m3fn, jnp.float8_e5m2, jnp.int8, jnp.int4).
+```python
+@dataclasses.dataclass
+class DotGeneralRaw:
+  """Configuration of quantization of one dot_general without gradient."""
+  lhs: Tensor  # left hand side
+  rhs: Tensor  # right hand side
+  dg_in_dtype: Optional[DType]
+  dg_accumulator_dtype: Optional[DType]
+  local_aqt: Optional[LocalAqt]  # sharded quantization
+```
+
+Inside config.Tensor we can configure the numerics used for each tensor, which includes number of bits, calibration algorithm, stochastic rounding, and many other quantization parameters.
+```python
+@dataclasses.dataclass
+class Tensor:
+  """Configuration of quantization of one tensor or one side of tensor op."""
+  numerics: Numerics
+  calib_shared_axes: Optional[list[int]]
+  scale_stop_grad: bool
+  calibration: calibration.Calibration  # calibration algorithm
+  po2_scale: bool  # round calibration to power of 2
+  use_fake_quant: bool
+  use_fwd_quant: Optional[bool]  # use quantized fwd in the bwd pass
+```
 
 ## Citing AQT
 Please use a following bibtex entry:
