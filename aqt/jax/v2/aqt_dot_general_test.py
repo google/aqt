@@ -113,7 +113,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         for v in [0.1, 1000.0]:
           for seed in range(10):
             key = jax.random.PRNGKey(seed)
-            cfg = config.Tensor.make(prec)
+            cfg = config.tensor_make(prec)
             if isinstance(cfg.numerics, int_numerics.IntNumerics):
               cfg.numerics = cfg.numerics.replace(preserve_zero=preserve_zero)
             cfg.calib_shared_axes = (0,)
@@ -160,7 +160,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       maxval=10.0,
       shape=(20, 1),
   ):
-    cfg = config.Tensor.make(bits)
+    cfg = config.tensor_make(bits)
     cfg.po2_scale = True
     cfg.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
@@ -181,22 +181,26 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   @parameterized.parameters([
       dict(cfg=config.int8_ttf_quant_v1(use_stochastic_rounding=False)),
-      dict(cfg=config.DotGeneral.make(None, None)),
-      dict(cfg=config.DotGeneral.make(1, 1)),
-      dict(cfg=config.DotGeneral.make(1, 2)),
-      dict(cfg=config.DotGeneral.make(2, 1)),
-      dict(cfg=config.DotGeneral.make(2, 2)),
-      dict(cfg=config.DotGeneral.make(8, 8)),
-      dict(cfg=config.DotGeneral.make(8, 8, dlhs_local_aqt=config.LocalAqt(2))),
-      dict(cfg=config.DotGeneral.make(8, 8, drhs_local_aqt=config.LocalAqt(2))),
+      dict(cfg=config.dot_general_make(None, None)),
+      dict(cfg=config.dot_general_make(1, 1)),
+      dict(cfg=config.dot_general_make(1, 2)),
+      dict(cfg=config.dot_general_make(2, 1)),
+      dict(cfg=config.dot_general_make(2, 2)),
+      dict(cfg=config.dot_general_make(8, 8)),
+      dict(
+          cfg=config.dot_general_make(8, 8, dlhs_local_aqt=config.LocalAqt(2))
+      ),
+      dict(
+          cfg=config.dot_general_make(8, 8, drhs_local_aqt=config.LocalAqt(2))
+      ),
       # That test could fail numerically because bf16
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
       # We do this test anyway, to catch jax-compilation-time errors.
-      dict(cfg=config.DotGeneral.make(2, 2), dtype=jnp.bfloat16),
-      dict(cfg=config.DotGeneral.make(8, 8), dtype=jnp.bfloat16),
-      dict(cfg=config.DotGeneral.make(None, 8)),
-      dict(cfg=config.DotGeneral.make(8, None)),
+      dict(cfg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
+      dict(cfg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
+      dict(cfg=config.dot_general_make(None, 8)),
+      dict(cfg=config.dot_general_make(8, None)),
       dict(
           cfg=fqt_param_dict(s=10, use_fwd_quant=True)["cfg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
@@ -218,7 +222,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           gra_shape=(4, 3, 6),
       ),
       dict(
-          cfg=config.DotGeneral.make(2, 2),
+          cfg=config.dot_general_make(2, 2),
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -511,7 +515,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_dynamic_context(self):
     @jax.jit
     def f(lhs, rhs, context):
-      cfg = config.DotGeneral.make()
+      cfg = config.dot_general_make()
       dg = aqt.make_dot_general(cfg)
       return dg(lhs, rhs, (((0,), (0,)), ((), ())), context=context)
 
@@ -522,7 +526,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     jax.value_and_grad(f)(lhs, rhs, context)
 
   def test_hardware_int8(self, seed=0):
-    cfg = config.DotGeneralRaw.make(8, 8)
+    cfg = config.dot_general_raw_make(8, 8)
 
     def dg(lhs, rhs):
       ret, _ = aqt._make_dot_general_raw(cfg)(
@@ -556,7 +560,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_maxval=20.0,
       seed=0,
   ):
-    cfg = config.DotGeneralRaw.make_conv_general_dilated(2, lhs_bits, rhs_bits)
+    cfg = config.conv_general_dilated_make(2, lhs_bits, rhs_bits)
 
     if cfg.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.

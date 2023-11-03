@@ -53,9 +53,101 @@ class Tensor:
   use_fwd_quant: Optional[bool]
 
   @classmethod
-  def make(cls, bits: Optional[int]) -> 'Tensor':
-    """Makes."""
-    return tensor_make(bits=bits)
+  def make(cls, *args, **kwargs) -> 'Tensor':
+    return tensor_make(*args, **kwargs)
+
+
+@dataclasses.dataclass
+class LocalAqt:
+  contraction_axis_shard_count: int
+
+
+@dataclasses.dataclass
+class DotGeneralRaw:
+  """Configuration of quantization of one dot_general without gradient."""
+
+  lhs: Tensor
+  rhs: Tensor
+  dg_in_dtype: Optional[DType]
+  dg_accumulator_dtype: Optional[DType]
+  local_aqt: Optional[LocalAqt]
+
+  @classmethod
+  def make(cls, *args, **kwargs) -> 'DotGeneralRaw':
+    return dot_general_raw_make(*args, **kwargs)
+
+  @classmethod
+  def make_conv_general_dilated(cls, *args, **kwargs) -> 'DotGeneralRaw':
+    return conv_general_dilated_make(*args, **kwargs)
+
+
+@dataclasses.dataclass
+class DotGeneral:
+  """Configuration of quantization of dot_general and its gradients."""
+
+  fwd: DotGeneralRaw
+  dlhs: DotGeneralRaw
+  drhs: DotGeneralRaw
+
+  @classmethod
+  def make(cls, *args, **kwargs) -> 'DotGeneral':
+    return dot_general_make(*args, **kwargs)
+
+
+################################################################################
+# Functions below are auxiliary helpers.
+
+
+def set_accumulator_dtype(
+    cfg: DotGeneral,
+    fwd_dtype: Optional[DType],
+    bwd_dtype: Optional[DType],
+):
+  cfg.fwd.dg_accumulator_dtype = fwd_dtype
+  cfg.dlhs.dg_accumulator_dtype = bwd_dtype
+  cfg.drhs.dg_accumulator_dtype = bwd_dtype
+
+
+def set_stochastic_rounding(
+    cfg: DotGeneral,
+    # Typically we have (but it's a caller's responsibility to check):
+    # - vjp_lhs_stochastic_rounding is referring to the gradient and
+    # - vjp_rhs_stochastic_rounding is referring to the activations/weights.
+    vjp_lhs_stochastic_rounding: bool,
+    vjp_rhs_stochastic_rounding: bool,
+    implementation: str,
+):
+  """Configure stochastic rounding implementation."""
+  noise_implementations = {
+      'jax.uniform': lambda shape, key: jax.random.uniform(key, shape) - 0.5,
+      'custom-1': stochastic_rounding.random_centered_uniform,
+  }
+  msg = f'{implementation} not supported.'
+  assert implementation in noise_implementations.keys(), msg
+  noise_fn = noise_implementations[implementation]
+
+  if vjp_lhs_stochastic_rounding:
+    cfg.dlhs.lhs.noise_fn = noise_fn
+    cfg.drhs.lhs.noise_fn = noise_fn
+  else:
+    cfg.dlhs.lhs.noise_fn = None
+    cfg.drhs.lhs.noise_fn = None
+
+  if vjp_rhs_stochastic_rounding:
+    cfg.dlhs.rhs.noise_fn = noise_fn
+    cfg.drhs.rhs.noise_fn = noise_fn
+  else:
+    cfg.dlhs.rhs.noise_fn = None
+    cfg.drhs.rhs.noise_fn = None
+
+
+def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
+  cfg.fwd.lhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.fwd.rhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.drhs.lhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.drhs.rhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.dlhs.lhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.dlhs.rhs.calibration = calibration.ConstantCalibration(bound)
 
 
 def tensor_make(bits: Optional[int]) -> 'Tensor':
@@ -83,48 +175,6 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       # dtype_x=dtype,
       use_fwd_quant=None,
   )
-
-
-@dataclasses.dataclass
-class LocalAqt:
-  contraction_axis_shard_count: int
-
-
-@dataclasses.dataclass
-class DotGeneralRaw:
-  """Configuration of quantization of one dot_general without gradient."""
-  lhs: Tensor
-  rhs: Tensor
-  dg_in_dtype: Optional[DType]
-  dg_accumulator_dtype: Optional[DType]
-  local_aqt: Optional[LocalAqt]
-
-  @classmethod
-  def make(
-      cls,
-      lhs_bits=None,
-      rhs_bits=None,
-      local_aqt=None,
-  ) -> 'DotGeneralRaw':
-    return dot_general_raw_make(
-        lhs_bits=lhs_bits,
-        rhs_bits=rhs_bits,
-        local_aqt=local_aqt,
-    )
-
-  @classmethod
-  def make_conv_general_dilated(
-      cls,
-      spatial_dimensions=2,
-      lhs_bits: Optional[int] = None,
-      rhs_bits: Optional[int] = None,
-  ) -> 'DotGeneralRaw':
-    """Create quantization config conv_general_dilated."""
-    return conv_general_dilated_make(
-        spatial_dimensions=spatial_dimensions,
-        lhs_bits=lhs_bits,
-        rhs_bits=rhs_bits,
-    )
 
 
 def dot_general_raw_make(
@@ -172,35 +222,6 @@ def conv_general_dilated_make(
   if config.rhs:
     config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
   return config
-
-
-@dataclasses.dataclass
-class DotGeneral:
-  """Configuration of quantization of dot_general and its gradients."""
-
-  fwd: DotGeneralRaw
-  dlhs: DotGeneralRaw
-  drhs: DotGeneralRaw
-
-  @classmethod
-  def make(
-      cls,
-      lhs_bits: Optional[int] = None,
-      rhs_bits: Optional[int] = None,
-      bwd_bits: Optional[int] = None,
-      use_fwd_quant: bool = True,
-      dlhs_local_aqt=None,
-      drhs_local_aqt=None,
-  ) -> 'DotGeneral':
-    """Create quantization configs for input matrices to a matmul."""
-    return dot_general_make(
-        lhs_bits,
-        rhs_bits,
-        bwd_bits,
-        use_fwd_quant,
-        dlhs_local_aqt=dlhs_local_aqt,
-        drhs_local_aqt=drhs_local_aqt,
-    )
 
 
 def dot_general_make(
@@ -280,58 +301,6 @@ def fully_quantized(
     set_static_bound(cfg, 1.0)
 
   return cfg
-
-
-def set_accumulator_dtype(
-    cfg: DotGeneral,
-    fwd_dtype: Optional[DType],
-    bwd_dtype: Optional[DType],
-):
-  cfg.fwd.dg_accumulator_dtype = fwd_dtype
-  cfg.dlhs.dg_accumulator_dtype = bwd_dtype
-  cfg.drhs.dg_accumulator_dtype = bwd_dtype
-
-
-def set_stochastic_rounding(
-    cfg: DotGeneral,
-    # Typically we have (but it's a caller's responsibility to check):
-    # - vjp_lhs_stochastic_rounding is referring to the gradient and
-    # - vjp_rhs_stochastic_rounding is referring to the activations/weights.
-    vjp_lhs_stochastic_rounding: bool,
-    vjp_rhs_stochastic_rounding: bool,
-    implementation: str,
-):
-  """Configure stochastic rounding implementation."""
-  noise_implementations = {
-      'jax.uniform': lambda shape, key: jax.random.uniform(key, shape) - 0.5,
-      'custom-1': stochastic_rounding.random_centered_uniform,
-  }
-  msg = f'{implementation} not supported.'
-  assert implementation in noise_implementations.keys(), msg
-  noise_fn = noise_implementations[implementation]
-
-  if vjp_lhs_stochastic_rounding:
-    cfg.dlhs.lhs.noise_fn = noise_fn
-    cfg.drhs.lhs.noise_fn = noise_fn
-  else:
-    cfg.dlhs.lhs.noise_fn = None
-    cfg.drhs.lhs.noise_fn = None
-
-  if vjp_rhs_stochastic_rounding:
-    cfg.dlhs.rhs.noise_fn = noise_fn
-    cfg.drhs.rhs.noise_fn = noise_fn
-  else:
-    cfg.dlhs.rhs.noise_fn = None
-    cfg.drhs.rhs.noise_fn = None
-
-
-def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
-  cfg.fwd.lhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.fwd.rhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.drhs.lhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.drhs.rhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.dlhs.lhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.dlhs.rhs.calibration = calibration.ConstantCalibration(bound)
 
 
 def int8_ttf_quant_v1(use_stochastic_rounding=True) -> DotGeneral:
