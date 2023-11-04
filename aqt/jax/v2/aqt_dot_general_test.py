@@ -180,7 +180,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
-      dict(cfg=config.int8_ttf_quant_v1(use_stochastic_rounding=False)),
+      dict(cfg=config.config_v3(fwd_bits=3, dlhs_bits=4, drhs_bits=5)),
       dict(cfg=config.dot_general_make(None, None)),
       dict(cfg=config.dot_general_make(1, 1)),
       dict(cfg=config.dot_general_make(1, 2)),
@@ -351,6 +351,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
     gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
 
+    test_context = aqt.Context(key=jax.random.PRNGKey(4), train_step=None)
+
     def aqt_dg_full(
         use_fake_quant,
         use_fwd_quant=None,
@@ -364,14 +366,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           local_aqt=local_aqt,
       )
       dg = aqt.make_dot_general(cfg)
-      context = aqt.Context(key=None, train_step=None)
-      return lambda lhs, rhs: dg(lhs, rhs, dims, context=context)
+      return lambda lhs, rhs: dg(lhs, rhs, dims, context=test_context)
 
     def aqt_dg_raw(use_fake_quant):
       cfg = modify_cfg(use_fake_quant=use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
-      context = aqt.Context(key=None, train_step=None)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, context)[0]
+      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, test_context)[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.

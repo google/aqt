@@ -106,11 +106,12 @@ class DotGeneral:
 def set_accumulator_dtype(
     cfg: DotGeneral,
     fwd_dtype: Optional[DType],
-    bwd_dtype: Optional[DType],
+    dlhs_dtype: Optional[DType],
+    drhs_dtype: Optional[DType],
 ):
   cfg.fwd.dg_accumulator_dtype = fwd_dtype
-  cfg.dlhs.dg_accumulator_dtype = bwd_dtype
-  cfg.drhs.dg_accumulator_dtype = bwd_dtype
+  cfg.dlhs.dg_accumulator_dtype = dlhs_dtype
+  cfg.drhs.dg_accumulator_dtype = drhs_dtype
 
 
 def set_stochastic_rounding(
@@ -292,6 +293,11 @@ def fully_quantized(
 
   true = True  # A crude way to get around g-explicit-bool-comparison warning
 
+  assert not (vjp_lhs_stochastic_rounding and vjp_rhs_stochastic_rounding), (
+      'This config is buggy when you set both to True. Contact lew@ or use'
+      ' config_v3'
+  )
+
   # By default use jax.uniform for stochastic rounding
   if use_stochastic_rounding == true:
     set_stochastic_rounding(cfg, True, True, 'jax.uniform')
@@ -308,23 +314,46 @@ def fully_quantized(
   return cfg
 
 
-def int8_ttf_quant_v1(use_stochastic_rounding=True) -> DotGeneral:
-  """Version 1 of 'TTF' int8 quantized training recipe."""
-  fwd = dot_general_raw_make(8, 8)
-  dlhs = dot_general_raw_make(8, 8)
-  drhs = dot_general_raw_make(None, None)
+def config_v3(
+    *,
+    fwd_bits: int | None,
+    dlhs_bits: int | None,
+    drhs_bits: int | None,
+    # The dummy static bound flag is for performance benchmarking.
+    use_dummy_static_bound: bool = False,
+    rng_type: str = 'jax.uniform',  # 'custom-1'
+    dlhs_local_aqt: Optional[LocalAqt] = None,
+    drhs_local_aqt: Optional[LocalAqt] = None,
+    fwd_accumulator_dtype: ... = jnp.int32,
+    dlhs_accumulator_dtype: ... = jnp.int32,
+    drhs_accumulator_dtype: ... = jnp.int32,
+) -> DotGeneral:
+  """Fully Quantized Training."""
+  fwd = dot_general_raw_make(fwd_bits, fwd_bits)
+  dlhs = dot_general_raw_make(dlhs_bits, dlhs_bits, local_aqt=dlhs_local_aqt)
+  drhs = dot_general_raw_make(drhs_bits, drhs_bits, local_aqt=drhs_local_aqt)
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
-  # Surprising: lhs quantization determines what drhs can do.
-  # Only rhs is accepting MultiTensor.
-  cfg.drhs.rhs.use_fwd_quant = False
   cfg.dlhs.rhs.use_fwd_quant = False
-  if use_stochastic_rounding:
-    set_stochastic_rounding(
-        cfg,
-        vjp_lhs_stochastic_rounding=True,
-        vjp_rhs_stochastic_rounding=False,
-        implementation='jax.uniform',
-    )
+  cfg.drhs.rhs.use_fwd_quant = False
 
+  # Typically we have (but I don't know if it is guraranteed):
+  # - vjp_lhs_stochastic_rounding is referring to the gradient and
+  # - vjp_rhs_stochastic_rounding is referring to the activations/weights.
+  set_stochastic_rounding(
+      cfg,
+      vjp_lhs_stochastic_rounding=True,
+      vjp_rhs_stochastic_rounding=False,
+      implementation=rng_type,
+  )
+
+  if use_dummy_static_bound:
+    set_static_bound(cfg, 1.0)
+
+  set_accumulator_dtype(
+      cfg,
+      fwd_dtype=fwd_accumulator_dtype,
+      dlhs_dtype=dlhs_accumulator_dtype,
+      drhs_dtype=drhs_accumulator_dtype,
+  )
   return cfg
