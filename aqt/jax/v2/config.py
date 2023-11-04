@@ -29,6 +29,9 @@ ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
 
 class NoNumerics(flax.struct.PyTreeNode):
+  # TODO(lew): This is a workaround. We should separate Stochastic Rounding.
+  # noise_fn has no effect in NoNumerics.
+  noise_fn: Optional[stochastic_rounding.NoiseFn] = None
 
   """No quantization, use a native type such as bf16."""
   pass
