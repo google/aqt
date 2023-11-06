@@ -397,5 +397,52 @@ def extract_referenced_variables(t: tf.Tensor) -> Set[str]:
   return {v.name for v in variables}
 
 
+class LowBitsRngTest(tf.test.TestCase, parameterized.TestCase):
+  """Tests for low-bit random number generations."""
+
+  def test_low_bits_rng(self):
+    seed = [0, 1]
+    rand_128 = aqt_tensor.low_bits_random_uniform([128], seed)
+    rand_1024 = aqt_tensor.low_bits_random_uniform([1024], seed)
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+      mean_128 = tf.abs(tf.reduce_mean(rand_128)).eval()
+      mean_1024 = tf.abs(tf.reduce_mean(rand_1024)).eval()
+      logging.info('mean_128: %s', mean_128)
+      logging.info('mean_1024: %s', mean_1024)
+      # assert the estimation using 1024 samples is reasonably close to zero.
+      atol = 0.015625  # Monte Carlo estimate of the bound: 0.5 / 1024 ** 0.5
+      self.assertAllClose(mean_1024, 0.0, atol=atol)
+      # assert reasonable improvement
+      self.assertLessEqual(mean_1024, mean_128)
+      self.assertAllInRange(mean_1024, -0.5, 0.5)
+
+  def test_low_bits_rng_shape(self):
+    seed = [0, 1]
+    shape = [4, 3]  # contains dimension that is not divisible by 4
+    rand_128 = aqt_tensor.low_bits_random_uniform(shape, seed)
+    with self.cached_session() as sess, sess.as_default():
+      tf.global_variables_initializer().run()
+      rand_128 = rand_128.eval()
+      expected_shape = tf.zeros(shape, dtype=tf.int32).eval()
+      self.assertShapeEqual(rand_128, expected_shape)
+
+  def test_low_bits_rng_dyn_shape(self):
+    seed = [0, 1]
+    data_shape = [None, 3]
+    fully_defined_shape = [4, 3]
+    x = tf.zeros(fully_defined_shape, dtype=tf.float32)
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=data_shape, dtype=x.dtype),
+            ]
+    )
+    def _rng_like(x):
+      shape = tf.shape(x)
+      return aqt_tensor.low_bits_random_uniform(shape, seed)
+    rand = _rng_like(x)
+    self.assertShapeEqual(rand, x)
+
+
 if __name__ == '__main__':
   absltest.main()
