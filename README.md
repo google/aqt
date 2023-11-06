@@ -21,21 +21,20 @@ Tensor contraction operations in JAX-based neural network libraries, i.e., any f
 
 In this section, we show how AQT produces a quantized `dot_general` and inject it into a neural network defined in JAX. The toy example below can be found in the [example colab](https://github.com/google/aqt/blob/main/aqt/jax/v2/examples/examples.ipynb).
 
-First, install the AQT package named as `aqtp` in PyPI and import necessary files.
+First, install the AQT package named as `aqtp` in PyPI.
 
 ```python
 # install the AQT library
 !pip install aqtp
-# necessary imports
-import aqt.jax.v2.aqt_dot_general as aqt
-import aqt.jax.v2.config as aqt_config
 ```
 
-Next, specify an AQT configuration that quantizes both forward and backward passes to int8.
+Next, import necessary files.
 
 ```python
-# create a config that quantizes both forward and backward passes to int8
-int8_config = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+# necessary imports
+import aqt.jax.v2.flax.aqt_dot_general as aqt
+import aqt.jax.v2.config as aqt_config
+import flax.linen as nn
 ```
 
 A [sample neural network](https://github.com/google/flax/blob/abab11fff54e229cb2691ebf71a7515abbd0a547/examples/lm1b/models.py#L170) defined in Flax looks like the following (as a toy example we use a simple MLP, but it can be any model):
@@ -46,16 +45,14 @@ class MlpBlock(nn.Module):
 
   @nn.compact
   def __call__(self, inputs):
-    dot_general = aqt.make_dot_general(self.config)
+    dot_general = aqt.AqtDotGeneral(self.config)
     x = nn.Dense(dot_general=dot_general, features=inputs.shape[-1] * 4)(inputs)
     x = nn.relu(x)
     x = nn.Dense(dot_general=dot_general, features=inputs.shape[-1])(x)
     return x
 ```
 
-AQT can quantize the model by simply replacing the `dot_general` in `nn.Dense` with a quantized dot_general created by the aqt configuration.
-
-Now let's test it.
+AQT can quantize the model by simply replacing the `dot_general` in `nn.Dense` with a quantized dot_general created by the aqt configuration. The example specifies an AQT configuration that quantizes both forward and backward passes to int8. Now let's test it.
 
 ```python
 import jax
@@ -70,10 +67,13 @@ def gen_matrix(rows, columns, seed=0):
 inputs = gen_matrix(3, 4)
 
 # test function that initializes the model and compute the forward pass
-def init_and_eval(name, mlp_block, init_seed=0):
+def init_and_eval(name, mlp_block, init_seed=0, eval_seed=0):
   model = mlp_block.init(jax.random.PRNGKey(init_seed), inputs)
-  out = mlp_block.apply(model, inputs)
+  out = mlp_block.apply(model, inputs, rngs={'params': jax.random.key(eval_seed)})
   print(f"{name}:\n", out)
+
+# create a config that quantizes both forward and backward passes to int8
+int8_config = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
 
 # run and print results
 mlp_fp16 = MlpBlock(config=None)
