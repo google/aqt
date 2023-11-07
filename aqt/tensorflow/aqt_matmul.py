@@ -585,7 +585,7 @@ class Matmul:
     """Returns a dictionary from keys to diagnostic tensors.
 
     Args:
-      lhs: lhs argument to self.Apply, used for deriving diangostics relative to
+      lhs: lhs argument to self.apply, used for deriving diangostics relative to
         a given input.
       rhs: as above, but for rhs
       grad: If specified, the gradient for deriving diagnostics.

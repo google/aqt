@@ -39,7 +39,7 @@ label are contracting.
 
 import collections
 import string
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from aqt.common import aqt_config
 from aqt.common import aqt_config_utils
@@ -664,3 +664,149 @@ def einsum(
     return qeinsum(lhs, rhs)
   else:
     return fwd(lhs, rhs)
+
+
+class Einsum:
+  """AQT approximate einsum for a dense layer."""
+
+  def __init__(
+      self,
+      eq: str,
+      config: aqt_config.AqtEinsumConfig,
+      lhs_shape: Iterable[Optional[int]],
+      rhs_shape: Iterable[Optional[int]],
+      name: str = 'aqt',
+      lhs_name: str = 'lhs',
+      rhs_name: str = 'rhs',
+      lhs_grad_name: str = 'lhs_grad',
+      rhs_grad_name: str = 'rhs_grad',
+  ):
+    self.eq = eq
+    self.name = name
+    self.rhs_shape = rhs_shape
+    self.lhs_name = lhs_name
+    self.rhs_name = rhs_name
+    self.lhs_grad_name = lhs_grad_name
+    self.rhs_grad_name = rhs_grad_name
+    self.config = config
+
+    self.lhs_shape = list(lhs_shape)
+    self.rhs_shape = list(rhs_shape)
+    # Assume the example weights has the shape of [None, 1] initially and need
+    # to reshape to [None, 1, ..., 1] to have the same rank as the inputs.
+    self.weight_shape = [-1] + (len(self.lhs_shape) - 1) * [1]
+
+    with tf.variable_scope(name):
+      self.lhs_quantizer = TensorQuantizer(
+          self.lhs_shape, self.config.lhs, name=self.lhs_name
+      )
+      self.rhs_quantizer = TensorQuantizer(
+          self.rhs_shape, self.config.rhs, name=self.rhs_name
+      )
+      grad_shape = get_out_shape(
+          self.eq, self.lhs_shape, self.rhs_shape
+          )
+      self.lhs_grad_quantizer = DynamicTensorQuantizer(
+          grad_shape, self.config.lhs_grad, name=self.lhs_grad_name,
+          ) if self.config.lhs_grad else None
+      self.rhs_grad_quantizer = DynamicTensorQuantizer(
+          grad_shape, self.config.rhs_grad, name=self.rhs_grad_name,
+          ) if self.config.rhs_grad else None
+
+    self.quantize_bwd = (
+        self.lhs_grad_quantizer is not None or
+        self.rhs_grad_quantizer is not None
+    )
+
+  def update_lhs(
+      self,
+      x: tf.Tensor,
+      weights: tf.Tensor,
+      event_count: tf.Tensor,
+  ) -> tf.Operation:
+    """Updates variables for an observation of the lhs.
+
+    Updating variables for an argument updates the statistics
+    for a new input to account for incremental observations of
+    a tensor's entries' magnitudes.
+
+    This also updates the scales, if they were set according to
+    a previous calibration config and now we've moved on to
+    a new event associated with a different calibration configuration
+    in the schedule.
+
+    Args:
+      x: a tensor for the observation of an lhs input
+      weights: a weight matrix broadcastable to x, representing how much weight
+        the corresponding axes should have on statistics associated with
+        quantizing that dimension.
+      event_count: the event of the observation
+
+    Returns:
+      The tf.Operation corresponding to the update
+    """
+    return self.lhs_quantizer.update(x, weights, event_count)
+
+  def update_rhs(
+      self,
+      x: tf.Tensor,
+      weights: tf.Tensor,
+      event_count: tf.Tensor,
+  ) -> tf.Operation:
+    """Computes analogue of update_lhs, but for rhs."""
+    return self.rhs_quantizer.update(x, weights, event_count)
+
+  def apply(
+      self,
+      lhs: tf.Tensor,
+      rhs: tf.Tensor,
+      train: bool = True,
+      **tf_einsum_kwargs
+  ) -> tf.Tensor:
+    """Generates a pure quantized einsum op.
+
+    Make sure that `apply` is called within the context of any updates
+    to statistics used for calibration you'd like to happen before the
+    op.
+
+    Args:
+      lhs: a float32 tensor for the left hand side
+      rhs: a float32 tensor for the right hand side
+      train: whether to generate the training or serving graph
+      **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
+
+    Returns:
+      A tf.Tensor generated from possibly quantizing lhs and rhs
+      with clip bounds derived from the current quantizer statistics.
+    """
+
+    return einsum(
+        self.eq,
+        self.lhs_quantizer,
+        lhs,
+        self.rhs_quantizer,
+        rhs,
+        train,
+        quantize_bwd=self.quantize_bwd,
+        lhs_grad_quantizer=self.lhs_grad_quantizer,
+        rhs_grad_quantizer=self.rhs_grad_quantizer,
+        **tf_einsum_kwargs)
+
+  def diagnostics(
+      self,
+      lhs: tf.Tensor,
+      rhs: tf.Tensor) -> Mapping[str, tf.Tensor]:
+    """Returns a dictionary from keys to diagnostic tensors.
+
+    Args:
+      lhs: lhs argument to self.apply, used for deriving diangostics relative to
+        a given input.
+      rhs: as above, but for rhs
+
+    Returns:
+      A dictionary with various quantization-related diagnostics,
+      whose string keys are prefixed by self.name/self.{lhs,rhs}_name.
+    """
+    lhs, rhs = tf.stop_gradient(lhs), tf.stop_gradient(rhs)
+
+    return aqt_ops_util.diagnostics(self, lhs, rhs)
