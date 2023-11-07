@@ -591,6 +591,42 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     prod_aqt = aqt_conv(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
 
+  @parameterized.parameters([
+      dict(
+          shard_count=2,
+          lhs=[1270.0, 10.0, 1270000.0, 10000.0],
+          expected_product=1281280.0,
+      ),
+      dict(
+          shard_count=1,
+          lhs=[1270.0, 10.0, 1270000.0, 10000.0],
+          expected_product=1280000.0,
+      ),
+  ])
+  def test_local_aqt(self, shard_count, lhs, expected_product):
+    # create a config that quantizes both forward and backward passes to int8
+    # set the number of shards (local aqt) to 2
+    cfg = config.fully_quantized(
+        fwd_bits=8,
+        bwd_bits=8,
+        use_stochastic_rounding=False,
+        drhs_local_aqt=config.LocalAqt(shard_count),
+    )
+    cfg.fwd.lhs.numerics = cfg.fwd.lhs.numerics.replace(preserve_max_val=True)
+    cfg.fwd.rhs.numerics = cfg.fwd.rhs.numerics.replace(preserve_max_val=True)
+    cfg.drhs.lhs.numerics = cfg.drhs.lhs.numerics.replace(preserve_max_val=True)
+    cfg.drhs.rhs.numerics = cfg.drhs.rhs.numerics.replace(preserve_max_val=True)
+    dg = lambda lhs, rhs: aqt.make_dot_general(cfg)(
+        lhs,
+        rhs,
+        dimension_numbers=(((), ()), ((), ())),
+        context=aqt.Context(key=None, train_step=None))
+    lhs = jnp.array(lhs)
+    rhs = jnp.array([1.])
+    output, bprop = jax.vjp(dg, lhs, rhs)
+    _, drhs = bprop(jnp.ones_like(output))
+    assert drhs == expected_product
+
 
 if __name__ == "__main__":
   absltest.main()
