@@ -138,6 +138,48 @@ class Tensor:
   use_fwd_quant: Optional[bool]  # use quantized fwd in the bwd pass
 ```
 
+## AQT versions
+
+As of today there are several independent AQT implementations in this package:
+
+- [JAX Legacy AQT](https://github.com/google/aqt/blob/main/aqt/jax_legacy)
+  Obsolete version of AQT still used by some customers.
+- [JAX AQTv1](https://github.com/google/aqt/blob/main/aqt/jax)
+  Version of AQT that was developed with acceleration of NN inference in mind.
+- [TF AQTv1](https://github.com/google/aqt/blob/main/aqt/tensorflow)
+  Tensorflow counterpart of JAX AQTv1.
+- [JAX AQTv2](https://github.com/google/aqt/blob/main/aqt/jax/v2)
+  AQT implementing universal matmul quantization.
+
+AQTv2 is the recommended library.
+We plan to port remaining features from AQTv1 to AQTv2 and
+delete AQTv1 in early Q1 2024. Below we describe details about that.
+
+## Inference acceleration
+
+The most important AQTv2 (to be ported from AQTv1) missing features are:
+
+ - https://github.com/google/aqt/issues/282
+ - https://github.com/google/aqt/issues/280
+
+
+Lack of these features prevents AQTv2 from accelerating inference with small batch.
+The only option today is dynamic quantization where
+each tensor op is quantized independently and quantization scales are found just-in-time.
+
+## Backpropagation acceleration
+
+AQTv2 speeds up training and fine-tuning.
+We verified 1.2x to 1.4x reduction in step time on 1B to 16B large Transformer
+models to a given quality on TPUs.
+
+Today in order to do it correctly one needs to understand that for each
+two-argument tensor op (matmul, einsum, conv) in the forward pass,
+there are two in the backward pass.
+One has to understand how to configure them.
+
+We will be updating config file with current best practices.
+
 ## How AQT Works Internally
 
 In this section we:
