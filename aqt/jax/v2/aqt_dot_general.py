@@ -283,6 +283,10 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
     rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
         rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
     )
+    if cfg.rhs.checkpoint is not None:
+      checkpoint_module = cfg.rhs.checkpoint()
+      rhs_q = checkpoint_module(rhs_q)
+      # rhs_q = cfg.rhs.checkpoint()(rhs_q)
     rhs_inv_scale_t = _rhs_scale_transpose(
         rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
     )
