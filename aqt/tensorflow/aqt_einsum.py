@@ -329,7 +329,7 @@ def get_einsum_transpose(eq: str, swap_ans: bool = False) -> str:
 
 def einsum(
     eq: str,  #
-    lhs_quantizer: TensorQuantizer | DynamicTensorQuantizer,
+    lhs_quantizer: TensorQuantizer,
     lhs: tf.Tensor,
     rhs_quantizer: TensorQuantizer,
     rhs: tf.Tensor,
@@ -337,7 +337,6 @@ def einsum(
     quantize_bwd: bool = False,
     lhs_grad_quantizer: DynamicTensorQuantizer | None = None,
     rhs_grad_quantizer: DynamicTensorQuantizer | None = None,
-    event_count: tf.Tensor | None = None,
     **tf_einsum_kwargs,
 ) -> tf.Tensor:
   """Performs a quantized two-argument :py:func:`tf.einsum`.
@@ -362,8 +361,6 @@ def einsum(
       the einsum equation, `grad,rhs->lhs_grad`, in the backward pass.
     rhs_grad_quantizer: A `TensorQuantizer` for grad, which is used to quantize
       the einsum equation, `grad,lhs->rhs_grad`, in the backward pass.
-    event_count: a optional scalar `tf.Tensor` only needed if either
-      lhs_quantizer or rhs_quantizer is DynamicTensorQuantizer.
     **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
 
   Returns:
@@ -384,11 +381,6 @@ def einsum(
       lhs_quantizer.config.tensor_configs,
       'rhs_quantizer.config.tensor_configs',
       rhs_quantizer.config.tensor_configs)
-
-  if train:
-    for quantizer in [lhs_quantizer, rhs_quantizer]:
-      if isinstance(quantizer, DynamicTensorQuantizer) and event_count is None:
-        raise ValueError('event_count is required for DynamicTensorQuantizer')
 
   if not quantize_bwd:
     assert lhs_grad_quantizer is None
@@ -452,29 +444,9 @@ def einsum(
     with tf.name_scope('AqtEinsum'):
       with tf.name_scope('get_quant_scale'):
         with tf.name_scope('lhs'):
-          if isinstance(lhs_quantizer, DynamicTensorQuantizer):
-            lhs_scale, lhs_inv_scale = (
-                lhs_quantizer._get_dynamic_quant_scale(
-                    lhs,
-                    None,
-                    event_count=event_count,
-                    train=train,
-                )
-            )
-          else:
-            lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
+          lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
         with tf.name_scope('rhs'):
-          if isinstance(rhs_quantizer, DynamicTensorQuantizer):
-            rhs_scale, rhs_inv_scale = (
-                rhs_quantizer._get_dynamic_quant_scale(
-                    rhs,
-                    None,
-                    event_count=event_count,
-                    train=train,
-                )
-            )
-          else:
-            rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
+          rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
 
       lhs_scaled = lhs_scale * lhs
       rhs_scaled = rhs_scale * rhs
@@ -523,29 +495,9 @@ def einsum(
 
           with tf.name_scope('get_quant_scale'):
             with tf.name_scope('lhs'):
-              if isinstance(lhs_quantizer, DynamicTensorQuantizer):
-                lhs_scale, lhs_inv_scale = (
-                    lhs_quantizer._get_dynamic_quant_scale(
-                        lhs,
-                        None,
-                        event_count=event_count,
-                        train=train,
-                    )
-                )
-              else:
-                lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
+              lhs_scale, lhs_inv_scale = lhs_quantizer._get_quant_scale(train)
             with tf.name_scope('rhs'):
-              if isinstance(rhs_quantizer, DynamicTensorQuantizer):
-                rhs_scale, rhs_inv_scale = (
-                    rhs_quantizer._get_dynamic_quant_scale(
-                        rhs,
-                        None,
-                        event_count=event_count,
-                        train=train,
-                    )
-                )
-              else:
-                rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
+              rhs_scale, rhs_inv_scale = rhs_quantizer._get_quant_scale(train)
 
           lhs_scaled = lhs_scale * lhs
           rhs_scaled = rhs_scale * rhs
@@ -553,7 +505,7 @@ def einsum(
           def _bwd(
               eq: str,
               grad_quantizer: DynamicTensorQuantizer | None,
-              y_quantizer: TensorQuantizer | DynamicTensorQuantizer,
+              y_quantizer: TensorQuantizer,
               grad: tf.Tensor,
               qy: tf.Tensor,
               y_inv_scale: tf.Tensor,
