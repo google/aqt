@@ -13,12 +13,13 @@
 # limitations under the License.
 """Mnist example."""
 
+from typing import Any, Callable
 from absl import app
 from aqt.jax.v2 import config as aqt_config
 from aqt.jax.v2.flax import aqt_dot_general
 from flax import linen as nn
+from flax import struct
 from flax.metrics import tensorboard
-from flax.training import train_state
 import jax
 import jax.numpy as jnp
 import ml_collections
@@ -67,7 +68,12 @@ def apply_model(state, images, labels):
 
 @jax.jit
 def update_model(state, grads):
-  return state.apply_gradients(grads=grads)
+  updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
+  new_params = optax.apply_updates(state.params, updates)
+  return state.replace(
+      params=new_params,
+      opt_state=new_opt_state,
+  )
 
 
 def train_epoch(state, train_ds, batch_size, rng):
@@ -107,17 +113,31 @@ def get_datasets():
   return train_ds, test_ds
 
 
+class TrainState(struct.PyTreeNode):
+  """Train state."""
+
+  apply_fn: Callable[..., Any] = struct.field(pytree_node=False)
+  params: Any = struct.field(pytree_node=True)
+  tx: optax.GradientTransformation = struct.field(pytree_node=False)
+  opt_state: optax.OptState = struct.field(pytree_node=True)
+
+
 def create_train_state(rng, config):
   """Creates initial `TrainState`."""
   cnn = CNN()
   params = cnn.init({'params': rng}, jnp.ones([1, 28, 28, 1]))['params']
   tx = optax.sgd(config.learning_rate, config.momentum)
-  return train_state.TrainState.create(apply_fn=cnn.apply, params=params, tx=tx)
+  return TrainState(
+      apply_fn=cnn.apply,
+      params=params,
+      tx=tx,
+      opt_state=tx.init(params),
+  )
 
 
 def train_and_evaluate(
     config: ml_collections.ConfigDict, workdir: str
-) -> train_state.TrainState:
+) -> TrainState:
   """Execute model training and evaluation loop.
 
   Args:
@@ -167,7 +187,8 @@ def train_and_evaluate(
   return state
 
 
-def main():
+def main(argv):
+  del argv
   cfg = ml_collections.ConfigDict()
   cfg.learning_rate = 0.1
   cfg.momentum = 0.9
