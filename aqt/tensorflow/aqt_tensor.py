@@ -28,6 +28,7 @@ from aqt.common import aqt_common
 from aqt.common import aqt_config
 from aqt.common import emulated_floating_points
 from aqt.common import emulation_utils
+import numpy as np
 import tensorflow.compat.v1 as tf
 import tensorflow.compat.v1.tpu as tpu_ops
 
@@ -425,6 +426,76 @@ def _should_update_scale(
   return was_previously_inactive | first_event
 
 
+def low_bits_random_uniform(
+    shape: Iterable[int], seed: tf.Tensor,
+) -> tf.Tensor:
+  """Random floats in nearly [-0.5, 0.5] of shape `shape`.
+
+  Shifts the bits to the leading mantissa bit of the `f32` representation,
+  and binary ORs with `1.0`, resulting in a normal number between
+  `[1.0, 1.0 + (x - 1) / x]`, where `x = 2 ** rand_bits`.
+
+  From there we adjust to `[-0.5 + 1/(2x), 0.5 - 1/(2x)]`, but don't bother
+  with scaling up (converges fine for 8bits+).
+
+  Args:
+    shape: Shape of desired f32 tensor.
+    seed: A shape [2] Tensor, the seed to the random number generator. Must have
+      dtype `int32` or `int64`. (When using XLA, only `int32` is allowed.)
+
+  Returns:
+    Random float32 numbers in approximately the range `[-0.5, 0.5]`.
+  """
+  # generate uint32 random number and then split to 4 segments of uint8 numbers
+  nbits = 8
+  segments = 4
+  original_shape = tf.convert_to_tensor(shape, dtype=tf.int32)
+  shape = tf.convert_to_tensor(shape, dtype=tf.int32)
+  if shape.shape.as_list() == [0]:
+    shape = tf.constant([1], dtype=shape.dtype)
+
+  def _reshape_and_truncate(shape) -> tf.Tensor:
+    last_dim = shape[-1]
+
+    last_dim_with_padding = tf.cast(
+        tf.math.ceil(last_dim / segments), shape.dtype
+    )
+    u32_shape = tf.concat([
+        shape[:-1], tf.reshape(last_dim_with_padding, [1])
+        ], axis=0)
+
+    u8_shape = tf.concat([
+        shape[:-1], tf.reshape(segments * last_dim_with_padding, [1])
+        ], axis=0)
+
+    def reshape_to_original(x: tf.Tensor):
+      y = tf.reshape(x, u8_shape)
+      y = y[..., :last_dim]
+      y = tf.reshape(y, original_shape)
+      return y
+
+    return u32_shape, reshape_to_original
+
+  u32_shape, reshape_to_original = _reshape_and_truncate(shape)
+  rand_uint32 = tf.random.stateless_uniform(
+      u32_shape, minval=None, maxval=None, seed=seed, dtype=tf.uint32
+  )
+  rand_u8 = tf.bitcast(rand_uint32, tf.uint8)
+  # TODO(wenbozhang): handle the last dimension is not multiple of 4
+  rand_u8 = reshape_to_original(rand_u8)
+  nmant = np.finfo(np.float32).nmant
+  rand_u32 = tf.cast(rand_u8, tf.uint32)
+  r_bitpattern = tf.bitwise.left_shift(rand_u32, nmant - nbits)
+  r_bitpattern = tf.bitwise.bitwise_or(
+      tf.bitcast(tf.constant(1, tf.float32), tf.uint32),
+      r_bitpattern
+  )
+  rand_floats = tf.bitcast(r_bitpattern, tf.float32)
+  shift = 2 ** (-1 - nbits)
+  centered = rand_floats - (1.5 - shift)
+  return centered
+
+
 class TensorQuantizerBase:
   """Maintains state associated with the quantization of an input tensor.
 
@@ -589,6 +660,7 @@ class TensorQuantizerBase:
       x: tf.Tensor,
       train: bool,
       use_stochastic_rounding: bool = False,
+      seed=None,
   ) -> tf.Tensor:
     """Quantizes x with active quant config, if any, else act as identity.
 
@@ -597,6 +669,7 @@ class TensorQuantizerBase:
       train: whether training
       use_stochastic_rounding: whether to add random numbers in [-0.5, 0.5]
         before integer quantization.
+      seed:
 
     Returns:
       quantized tensor
@@ -606,7 +679,8 @@ class TensorQuantizerBase:
 
       def _floor(t: tf.Tensor, use_stochastic_rounding: bool) -> tf.Tensor:
         if use_stochastic_rounding:
-          t = t + tf.random.uniform(tf.shape(t), -0.5, 0.5, dtype=t.dtype)
+          rand = low_bits_random_uniform(tf.shape(t), seed)
+          t = t + tf.cast(rand, dtype=t.dtype)
         return tf.math.floor(t)
 
       def maybe_floor_or_small_float(y):
