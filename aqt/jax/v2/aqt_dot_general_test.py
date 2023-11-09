@@ -652,36 +652,53 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
               dataset_size=8,
               aqt_cfg=config.fully_quantized(fwd_bits=8, bwd_bits=8),
               target_loss={
-                  "cpu": 4.009276390075683593750000000000,
-                  "tpu": 4.016347885131835937500000000000,
+                  "cpu": 3.981118917465209960937500000000,
+                  "tpu": 3.991446971893310546875000000000,
               },
           )
       ]
   )
   def test_mnist_training(self, batch_size, dataset_size, aqt_cfg, target_loss):
 
-    class TrainConfig:
-      learning_rate = 0.1
-      momentum = 0.9
+    def mnist_train(aqt_cfg):
+      class TrainConfig:
+        learning_rate = 0.1
+        momentum = 0.9
 
-    train_cfg = TrainConfig()
-    rng = jax.random.key(0)
-    rng, init_rng = jax.random.split(rng)
-    state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
-    rng, ds_rng = jax.random.split(rng)
-    train_ds = {
-        "image": jax.random.uniform(
-            key=ds_rng, shape=(dataset_size, 28, 28, 1)
-        ),
-        "label": jax.random.randint(
-            key=ds_rng, shape=(dataset_size,), minval=0, maxval=10
-        ),
-    }
-    _, input_rng = jax.random.split(rng)
-    _, train_loss, _ = aqt_mnist.train_epoch(
-        state, train_ds, batch_size, input_rng
-    )
+      train_cfg = TrainConfig()
+      rng = jax.random.key(0)
+      rng, init_rng = jax.random.split(rng)
+      state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
+      rng, ds_rng = jax.random.split(rng)
+      train_ds = {
+          "image": jax.random.uniform(
+              key=ds_rng, shape=(dataset_size, 28, 28, 1)
+          ),
+          "label": jax.random.randint(
+              key=ds_rng, shape=(dataset_size,), minval=0, maxval=10
+          ),
+      }
+      _, input_rng = jax.random.split(rng)
+      state, train_loss, _ = aqt_mnist.train_epoch(
+          state, train_ds, batch_size, input_rng
+      )
+      return train_loss, state
+
+    def set_preprocess_quantized(aqt_cfg, preprocess):
+      aqt_cfg.fwd.lhs.preprocess_quantized = preprocess
+      aqt_cfg.fwd.rhs.preprocess_quantized = preprocess
+
+    train_loss, _ = mnist_train(aqt_cfg)
     assert train_loss == target_loss[jax.devices()[0].platform]
+
+    set_preprocess_quantized(aqt_cfg, config.FlaxCheckpointing)
+    train_loss, state = mnist_train(aqt_cfg)
+    assert train_loss == target_loss[jax.devices()[0].platform]
+    # there should be exactly 4 int8 tensors saved in aqt variable collection
+    if_int8_tree = jax.tree_util.tree_map(
+        lambda x: 1 if x.dtype == jnp.int8 else 0, state.model
+    )
+    assert jax.tree_util.tree_reduce(np.add, if_int8_tree) == 4
 
 
 if __name__ == "__main__":

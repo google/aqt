@@ -36,7 +36,7 @@ class CNN(nn.Module):
 
   @nn.compact
   def __call__(self, x):
-    aqt_dg = aqt_dot_general.AqtDotGeneral(self.aqt_cfg)
+    aqt_dg = functools.partial(aqt_dot_general.AqtDotGeneral, self.aqt_cfg)
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
@@ -47,9 +47,9 @@ class CNN(nn.Module):
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = x.reshape((x.shape[0], -1))  # flatten
-    x = nn.Dense(features=256, dot_general=aqt_dg)(x)
+    x = nn.Dense(features=256, dot_general_cls=aqt_dg)(x)
     x = nn.relu(x)
-    x = nn.Dense(features=10, dot_general=aqt_dg)(x)
+    x = nn.Dense(features=10, dot_general_cls=aqt_dg)(x)
     return x
 
 
@@ -69,7 +69,7 @@ def apply_model(state, images, labels, train):
     loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
     return loss, (logits, updated_var)
 
-  grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+  grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
   aux, grads = grad_fn(state.model)
   loss, (logits, updated_var) = aux
   accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)

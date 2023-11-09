@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional, Union
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
+import flax.linen as nn
 import flax.struct
 import jax
 import jax.numpy as jnp
@@ -26,6 +27,20 @@ DType = Any
 Context = Any  # TODO(lew): We could put Context in a separate file.
 
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
+
+
+class FlaxCheckpointing(nn.Module):
+  """Save quantized weights in dot_general."""
+  var_collection: str = 'aqt'
+  var_name: str = 'quantized'
+
+  @nn.compact
+  def __call__(self, inputs):
+    params = self.variable(
+        self.var_collection, self.var_name, lambda s: jnp.ones(s), inputs.shape  # pylint: disable=unnecessary-lambda
+    )
+    params.value = inputs
+    return params.value
 
 
 class NoNumerics(flax.struct.PyTreeNode):
@@ -56,6 +71,8 @@ class Tensor:
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
+  # Operation applied to the quantized input tensor right before the matmul
+  preprocess_quantized: Optional[FlaxCheckpointing]
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
@@ -181,6 +198,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       use_fake_quant=False,
       # dtype_x=dtype,
       use_fwd_quant=None,
+      preprocess_quantized=None,
   )
 
 

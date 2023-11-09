@@ -320,6 +320,12 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
       if cfg.dg_in_dtype is not None:
         lhs_q = lhs_q.astype(cfg.dg_in_dtype)
         rhs_q = rhs_q.astype(cfg.dg_in_dtype)
+      if cfg.lhs.preprocess_quantized is not None:
+        preprocess_fn = cfg.lhs.preprocess_quantized()  # pytype: disable=missing-parameter
+        lhs_q = preprocess_fn(lhs_q)
+      if cfg.rhs.preprocess_quantized is not None:
+        preprocess_fn = cfg.rhs.preprocess_quantized()  # pytype: disable=missing-parameter
+        rhs_q = preprocess_fn(rhs_q)
 
       out = lax.dot_general(
           lhs_q,
