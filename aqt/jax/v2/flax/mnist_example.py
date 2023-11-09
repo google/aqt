@@ -58,9 +58,9 @@ def apply_model(state, images, labels, train):
   """Computes gradients, loss and accuracy for a single batch."""
 
   apply_fn = state.apply_fn_train if train else state.apply_fn_eval
-  def loss_fn(params):
+  def loss_fn(model):
     logits, updated_var = apply_fn(
-        {'params': params, 'batch_stats': state.batch_stats},
+        model,
         images,
         rngs={'params': jax.random.PRNGKey(0)},
         mutable=True,
@@ -70,7 +70,7 @@ def apply_model(state, images, labels, train):
     return loss, (logits, updated_var)
 
   grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-  aux, grads = grad_fn(state.params)
+  aux, grads = grad_fn(state.model)
   loss, (logits, updated_var) = aux
   accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
   return grads, loss, accuracy, updated_var
@@ -78,12 +78,14 @@ def apply_model(state, images, labels, train):
 
 @jax.jit
 def update_model(state, grads, updated_var):
-  updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
-  new_params = optax.apply_updates(state.params, updates)
+  params = state.model['params']
+  param_grad = grads['params']
+  updates, new_opt_state = state.tx.update(param_grad, state.opt_state, params)
+  new_params = optax.apply_updates(params, updates)
+  updated_var.update(params=new_params)
   return state.replace(
-      params=new_params,
+      model=updated_var,
       opt_state=new_opt_state,
-      batch_stats=updated_var['batch_stats'],
   )
 
 
@@ -131,8 +133,7 @@ class TrainState(struct.PyTreeNode):
 
   apply_fn_train: Callable[..., Any] = struct.field(pytree_node=False)
   apply_fn_eval: Callable[..., Any] = struct.field(pytree_node=False)
-  params: Any = struct.field(pytree_node=True)
-  batch_stats: Any = struct.field(pytree_node=True)
+  model: Any = struct.field(pytree_node=True)
   tx: optax.GradientTransformation = struct.field(pytree_node=False)
   opt_state: optax.OptState = struct.field(pytree_node=True)
 
@@ -141,16 +142,14 @@ def create_train_state(rng, config):
   """Creates initial `TrainState`."""
   cnn_train = CNN(bn_use_stats=True)
   model = cnn_train.init({'params': rng}, jnp.ones([1, 28, 28, 1]))
-  params, batch_stats = model['params'], model['batch_stats']
   tx = optax.sgd(config.learning_rate, config.momentum)
   cnn_eval = CNN(bn_use_stats=False)
   return TrainState(
       apply_fn_train=cnn_train.apply,
       apply_fn_eval=cnn_eval.apply,
-      params=params,
-      batch_stats=batch_stats,
+      model=model,
       tx=tx,
-      opt_state=tx.init(params),
+      opt_state=tx.init(model['params']),
   )
 
 
