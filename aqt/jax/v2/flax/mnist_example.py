@@ -32,11 +32,11 @@ import tensorflow_datasets as tfds
 class CNN(nn.Module):
   """A simple CNN model."""
   bn_use_stats: bool
+  aqt_cfg: aqt_config.DotGeneral
 
   @nn.compact
   def __call__(self, x):
-    aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
-    aqt_dg = aqt_dot_general.AqtDotGeneral(aqt_cfg)
+    aqt_dg = aqt_dot_general.AqtDotGeneral(self.aqt_cfg)
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
@@ -138,12 +138,12 @@ class TrainState(struct.PyTreeNode):
   opt_state: optax.OptState = struct.field(pytree_node=True)
 
 
-def create_train_state(rng, config):
+def create_train_state(rng, config, aqt_cfg):
   """Creates initial `TrainState`."""
-  cnn_train = CNN(bn_use_stats=True)
+  cnn_train = CNN(bn_use_stats=True, aqt_cfg=aqt_cfg)
   model = cnn_train.init({'params': rng}, jnp.ones([1, 28, 28, 1]))
   tx = optax.sgd(config.learning_rate, config.momentum)
-  cnn_eval = CNN(bn_use_stats=False)
+  cnn_eval = CNN(bn_use_stats=False, aqt_cfg=aqt_cfg)
   return TrainState(
       apply_fn_train=cnn_train.apply,
       apply_fn_eval=cnn_eval.apply,
@@ -172,7 +172,8 @@ def train_and_evaluate(
   summary_writer.hparams(dict(config))
 
   rng, init_rng = jax.random.split(rng)
-  state = create_train_state(init_rng, config)
+  aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+  state = create_train_state(init_rng, config, aqt_cfg)
 
   for epoch in range(1, config.num_epochs + 1):
     rng, input_rng = jax.random.split(rng)

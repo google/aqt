@@ -20,6 +20,7 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
+import aqt.jax.v2.flax.mnist_example as aqt_mnist
 import flax.linen.linear as fl
 import jax
 import jax.numpy as jnp
@@ -643,6 +644,44 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     output, bprop = jax.vjp(dg, lhs, rhs)
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
+
+  @parameterized.parameters(
+      [
+          dict(
+              batch_size=4,
+              dataset_size=8,
+              aqt_cfg=config.fully_quantized(fwd_bits=8, bwd_bits=8),
+              target_loss={
+                  "cpu": 4.009276390075683593750000000000,
+                  "tpu": 4.016347885131835937500000000000,
+              },
+          )
+      ]
+  )
+  def test_mnist_training(self, batch_size, dataset_size, aqt_cfg, target_loss):
+
+    class TrainConfig:
+      learning_rate = 0.1
+      momentum = 0.9
+
+    train_cfg = TrainConfig()
+    rng = jax.random.key(0)
+    rng, init_rng = jax.random.split(rng)
+    state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
+    rng, ds_rng = jax.random.split(rng)
+    train_ds = {
+        "image": jax.random.uniform(
+            key=ds_rng, shape=(dataset_size, 28, 28, 1)
+        ),
+        "label": jax.random.randint(
+            key=ds_rng, shape=(dataset_size,), minval=0, maxval=10
+        ),
+    }
+    _, input_rng = jax.random.split(rng)
+    _, train_loss, _ = aqt_mnist.train_epoch(
+        state, train_ds, batch_size, input_rng
+    )
+    assert train_loss == target_loss[jax.devices()[0].platform]
 
 
 if __name__ == "__main__":
