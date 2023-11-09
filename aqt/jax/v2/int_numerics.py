@@ -29,6 +29,7 @@ class IntNumerics(flax.struct.PyTreeNode):
   # true = map max val on the middle of the last
   preserve_max_val: bool
   clip: bool
+  clip_gradient: bool
   round: bool
   noise_fn: Optional[stochastic_rounding.NoiseFn]
 
@@ -58,11 +59,21 @@ class IntNumerics(flax.struct.PyTreeNode):
     else:
       return self.get_edge_of_last_int_bucket()
 
+  def _get_fwd_clip_bound(self):
+    # If we are not rounding, we just clip to bucket edges.
+    fwd_clip_bound = self.get_edge_of_last_int_bucket()
+    # If, after clip, we are rounding, we need to make sure that
+    # we won't round values at the clip_bound away to the
+    # non-existing bucket.
+    if self.round:
+      # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
+      fwd_clip_bound -= 0.5
+    return fwd_clip_bound
+
   def fwd(self, x, context):
     """Forward pass."""
     assert self.bits <= 22, 'Too many bits, float32 has less precision.'
 
-    edge_of_last_bucket = self.get_edge_of_last_int_bucket()
     # Maybe noise
     if self.noise_fn:
       assert context.key is not None, (
@@ -71,16 +82,8 @@ class IntNumerics(flax.struct.PyTreeNode):
       )
       x = (x + self.noise_fn(x.shape, context.key)).astype(x.dtype)
 
-    # Maybe clip
     if self.clip:
-      # If we are not rounding, we just clip to bucket edges.
-      fwd_clip_bound = edge_of_last_bucket
-      # If, after clip, we are rounding, we need to make sure that
-      # we won't round values at the edge_of_last_bucket away to the
-      # non-existing bucket.
-      if self.round:
-        # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
-        fwd_clip_bound -= 0.5
+      fwd_clip_bound = self._get_fwd_clip_bound()
       x = jnp.clip(x, -fwd_clip_bound, fwd_clip_bound)
 
     # Maybe round
@@ -99,11 +102,15 @@ class IntNumerics(flax.struct.PyTreeNode):
     return self.fwd(x, context), res
 
   def vjp_bwd(self, res, grad):
-    # This is gradient of clip.
-    # For boundary values we will have full graindent.
-    # We might use something like this for calibrations other than abs(max(x))
-    # (x,) = res
-    # ret = (x <= edge_of_last_bucket) * (x >= -edge_of_last_bucket) * grad
-    del res
+    # Gradient of the clip function.
+    # For boundary values we will have full gradient.
+    # When using abs(max(x)) scaling, x is always in the interior, and the
+    # gradient clip is always 1. So, we can always set clip_gradient to false.
+    # However, other types of scaling may result in x being outside (i.e., there
+    # is clipping). In that case it may be desirable to make the gradient zero.
     ret = grad
+    if self.clip_gradient:
+      (x,) = res
+      clip_bound = self._get_fwd_clip_bound()
+      ret *= (-clip_bound <= x) * (x <= clip_bound)
     return (ret, None)

@@ -45,7 +45,8 @@ class AbsMaxCalibration(Calibration):
     msg = 'Perhaps you are using fake_quant and forgot to set them.'
     assert shared_axes is not None, msg
 
-    # NOTE: If you want to clip, modify _make_int_quant.vjp_bwd.
+    # NOTE: If you want to clip, consider using clip and clip_gradient in
+    # int_numerics.IntNumerics.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     return abs_max

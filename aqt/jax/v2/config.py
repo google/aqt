@@ -169,6 +169,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
         clip=True,
         round=True,
         noise_fn=None,
+        clip_gradient=False,  # This can be disabled when using abs-max scaling.
     )
 
   return Tensor(

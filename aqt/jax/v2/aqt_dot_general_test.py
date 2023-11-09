@@ -107,27 +107,29 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     t = np.random.normal(size=6).reshape((2, 3))
     np.testing.assert_array_equal(t, t)
 
-  def test_fq_noise(self):
-    for preserve_zero in [True, False]:
-      for prec in [1, 2, 4, 8]:
-        for v in [0.1, 1000.0]:
-          for seed in range(10):
-            key = jax.random.PRNGKey(seed)
-            cfg = config.tensor_make(prec)
-            if isinstance(cfg.numerics, int_numerics.IntNumerics):
-              cfg.numerics = cfg.numerics.replace(preserve_zero=preserve_zero)
-            cfg.calib_shared_axes = (0,)
-            sample_size = 10000
-            shape = (sample_size,)
-            a = jax.random.uniform(key, shape, minval=-v, maxval=v)
-            context = aqt.Context(key=None, train_step=None)
-            a_fq = aqt.make_fake_quant(cfg)(a, context)
-            bucket_noise = a_fq - a  #  ~ U(-bucket_size/2, bucket_size/2)
-            bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
-            bucket_size = (v * 2) / bucket_count
-            noise = bucket_noise / bucket_size + 0.5  # ~U(0, 1)
-            pvalue = scipy.stats.kstest(noise, "uniform").pvalue
-            assert pvalue > 0.01
+  @parameterized.product(
+      preserve_zero=[True, False],
+      prec=[1, 2, 4, 8],
+      v=[0.1, 1000.0],
+      seed=list(range(10)),
+  )
+  def test_fq_noise(self, preserve_zero, prec, v, seed):
+    key = jax.random.PRNGKey(seed)
+    cfg = config.tensor_make(prec)
+    if isinstance(cfg.numerics, int_numerics.IntNumerics):
+      cfg.numerics = cfg.numerics.replace(preserve_zero=preserve_zero)
+    cfg.calib_shared_axes = (0,)
+    sample_size = 10000
+    shape = (sample_size,)
+    a = jax.random.uniform(key, shape, minval=-v, maxval=v)
+    context = aqt.Context(key=None, train_step=None)
+    a_fq = aqt.make_fake_quant(cfg)(a, context)
+    bucket_noise = a_fq - a  #  ~ U(-bucket_size/2, bucket_size/2)
+    bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
+    bucket_size = (v * 2) / bucket_count
+    noise = bucket_noise / bucket_size + 0.5  # ~U(0, 1)
+    pvalue = scipy.stats.kstest(noise, "uniform").pvalue
+    assert pvalue > 0.01
 
   def test_stochastic_rounding_noise(self):
     repeats = 1000
@@ -187,6 +189,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.dot_general_make(2, 1)),
       dict(cfg=config.dot_general_make(2, 2)),
       dict(cfg=config.dot_general_make(8, 8)),
+      dict(cfg=config.dot_general_make(8, 8), clip_gradient=True),
       dict(
           cfg=config.dot_general_make(8, 8, dlhs_local_aqt=config.LocalAqt(2))
       ),
@@ -250,6 +253,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       gra_shape=(10, 30),  # has to be the shape of the output
       seed=0,
       dtype=jnp.float32,
+      clip_gradient=False,
   ):
     readonly_cfg = cfg
     del cfg
@@ -260,6 +264,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         use_fwd_quant=None,
         fwd_lhs_tricky_clip_and_round=False,
         local_aqt=None,
+        clip_gradient=False,
     ):
       cfg = copy.deepcopy(readonly_cfg)
       if fwd_lhs_tricky_clip_and_round:
@@ -344,6 +349,17 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         # cfg.fwd.local_aqt = local_aqt
         cfg.dlhs.local_aqt = local_aqt
         cfg.drhs.local_aqt = local_aqt
+
+      # When using abs-max scaling, this should be a no-op.
+      if isinstance(cfg.fwd.lhs.numerics, int_numerics.IntNumerics):
+        cfg.fwd.lhs.numerics = cfg.fwd.lhs.numerics.replace(
+            clip_gradient=clip_gradient
+        )
+      if isinstance(cfg.fwd.rhs.numerics, int_numerics.IntNumerics):
+        cfg.fwd.rhs.numerics = cfg.fwd.rhs.numerics.replace(
+            clip_gradient=clip_gradient
+        )
+
       return cfg
 
     # test dot_general
@@ -364,6 +380,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           use_fwd_quant=use_fwd_quant,
           fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
           local_aqt=local_aqt,
+          clip_gradient=clip_gradient,
       )
       dg = aqt.make_dot_general(cfg)
       return lambda lhs, rhs: dg(lhs, rhs, dims, context=test_context)
