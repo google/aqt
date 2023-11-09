@@ -13,6 +13,7 @@
 # limitations under the License.
 """Mnist example."""
 
+import functools
 from typing import Any, Callable
 from absl import app
 from aqt.jax.v2 import config as aqt_config
@@ -30,15 +31,19 @@ import tensorflow_datasets as tfds
 
 class CNN(nn.Module):
   """A simple CNN model."""
+  bn_use_stats: bool
 
   @nn.compact
   def __call__(self, x):
     aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
     aqt_dg = aqt_dot_general.AqtDotGeneral(aqt_cfg)
+    use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+    x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+    x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = x.reshape((x.shape[0], -1))  # flatten
@@ -48,31 +53,37 @@ class CNN(nn.Module):
     return x
 
 
-@jax.jit
-def apply_model(state, images, labels):
+@functools.partial(jax.jit, static_argnums=(3,))
+def apply_model(state, images, labels, train):
   """Computes gradients, loss and accuracy for a single batch."""
 
+  apply_fn = state.apply_fn_train if train else state.apply_fn_eval
   def loss_fn(params):
-    logits = state.apply_fn(
-        {'params': params}, images, rngs={'params': jax.random.PRNGKey(0)}
+    logits, updated_var = apply_fn(
+        {'params': params, 'batch_stats': state.batch_stats},
+        images,
+        rngs={'params': jax.random.PRNGKey(0)},
+        mutable=True,
     )
     one_hot = jax.nn.one_hot(labels, 10)
     loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
-    return loss, logits
+    return loss, (logits, updated_var)
 
   grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-  (loss, logits), grads = grad_fn(state.params)
+  aux, grads = grad_fn(state.params)
+  loss, (logits, updated_var) = aux
   accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
-  return grads, loss, accuracy
+  return grads, loss, accuracy, updated_var
 
 
 @jax.jit
-def update_model(state, grads):
+def update_model(state, grads, updated_var):
   updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
   new_params = optax.apply_updates(state.params, updates)
   return state.replace(
       params=new_params,
       opt_state=new_opt_state,
+      batch_stats=updated_var['batch_stats'],
   )
 
 
@@ -91,8 +102,10 @@ def train_epoch(state, train_ds, batch_size, rng):
   for perm in perms:
     batch_images = train_ds['image'][perm, ...]
     batch_labels = train_ds['label'][perm, ...]
-    grads, loss, accuracy = apply_model(state, batch_images, batch_labels)
-    state = update_model(state, grads)
+    grads, loss, accuracy, updated_var = apply_model(
+        state, batch_images, batch_labels, train=True
+    )
+    state = update_model(state, grads, updated_var)
     epoch_loss.append(loss)
     epoch_accuracy.append(accuracy)
   train_loss = np.mean(epoch_loss)
@@ -116,20 +129,26 @@ def get_datasets():
 class TrainState(struct.PyTreeNode):
   """Train state."""
 
-  apply_fn: Callable[..., Any] = struct.field(pytree_node=False)
+  apply_fn_train: Callable[..., Any] = struct.field(pytree_node=False)
+  apply_fn_eval: Callable[..., Any] = struct.field(pytree_node=False)
   params: Any = struct.field(pytree_node=True)
+  batch_stats: Any = struct.field(pytree_node=True)
   tx: optax.GradientTransformation = struct.field(pytree_node=False)
   opt_state: optax.OptState = struct.field(pytree_node=True)
 
 
 def create_train_state(rng, config):
   """Creates initial `TrainState`."""
-  cnn = CNN()
-  params = cnn.init({'params': rng}, jnp.ones([1, 28, 28, 1]))['params']
+  cnn_train = CNN(bn_use_stats=True)
+  model = cnn_train.init({'params': rng}, jnp.ones([1, 28, 28, 1]))
+  params, batch_stats = model['params'], model['batch_stats']
   tx = optax.sgd(config.learning_rate, config.momentum)
+  cnn_eval = CNN(bn_use_stats=False)
   return TrainState(
-      apply_fn=cnn.apply,
+      apply_fn_train=cnn_train.apply,
+      apply_fn_eval=cnn_eval.apply,
       params=params,
+      batch_stats=batch_stats,
       tx=tx,
       opt_state=tx.init(params),
   )
@@ -161,8 +180,8 @@ def train_and_evaluate(
     state, train_loss, train_accuracy = train_epoch(
         state, train_ds, config.batch_size, input_rng
     )
-    _, test_loss, test_accuracy = apply_model(
-        state, test_ds['image'], test_ds['label']
+    _, test_loss, test_accuracy, _ = apply_model(
+        state, test_ds['image'], test_ds['label'], train=False
     )
 
     print(
