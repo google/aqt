@@ -645,26 +645,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
 
-  @parameterized.parameters(
-      [
-          dict(
-              batch_size=4,
-              dataset_size=8,
-              aqt_cfg=config.fully_quantized(fwd_bits=8, bwd_bits=8),
-              target_loss={
-                  "cpu": [
-                      3.981118679046630859375000000000,  # rome, milan
-                      3.981118917465209960937500000000,  # skylake
-                  ],
-                  "TPU v2": [3.991446971893310546875000000000],
-                  "TPU v3": [3.991446971893310546875000000000],
-                  "TPU v4": [3.992439270019531250000000000000],
-                  "TPU v5 lite": [3.991421222686767578125000000000],
-              },
-          )
-      ]
-  )
-  def test_mnist_training(self, batch_size, dataset_size, aqt_cfg, target_loss):
+  def test_mnist_training(self):
+    batch_size = 4
+    dataset_size = 8
+    target_loss = {
+        "cpu": [
+            3.981118679046630859375000000000,  # rome, milan
+            3.981118917465209960937500000000,  # skylake
+        ],
+        "TPU v2": [3.991446971893310546875000000000],
+        "TPU v3": [3.991446971893310546875000000000],
+        "TPU v4": [3.992439270019531250000000000000],
+        "TPU v5 lite": [3.991421222686767578125000000000],
+    }
 
     class TrainConfig:
       learning_rate = 0.1
@@ -673,6 +666,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     train_cfg = TrainConfig()
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
+    aqt_cfg = config.fully_quantized(fwd_bits=8, bwd_bits=8)
     state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
     rng, ds_rng = jax.random.split(rng)
     train_ds = {
