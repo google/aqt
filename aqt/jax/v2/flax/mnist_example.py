@@ -36,7 +36,7 @@ class CNN(nn.Module):
 
   @nn.compact
   def __call__(self, x):
-    aqt_dg = aqt_dot_general.AqtDotGeneral(self.aqt_cfg)
+    aqt_dg = functools.partial(aqt_dot_general.AqtDotGeneral, self.aqt_cfg)
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
@@ -47,9 +47,9 @@ class CNN(nn.Module):
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = x.reshape((x.shape[0], -1))  # flatten
-    x = nn.Dense(features=256, dot_general=aqt_dg)(x)
+    x = nn.Dense(features=256, dot_general_cls=aqt_dg)(x)
     x = nn.relu(x)
-    x = nn.Dense(features=10, dot_general=aqt_dg)(x)
+    x = nn.Dense(features=10, dot_general_cls=aqt_dg)(x)
     return x
 
 

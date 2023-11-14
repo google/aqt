@@ -652,8 +652,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
               dataset_size=8,
               aqt_cfg=config.fully_quantized(fwd_bits=8, bwd_bits=8),
               target_loss={
-                  "cpu": 4.009276390075683593750000000000,
-                  "tpu": 4.016347885131835937500000000000,
+                  "cpu": [
+                      3.981118679046630859375000000000,  # rome, milan
+                      3.981118917465209960937500000000,  # skylake
+                  ],
+                  "TPU v2": [3.991446971893310546875000000000],
+                  "TPU v3": [3.991446971893310546875000000000],
+                  "TPU v4": [3.992439270019531250000000000000],
+                  "TPU v5 lite": [3.991421222686767578125000000000],
               },
           )
       ]
@@ -681,7 +687,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     _, train_loss, _ = aqt_mnist.train_epoch(
         state, train_ds, batch_size, input_rng
     )
-    assert train_loss == target_loss[jax.devices()[0].platform]
+    assert train_loss in target_loss[jax.devices()[0].device_kind]
 
 
 if __name__ == "__main__":
