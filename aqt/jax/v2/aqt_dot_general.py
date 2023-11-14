@@ -304,31 +304,22 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
     if cfg.lhs.use_fake_quant:
       msg = "Can't set dg_in_dtype in fake_quant mode."
       assert cfg.dg_in_dtype is None, msg
-
       lhs_q = _maybe_mul(lhs_q, lhs_inv_scale)
       rhs_q = _maybe_mul(rhs_q, rhs_inv_scale)
-
-      out = lax.dot_general(
-          lhs_q,
-          rhs_q,
-          dimension_numbers=dimension_numbers,
-          preferred_element_type=cfg.dg_accumulator_dtype,
-          precision=lax.Precision.DEFAULT,
-      ).astype(lhs.dtype)
-
     else:
       if cfg.dg_in_dtype is not None:
         lhs_q = lhs_q.astype(cfg.dg_in_dtype)
         rhs_q = rhs_q.astype(cfg.dg_in_dtype)
 
-      out = lax.dot_general(
-          lhs_q,
-          rhs_q,
-          dimension_numbers=dimension_numbers,
-          preferred_element_type=cfg.dg_accumulator_dtype,
-          precision=lax.Precision.DEFAULT,
-      ).astype(lhs.dtype)
+    out = lax.dot_general(
+        lhs_q,
+        rhs_q,
+        dimension_numbers=dimension_numbers,
+        preferred_element_type=cfg.dg_accumulator_dtype,
+        precision=lax.Precision.DEFAULT,
+    ).astype(lhs.dtype)
 
+    if not cfg.lhs.use_fake_quant:
       out = _maybe_mul(out, lhs_inv_scale_t)
       out = _maybe_mul(out, rhs_inv_scale_t)
 
