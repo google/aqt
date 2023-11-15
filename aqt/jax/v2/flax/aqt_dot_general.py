@@ -39,7 +39,7 @@ class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
   cfg: config.DotGeneral | None = None
-  use_prng: bool = True
+  prng_name: str | None = 'params'
 
   @nn.compact
   def __call__(
@@ -50,7 +50,7 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-    key = self.make_rng('params') if self.use_prng else None
+    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(self.cfg)
     aqt_dg = functools.partial(aqt_dg, context=context)
@@ -67,11 +67,11 @@ class AqtEinsum(nn.Module):
   """Quantized Einsum class for model injection."""
 
   cfg: config.DotGeneral | None = None
-  use_prng: bool = True
+  prng_name: str | None = 'params'
 
   @nn.compact
   def __call__(self, eqn, lhs, rhs):
-    key = self.make_rng('params') if self.use_prng else None
+    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(self.cfg)
     aqt_dg = functools.partial(aqt_dg, context=context)
