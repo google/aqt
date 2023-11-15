@@ -21,8 +21,8 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
+import aqt.jax.v2.examples.mnist as aqt_mnist
 import aqt.jax.v2.flax.aqt_dot_general as aqt_flax
-import aqt.jax.v2.flax.mnist_example as aqt_mnist
 import flax.linen.linear as fl
 import jax
 import jax.numpy as jnp
@@ -338,6 +338,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             c.rhs.numerics = c.rhs.numerics.replace(round=False)
           # c.lhs.numerics.clip = False
           # c.rhs.numerics.clip = False
+
         disable_quant(cfg.fwd)
         disable_quant(cfg.dlhs)
         disable_quant(cfg.drhs)
@@ -401,8 +402,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return jax.lax.dot_general(lhs, rhs, dims)
 
     def lax_dg_248(lhs, rhs):
-      def dg_mul(delta):
 
+      def dg_mul(delta):
         def dg(
             lhs,
             rhs,
@@ -640,9 +641,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         lhs,
         rhs,
         dimension_numbers=(((), ()), ((), ())),
-        context=aqt.Context(key=None, train_step=None))
+        context=aqt.Context(key=None, train_step=None),
+    )
     lhs = jnp.array(lhs)
-    rhs = jnp.array([1.])
+    rhs = jnp.array([1.0])
     output, bprop = jax.vjp(dg, lhs, rhs)
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
