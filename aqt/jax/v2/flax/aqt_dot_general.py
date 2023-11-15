@@ -21,6 +21,20 @@ import flax.linen as nn
 import jax.numpy as jnp
 
 
+class Checkpointer(nn.Module, config.Preprocess):
+  """Save quantized inputs to dot_general."""
+
+  var_collection: str = 'aqt'
+
+  @nn.compact
+  def __call__(self, inputs):
+    params = self.variable(
+        self.var_collection, 'value', jnp.zeros, inputs.shape
+    )
+    params.value = inputs
+    return params.value
+
+
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 

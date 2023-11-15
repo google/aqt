@@ -311,6 +311,18 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
         lhs_q = lhs_q.astype(cfg.dg_in_dtype)
         rhs_q = rhs_q.astype(cfg.dg_in_dtype)
 
+    if cfg.lhs.preprocess_quant_cls is not None:
+      preprocess_quant_lhs = cfg.lhs.preprocess_quant_cls()
+      lhs_q = preprocess_quant_lhs(lhs_q)
+    if cfg.lhs.preprocess_scale_cls is not None:
+      preprocess_scale_lhs = cfg.lhs.preprocess_scale_cls()
+      lhs_inv_scale_t = preprocess_scale_lhs(lhs_inv_scale_t)
+    if cfg.rhs.preprocess_quant_cls is not None:
+      preprocess_quant_rhs = cfg.rhs.preprocess_quant_cls()
+      rhs_q = preprocess_quant_rhs(rhs_q)
+    if cfg.rhs.preprocess_scale_cls is not None:
+      preprocess_scale_rhs = cfg.rhs.preprocess_scale_cls()
+      rhs_inv_scale_t = preprocess_scale_rhs(rhs_inv_scale_t)
     out = lax.dot_general(
         lhs_q,
         rhs_q,

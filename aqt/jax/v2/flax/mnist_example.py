@@ -69,7 +69,7 @@ def apply_model(state, images, labels, train):
     loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
     return loss, (logits, updated_var)
 
-  grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+  grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
   aux, grads = grad_fn(state.model)
   loss, (logits, updated_var) = aux
   accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)

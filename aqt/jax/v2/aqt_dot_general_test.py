@@ -14,12 +14,14 @@
 
 """Tests for dot_general."""
 import copy
+import functools
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
+import aqt.jax.v2.flax.aqt_dot_general as aqt_flax
 import aqt.jax.v2.flax.mnist_example as aqt_mnist
 import flax.linen.linear as fl
 import jax
@@ -645,7 +647,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
 
-  def test_mnist_training(self):
+  @parameterized.parameters([
+      dict(preprocess=False),
+      dict(preprocess=True),
+  ])
+  def test_mnist_training(self, preprocess):
     batch_size = 4
     dataset_size = 8
     target_loss = {
@@ -667,6 +673,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
     aqt_cfg = config.fully_quantized(fwd_bits=8, bwd_bits=8)
+    if preprocess:
+      aqt_cfg.fwd.lhs.preprocess_quant_cls = functools.partial(
+          aqt_flax.Checkpointer, name="quant_input"
+      )
+      aqt_cfg.fwd.lhs.preprocess_scale_cls = functools.partial(
+          aqt_flax.Checkpointer, name="scale_input"
+      )
+      aqt_cfg.fwd.rhs.preprocess_quant_cls = functools.partial(
+          aqt_flax.Checkpointer, name="quant_kernel"
+      )
+      aqt_cfg.fwd.rhs.preprocess_scale_cls = functools.partial(
+          aqt_flax.Checkpointer, name="scale_kernel"
+      )
     state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
     rng, ds_rng = jax.random.split(rng)
     train_ds = {
@@ -678,10 +697,33 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ),
     }
     _, input_rng = jax.random.split(rng)
-    _, train_loss, _ = aqt_mnist.train_epoch(
+    state, train_loss, _ = aqt_mnist.train_epoch(
         state, train_ds, batch_size, input_rng
     )
     assert train_loss in target_loss[jax.devices()[0].device_kind]
+    if preprocess:
+      aqt_tree = {
+          "Dense_0": {
+              "AqtDotGeneral_0": {
+                  "quant_input": {"value": jnp.int8},
+                  "scale_input": {"value": jnp.float32},
+                  "quant_kernel": {"value": jnp.int8},
+                  "scale_kernel": {"value": jnp.float32},
+              }
+          },
+          "Dense_1": {
+              "AqtDotGeneral_0": {
+                  "quant_input": {"value": jnp.int8},
+                  "scale_input": {"value": jnp.float32},
+                  "quant_kernel": {"value": jnp.int8},
+                  "scale_kernel": {"value": jnp.float32},
+              }
+          },
+      }
+      state_dtype_tree = jax.tree_util.tree_map(lambda x: x.dtype, state.model)
+      assert state_dtype_tree["aqt"] == aqt_tree
+    else:
+      assert "aqt" not in state.model.keys()
 
 
 if __name__ == "__main__":
