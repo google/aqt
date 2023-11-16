@@ -382,10 +382,14 @@ class AqtMatmulConfig(_BaseConfig):
     lhs: quantization schedule for left-hand side argument
     rhs: quantization schedule for right-hand side argument
     grad: quantization schedule for gradients (optional).
+    warm_up_phase_completed: whether warm up training phase is completed. if set
+      a value, multi-phase training will be activated and tf.cond will be
+      disabled by default.
   """
   lhs: AqtScheduleConfig
   rhs: AqtScheduleConfig
   grad: Optional[AqtScheduleConfig] = None
+  warm_up_phase_completed: Optional[bool] = None
 
 
 @dataclasses.dataclass
