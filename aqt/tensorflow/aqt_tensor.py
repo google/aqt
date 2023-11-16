@@ -406,12 +406,17 @@ def _should_update_scale(
   if isinstance(config.quant_config, aqt_config.FloatConfig):
     return tf.constant(False)
 
-  if not config.freeze_scale_at_begin:
-    return tf.constant(True)
-
   # The first time a config is active, even if we freeze scale, we should
   # update the scale.
   was_previously_inactive = ~is_config_active(config, prev_event_count)
+
+  if not config.freeze_scale_at_begin:
+    should_update = tf.constant(True)
+    if config.freeze_scale_at_event is not None:
+      should_update = was_previously_inactive | (
+          new_event_count < config.freeze_scale_at_event
+      )
+    return should_update
 
   # We rely on tf.int64.min being an illegal event count value, so that
   # even if is_config_active(config, tf.int64.min), we still update scale.

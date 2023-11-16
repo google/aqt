@@ -216,19 +216,22 @@ class AqtTensorConfig(_BaseConfig):
     quant_config: Numerical format for quantization.
     calibration_config: Calibration config.
     freeze_scale_at_begin: Freezes the calibration when begin_at_event is
-      reached. This breaks the feedback look between calibration scale and
+      reached. This breaks the feedback loop between calibration scale and
       distribution observed by stats.
     begin_at_event: Start of this quantization interval. You need to make sure
       that there are enough updates before quantization is enabled with
       begin_at_event or set a proper prior or use const_bound. This is very
       important if freeze_scale_at_begin == true.
     end_at_event: End of this quantization interval.
+    freeze_scale_at_event: Freezes the calibration when freeze_scale_at_event is
+      reached.
   """
   quant_config: QuantConfig
   calibration_config: CalibrationConfig
   freeze_scale_at_begin: bool
   begin_at_event: Optional[int] = None
   end_at_event: Optional[int] = None
+  freeze_scale_at_event: Optional[int] = None
 
   def validate(self):
     """Validates this tensor config."""
@@ -250,6 +253,29 @@ class AqtTensorConfig(_BaseConfig):
         raise NotImplementedError(
             'Using small_float.rounding_mode '
             'only currently supports ROUND_TO_NEAREST_EVEN.')
+
+    if self.freeze_scale_at_event is not None:
+      if (
+          self.begin_at_event is not None and
+          self.freeze_scale_at_event < self.begin_at_event
+      ):
+        raise ConfigError(
+            f'expected freeze_scale_at_event={self.freeze_scale_at_event} '
+            f'>= begin_at_event={self.begin_at_event}.'
+            )
+      if (
+          self.end_at_event is not None and
+          self.freeze_scale_at_event >= self.end_at_event
+      ):
+        raise ConfigError(
+            f'expected freeze_scale_at_event={self.freeze_scale_at_event} '
+            f'< end_at_event={self.end_at_event}.'
+            )
+      if self.freeze_scale_at_begin:
+        raise ConfigError(
+            f'expected freeze_scale_at_begin={self.freeze_scale_at_begin} '
+            'is False when given freeze_scale_at_event.'
+            )
 
   def to_dict(self) -> Dict[str, Any]:
     # AqtTensorConfig dataclass does not have `int_quant_config` and

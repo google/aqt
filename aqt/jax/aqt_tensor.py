@@ -316,18 +316,23 @@ class TensorQuantizer(nn.Module):
   def _should_update_scale(
       self,  #
       config: aqt_config.AqtTensorConfig,
-      event_count: jnp.ndarray) -> bool:
+      event_count: jnp.ndarray) -> jnp.ndarray:
     """Returns if scale should be updated for the config and event count."""
     if isinstance(config.quant_config, aqt_config.FloatConfig):
-      return False
-
-    if not config.freeze_scale_at_begin:
-      return True
+      return jnp.array(False)
 
     # The first time a config is active, even if we freeze scale, we should
     # update the scale.
     was_previously_inactive = not is_config_active(config,
                                                    self._last_update.value)
+
+    if not config.freeze_scale_at_begin:
+      should_update = jnp.array(True)
+      if config.freeze_scale_at_event is not None:
+        should_update = was_previously_inactive | (
+            event_count < config.freeze_scale_at_event
+        )
+      return should_update
 
     # We rely on jnp.int32.min being an illegal event count value, so that
     # even if is_config_active(config, jnp.int32.min), we still update scale.
@@ -338,7 +343,7 @@ class TensorQuantizer(nn.Module):
 
     first_event = jnp.array(self._last_update.value == jnp.iinfo(jnp.int32).min)
 
-    return was_previously_inactive | first_event  # pytype: disable=bad-return-type  # jnp-type
+    return jnp.array(was_previously_inactive | first_event)  # pytype: disable=bad-return-type  # jnp-type
 
   def _to_quant(self, x: jnp.ndarray, train: bool) -> jnp.ndarray:
     """Quantizes x with active quant config, if any, else act as identity."""
