@@ -174,18 +174,6 @@ def _matmul_case(
     The `tf.Tensor` from the resulting quantized matmul.
   """
 
-  lhs_configs = lhs_quantizer.config.tensor_configs
-  rhs_configs = rhs_quantizer.config.tensor_configs
-
-  def is_int8_compatible(lhs_config, rhs_config):
-    return (isinstance(lhs_config.quant_config, aqt_config.IntQuantConfig) and
-            isinstance(rhs_config.quant_config, aqt_config.IntQuantConfig) and
-            lhs_config.quant_config.bits <= 8 and
-            rhs_config.quant_config.bits <= 8)
-
-  lhs_index = lhs_quantizer.config.inference_config_index
-  rhs_index = rhs_quantizer.config.inference_config_index
-
   def cond_int8_matmul():
     return int8_matmul(lhs_quantizer, rhs_quantizer, lhs, rhs, train,
                        transpose_a, transpose_b)
@@ -194,36 +182,9 @@ def _matmul_case(
     return default_matmul(lhs_quantizer, rhs_quantizer, lhs, rhs, train,
                           transpose_a, transpose_b)
 
-  if train or lhs_index is None or rhs_index is None:
-    should_int8_quantize = tf.constant(False)
-    for lhs_config in lhs_configs:
-      for rhs_config in rhs_configs:
-        # If any of lhs and rhs is FloatConfig, use the default matmul.
-        if is_int8_compatible(lhs_config, rhs_config):
-          should_int8_quantize |= (
-              aqt_tensor.is_config_active(lhs_config,
-                                          lhs_quantizer._last_update)
-              & aqt_tensor.is_config_active(rhs_config,
-                                            rhs_quantizer._last_update))
-    # Use go/tf-control-flow-v2, which we've noticed fuses better on TPU XLA.
-    v2_was_enabled = tf.control_flow_v2_enabled()
-    if not v2_was_enabled:
-      tf.enable_control_flow_v2()
-    cond = tf.cond(should_int8_quantize, cond_int8_matmul, cond_default_matmul)
-    if not v2_was_enabled:
-      tf.disable_control_flow_v2()
-  else:
-    # In the inference setting, if inference config indices are specified,
-    # then manualy const-prop the tf.cond to avoid overheads such as loading
-    # bf16 weights
-    should_int8_quantize = is_int8_compatible(
-        lhs_configs[lhs_index], rhs_configs[rhs_index]
-    )
-    if should_int8_quantize:
-      cond = cond_int8_matmul()
-    else:
-      cond = cond_default_matmul()
-  return cond
+  return aqt_ops_util._dense_op_case(lhs_quantizer, rhs_quantizer,
+                                     cond_default_matmul, cond_int8_matmul,
+                                     train)
 
 
 def _validate_inputs(

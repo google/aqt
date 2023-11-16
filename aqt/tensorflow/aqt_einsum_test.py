@@ -571,7 +571,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       lhs_config = _schedule_config(8, 1.0, [1])
       rhs_config = _schedule_config(8, 1.0, [0])
 
-      kwargs = {"optimize": "optimal", "name": "optimal_einsum"}
+      kwargs = {"optimize": "optimal"}
 
       _einsum_op(eq, lhs, rhs, lhs_config, rhs_config, **kwargs)
       for (_, actual_kwargs) in tfeinsum.call_args_list:

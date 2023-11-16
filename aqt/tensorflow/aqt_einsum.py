@@ -37,14 +37,18 @@ Of course, if an axis is contracting, all axes across all inputs with the same
 label are contracting.
 """
 
+
 import collections
+import functools
 import string
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from aqt.common import aqt_config
 from aqt.common import aqt_config_utils
 from aqt.tensorflow import aqt_ops_util
 from aqt.tensorflow import aqt_tensor
+import jax
+from jax.experimental import jax2tf
 import tensorflow.compat.v1 as tf
 
 # We repeatedly use protected methods from classes defined in other modules to
@@ -53,6 +57,8 @@ import tensorflow.compat.v1 as tf
 
 TensorQuantizer = aqt_tensor.TensorQuantizer
 DynamicTensorQuantizer = aqt_tensor.DynamicTensorQuantizer
+
+EinsumOp = Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def _parse_equation(eq: str) -> Tuple[str, str, str]:
@@ -232,7 +238,7 @@ def default_einsum(
     lhs: tf.Tensor,
     rhs: tf.Tensor,
     train: bool,
-    **tf_einsum_kwargs,
+    **einsum_kwargs,
 ) -> tf.Tensor:
   """Perform tf.einsum with input tensors of float type.
 
@@ -250,7 +256,7 @@ def default_einsum(
       `TensorQuantizer.update()` in quantized operations rather than the float
       tensor input `lhs` or `rhs` provided to those operations at inference
       time.
-    **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
+    **einsum_kwargs: Keyword arguments to pass onto `einsum`.
 
   Returns:
     result of einsum
@@ -260,12 +266,114 @@ def default_einsum(
         lhs_quantizer, lhs, train
     )
   rhs = aqt_ops_util._possibly_use_quantized_variable(rhs_quantizer, rhs, train)
-  return tf.einsum(eq, lhs, rhs, **tf_einsum_kwargs)
+  return tf.einsum(eq, lhs, rhs, **einsum_kwargs)
+
+
+def get_jax_einsum(eq: str,
+                   lhs_shape: List[int],
+                   rhs_shape: List[int],
+                   quantize: bool = False,
+                   **einsum_kwargs) -> EinsumOp:
+  """Returns jax einsum op."""
+
+  def _get_shapes(shape: Iterable[Optional[int]]):
+    num_polymorphic_dims = sum([s is None for s in shape])
+    if num_polymorphic_dims > 1:
+      raise ValueError(f'Only one polymorphic dimension is supported but '
+                       f'{num_polymorphic_dims} is provides in {shape}.')
+    shape_str = ['batch_size' if i is None else str(i) for i in shape]
+    return ','.join(shape_str)
+
+  polymorphic_shapes = (
+      _get_shapes(lhs_shape),
+      _get_shapes(rhs_shape),
+      )
+  labeled_dimensions = {}
+  lhs, rhs, out = _parse_equation(eq)
+  for axes, shape in [(lhs, lhs_shape), (rhs, rhs_shape)]:
+    for label, dim in zip(axes, shape):
+      if label in labeled_dimensions:
+        assert labeled_dimensions[label] == dim
+      else:
+        labeled_dimensions[label] = dim
+  out_shape = [labeled_dimensions[label] for label in out]
+  if quantize:
+    einsum_kwargs['preferred_element_type'] = jax.numpy.int32
+
+  einsum_action = jax2tf.convert(
+      functools.partial(jax.numpy.einsum, eq,
+                        **einsum_kwargs),
+      polymorphic_shapes=polymorphic_shapes,
+      native_serialization=False)
+
+  def _jax_einsum_op(lhs: tf.Tensor,
+                     rhs: tf.Tensor) -> tf.Tensor:
+    out = einsum_action(lhs, rhs)
+    out = tf.ensure_shape(out, out_shape)
+    return out
+  return _jax_einsum_op
+
+
+def int8_einsum(
+    eq: str,  #
+    lhs_quantizer: TensorQuantizer | DynamicTensorQuantizer | None,
+    rhs_quantizer: TensorQuantizer,
+    lhs: tf.Tensor,
+    rhs: tf.Tensor,
+    train: bool,
+    **einsum_kwargs,
+) -> tf.Tensor:
+  """Perform tf.einsum with input tensors of int type.
+  """
+  einsum_op = get_jax_einsum(eq, lhs.shape.as_list(),
+                             rhs.shape.as_list(),
+                             quantize=True,
+                             **einsum_kwargs)
+  with tf.name_scope('i8_cast'):
+    int_lhs = tf.cast(lhs, tf.int8)
+    int_rhs = tf.cast(rhs, tf.int8)
+  if lhs_quantizer and isinstance(lhs_quantizer, TensorQuantizer):
+    int_lhs = aqt_ops_util._possibly_use_quantized_variable(
+        lhs_quantizer, int_lhs, train
+    )
+  int_rhs = aqt_ops_util._possibly_use_quantized_variable(
+      rhs_quantizer, int_rhs, train
+  )
+  with tf.name_scope('i8_einsum'):
+    iout = einsum_op(int_lhs, int_rhs)
+  with tf.name_scope('fl_cast'):
+    out = tf.cast(iout, lhs.dtype)
+  return out
+
+
+def _einsum_case(
+    eq: str,
+    lhs_quantizer: TensorQuantizer | DynamicTensorQuantizer,
+    rhs_quantizer: TensorQuantizer,
+    lhs: tf.Tensor,
+    rhs: tf.Tensor,
+    train: bool,
+    **einsum_kwargs,
+) -> tf.Tensor:
+  """Switch over matmuls based on event count and configs."""
+  def cond_int8_einsum():
+    return int8_einsum(
+        eq, lhs_quantizer, rhs_quantizer, lhs, rhs, train, **einsum_kwargs
+    )
+
+  def cond_default_einsum():
+    return default_einsum(
+        eq, lhs_quantizer, rhs_quantizer, lhs, rhs, train, **einsum_kwargs
+        )
+
+  return aqt_ops_util._dense_op_case(lhs_quantizer, rhs_quantizer,
+                                     cond_default_einsum, cond_int8_einsum,
+                                     train, skip_cond_if_all_int_quant=True)
 
 
 def _scale_grad(grad: tf.Tensor, y_inv_scale: tf.Tensor, grad_dims: str,
                 y_dims: str, y_share_stats_axes: Iterable[int],
-                **tf_einsum_kwargs,
+                **einsum_kwargs,
                 ) -> tf.Tensor:
   # Remove share stats dimensions of size 1, which are not appear in out
   sy_inv_scale = tf.squeeze(y_inv_scale, axis=y_share_stats_axes)
@@ -273,7 +381,7 @@ def _scale_grad(grad: tf.Tensor, y_inv_scale: tf.Tensor, grad_dims: str,
   sy_dims = ''.join(sy_axes)
   # Use einsum to scale the gradients instead of using broadcasting.
   scale_eq = f'{grad_dims},{sy_dims}->{grad_dims}'
-  return tf.einsum(scale_eq, grad, sy_inv_scale, **tf_einsum_kwargs)
+  return tf.einsum(scale_eq, grad, sy_inv_scale, **einsum_kwargs)
 
 
 def _get_diagnal_axes(x_dims: str) -> Dict[str, int]:
@@ -338,7 +446,7 @@ def einsum(
     lhs_grad_quantizer: DynamicTensorQuantizer | None = None,
     rhs_grad_quantizer: DynamicTensorQuantizer | None = None,
     event_count: tf.Tensor | None = None,
-    **tf_einsum_kwargs,
+    optimize: str = 'greedy',
 ) -> tf.Tensor:
   """Performs a quantized two-argument :py:func:`tf.einsum`.
 
@@ -364,7 +472,8 @@ def einsum(
       the einsum equation, `grad,lhs->rhs_grad`, in the backward pass.
     event_count: a optional scalar `tf.Tensor` only needed if either
       lhs_quantizer or rhs_quantizer is DynamicTensorQuantizer.
-    **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
+    optimize: Optimization strategy to pass onto `einsum`. Must be 'greedy',
+    or 'optimal', which is available in `tf.einsum` and `jax.einsum`.
 
   Returns:
     A `float32` tensor conformal to what `tf.einsum` would return.
@@ -488,14 +597,14 @@ def einsum(
       # TODO(vladf): until tf.einsum supports int8 arguments, we need to cast
       # the quantized variables to a floating point format.
       with tf.name_scope('einsum'):
-        out = default_einsum(eq, lhs_quantizer, rhs_quantizer, qlhs, qrhs,
-                             train, **tf_einsum_kwargs)
+        out = _einsum_case(eq, lhs_quantizer, rhs_quantizer, qlhs, qrhs,
+                           train, optimize=optimize)
 
       with tf.name_scope('inv_scale'):
         assert len(lhs_inv_scale.shape) == len(qlhs.shape)
         assert len(rhs_inv_scale.shape) == len(qrhs.shape)
         inv_scale = tf.einsum(eq, lhs_inv_scale, rhs_inv_scale,
-                              **tf_einsum_kwargs)
+                              optimize=optimize)
       return out * inv_scale
 
   @tf.custom_gradient
@@ -569,7 +678,7 @@ def einsum(
                 grad_dims,
                 y_dims,
                 y_share_stats_axes,
-                **tf_einsum_kwargs,
+                optimize=optimize,
             )
             if grad_quantizer:
               with tf.name_scope('to_quant_grad'):
@@ -597,15 +706,18 @@ def einsum(
               grad_inv_scale = None
 
             with tf.name_scope('einsum'):
-              out = default_einsum(
-                  eq,
-                  grad_quantizer,
-                  y_quantizer,
-                  qgrad,
-                  qy,
-                  train,
-                  **tf_einsum_kwargs,
-              )
+              if grad_quantizer:
+                out = _einsum_case(
+                    eq,
+                    grad_quantizer,
+                    y_quantizer,
+                    qgrad,
+                    qy,
+                    train,
+                    optimize=optimize,
+                )
+              else:
+                out = tf.einsum(eq, qgrad, qy, optimize=optimize)
 
             with tf.name_scope('inv_scale'):
               if grad_quantizer:
@@ -619,7 +731,7 @@ def einsum(
                     x_dims,
                     grad_dims,
                     grad_share_stats_axes,
-                    **tf_einsum_kwargs,
+                    optimize=optimize,
                 )
             return out
 
@@ -761,7 +873,7 @@ class Einsum:
       lhs: tf.Tensor,
       rhs: tf.Tensor,
       train: bool = True,
-      **tf_einsum_kwargs
+      optimize: str = 'greedy'
   ) -> tf.Tensor:
     """Generates a pure quantized einsum op.
 
@@ -773,7 +885,9 @@ class Einsum:
       lhs: a float32 tensor for the left hand side
       rhs: a float32 tensor for the right hand side
       train: whether to generate the training or serving graph
-      **tf_einsum_kwargs: Keyword arguments to pass onto `einsum`.
+      optimize: Optimization strategy to pass onto `einsum`. Must be
+        'greedy', or 'optimal', which is available in `tf.einsum` and
+        `jax.einsum`.
 
     Returns:
       A tf.Tensor generated from possibly quantizing lhs and rhs
@@ -790,7 +904,7 @@ class Einsum:
         quantize_bwd=self.quantize_bwd,
         lhs_grad_quantizer=self.lhs_grad_quantizer,
         rhs_grad_quantizer=self.rhs_grad_quantizer,
-        **tf_einsum_kwargs)
+        optimize=optimize)
 
   def diagnostics(
       self,
