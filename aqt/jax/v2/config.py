@@ -15,10 +15,12 @@
 
 import abc
 import dataclasses
+import functools
 from typing import Any, Callable, Optional, Union
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2.flax import aqt_dot_general as aqt_flax
 import flax.struct
 import jax
 import jax.numpy as jnp
@@ -343,6 +345,8 @@ def config_v3(
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
     drhs_accumulator_dtype: ... = jnp.int32,
+    freeze_lhs: bool = False,
+    freeze_rhs: bool = False,
 ) -> DotGeneral:
   """Fully Quantized Training."""
   fwd = dot_general_raw_make(fwd_bits, fwd_bits)
@@ -372,4 +376,23 @@ def config_v3(
       dlhs_dtype=dlhs_accumulator_dtype,
       drhs_dtype=drhs_accumulator_dtype,
   )
+  if freeze_lhs:
+    cfg.fwd.lhs.preprocess_quant_cls = functools.partial(
+        aqt_flax.Freezer,
+        name='lhs',
+    )
+    cfg.fwd.lhs.preprocess_scale_cls = functools.partial(
+        aqt_flax.Freezer,
+        name='lhs_scale',
+    )
+  if freeze_rhs:
+    cfg.fwd.rhs.preprocess_quant_cls = functools.partial(
+        aqt_flax.Freezer,
+        name='rhs',
+    )
+    cfg.fwd.rhs.preprocess_scale_cls = functools.partial(
+        aqt_flax.Freezer,
+        name='rhs_scale',
+    )
+
   return cfg

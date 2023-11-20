@@ -21,18 +21,30 @@ import flax.linen as nn
 import jax.numpy as jnp
 
 
-class Checkpointer(nn.Module, config.Preprocess):
-  """Save quantized inputs to dot_general."""
+class Freezer(nn.Module, config.Preprocess):
+  """Stores and reuses values in a variable.
 
+    On default it is an identity function that saves the input in a variable.
+  In 'use_frozen=True' mode, ignores the input and returns the frozen value. It
+    is usefult to implement 'constant folding' and put quantized weights and
+    scales in the checkpoint for serving.
+  """
+
+  # If you want use 'params' make sure that there is another mechanism to hide
+  # these variables from the optimizer.
   var_collection: str = 'aqt'
+
+  # If you set it to True, instead of returning the current input
+  # will return last input it got.
+  use_frozen: bool = False
 
   @nn.compact
   def __call__(self, inputs):
-    params = self.variable(
-        self.var_collection, 'value', jnp.zeros, inputs.shape
-    )
-    params.value = inputs
-    return params.value
+    # return inputs or the frozen value
+    frozen = self.variable(self.var_collection, 'val', jnp.zeros, inputs.shape)
+    if not self.use_frozen:
+      frozen.value = inputs
+    return frozen.value
 
 
 class AqtDotGeneral(nn.Module):
