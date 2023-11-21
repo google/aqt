@@ -14,8 +14,9 @@
 """Common utility functions for AQT ops.
 """
 
-from typing import Dict, Optional
+from typing import Callable, Dict, List, Optional
 
+from aqt.common import aqt_config
 from aqt.tensorflow import aqt_tensor
 import tensorflow.compat.v1 as tf
 
@@ -25,11 +26,13 @@ import tensorflow.compat.v1 as tf
 # avoid exporting them as part of the public API.
 # pylint: disable=protected-access
 
+TensorQuantizer = aqt_tensor.TensorQuantizer
+DynamicTensorQuantizer = aqt_tensor.DynamicTensorQuantizer
+
 
 def _possibly_use_quantized_variable(
-    quantizer: aqt_tensor.TensorQuantizer,  #
-    x: tf.Tensor,
-    train: bool) -> tf.Tensor:
+    quantizer: TensorQuantizer, x: tf.Tensor, train: bool  #
+) -> tf.Tensor:
   """Returns quantized variable if not training and TQ.use_quantized_variable, casted to x.dtype.
 
   Given an input tensor and its tensor quantizer, here we enforce to use the
@@ -97,3 +100,100 @@ def diagnostics(
     for name, var in quantizer.calibration_variables().items():
       d[f'{prefix}/{name}'] = var
   return d
+
+
+def _dense_op_case(
+    lhs_quantizer: TensorQuantizer | DynamicTensorQuantizer,
+    rhs_quantizer: TensorQuantizer,
+    default_dense_op: Callable[[], tf.Tensor],
+    int8_dense_op: Callable[[], tf.Tensor],
+    train: bool,
+    skip_cond_if_all_int_quant: bool = False,
+) -> tf.Tensor:
+  """Switch over the dense compute based on event count and configs.
+
+  The `TensorQuantizer`s for each argument are provided to supply the
+  configurations for each input tensor. Also, if indicated by constituent
+  configs, this uses the quantized variables in each tensor quantizer rather
+  than the inputs themselves. Regardless, gradients are preserved as if this was
+  a matmul over the original `(lhs, rhs)` inputs.
+
+  Args:
+    lhs_quantizer: TensorQuantizer for lhs.
+    rhs_quantizer: TensorQuantizer for rhs.
+    default_dense_op: function for the float dense op.
+    int8_dense_op: function for the int8 dense op.
+    train: If false and `TQ.use_quantized_variable` is True, then use the
+      quantized variable, instead of input tensors, for the respective input
+      tensor.
+    skip_cond_if_all_int_quant: If all quant configs are IntQuantConfig, skip
+      tf.cond.
+
+  Returns:
+    The `tf.Tensor` from the resulting quantized dense op.
+  """
+
+  lhs_configs = lhs_quantizer.config.tensor_configs
+  rhs_configs = rhs_quantizer.config.tensor_configs
+
+  def is_int8_compatible(
+      lhs_config: aqt_config.AqtTensorConfig,
+      rhs_config: aqt_config.AqtTensorConfig,
+  ) -> bool:
+    return (
+        isinstance(lhs_config.quant_config, aqt_config.IntQuantConfig)
+        and isinstance(rhs_config.quant_config, aqt_config.IntQuantConfig)
+        and lhs_config.quant_config.bits <= 8
+        and rhs_config.quant_config.bits <= 8
+    )
+
+  def all_int8_compatible(
+      lhs_configs: List[aqt_config.AqtTensorConfig],
+      rhs_configs: List[aqt_config.AqtTensorConfig],
+  ) -> bool:
+    for lhs_config in lhs_configs:
+      for rhs_config in rhs_configs:
+        if not is_int8_compatible(lhs_config, rhs_config):
+          return False
+    return True
+
+  # short circuit for quantization all the way, which is not enabled by default
+  # for backward checkpoint compatibility.
+  if skip_cond_if_all_int_quant and all_int8_compatible(
+      lhs_configs, rhs_configs
+  ):
+    return int8_dense_op()
+
+  lhs_index = lhs_quantizer.config.inference_config_index
+  rhs_index = rhs_quantizer.config.inference_config_index
+
+  if train or lhs_index is None or rhs_index is None:
+    should_int8_quantize = tf.constant(False)
+    for lhs_config in lhs_configs:
+      for rhs_config in rhs_configs:
+        # If any of lhs and rhs is FloatConfig, use the default matmul.
+        if is_int8_compatible(lhs_config, rhs_config):
+          should_int8_quantize |= aqt_tensor.is_config_active(
+              lhs_config, lhs_quantizer._last_update
+          ) & aqt_tensor.is_config_active(
+              rhs_config, rhs_quantizer._last_update
+          )
+    # Use go/tf-control-flow-v2, which we've noticed fuses better on TPU XLA.
+    v2_was_enabled = tf.control_flow_v2_enabled()
+    if not v2_was_enabled:
+      tf.enable_control_flow_v2()
+    cond = tf.cond(should_int8_quantize, int8_dense_op, default_dense_op)
+    if not v2_was_enabled:
+      tf.disable_control_flow_v2()
+  else:
+    # In the inference setting, if inference config indices are specified,
+    # then manually const-prop the tf.cond to avoid overheads such as loading
+    # bf16 weights
+    should_int8_quantize = is_int8_compatible(
+        lhs_configs[lhs_index], rhs_configs[rhs_index]
+    )
+    if should_int8_quantize:
+      cond = int8_dense_op()
+    else:
+      cond = default_dense_op()
+  return cond

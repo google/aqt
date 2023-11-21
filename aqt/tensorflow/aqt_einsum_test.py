@@ -142,6 +142,7 @@ def _einsum_op(
         lhs_bwd_tq,
         rhs_bwd_tq,
         event_count=tf.constant(0, tf.int64) if dynamic_fwd_quant else None,
+        use_real_int8_einsum=True,
         **einsum_kwargs,
     )
 
@@ -571,7 +572,7 @@ class EinsumTest(tf.test.TestCase, parameterized.TestCase):
       lhs_config = _schedule_config(8, 1.0, [1])
       rhs_config = _schedule_config(8, 1.0, [0])
 
-      kwargs = {"optimize": "optimal", "name": "optimal_einsum"}
+      kwargs = {"optimize": "optimal"}
 
       _einsum_op(eq, lhs, rhs, lhs_config, rhs_config, **kwargs)
       for (_, actual_kwargs) in tfeinsum.call_args_list:
