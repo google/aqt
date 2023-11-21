@@ -402,7 +402,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return jax.lax.dot_general(lhs, rhs, dims)
 
     def lax_dg_248(lhs, rhs):
-
       def dg_mul(delta):
         def dg(
             lhs,
@@ -677,16 +676,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     aqt_cfg = config.fully_quantized(fwd_bits=8, bwd_bits=8)
     if preprocess:
       aqt_cfg.fwd.lhs.preprocess_quant_cls = functools.partial(
-          aqt_flax.Checkpointer, name="quant_input"
+          aqt_flax.Freezer, name="quant_input"
       )
       aqt_cfg.fwd.lhs.preprocess_scale_cls = functools.partial(
-          aqt_flax.Checkpointer, name="scale_input"
+          aqt_flax.Freezer, name="scale_input"
       )
       aqt_cfg.fwd.rhs.preprocess_quant_cls = functools.partial(
-          aqt_flax.Checkpointer, name="quant_kernel"
+          aqt_flax.Freezer, name="quant_kernel"
       )
       aqt_cfg.fwd.rhs.preprocess_scale_cls = functools.partial(
-          aqt_flax.Checkpointer, name="scale_kernel"
+          aqt_flax.Freezer, name="scale_kernel"
       )
     state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
     rng, ds_rng = jax.random.split(rng)
@@ -707,18 +706,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       aqt_tree = {
           "Dense_0": {
               "AqtDotGeneral_0": {
-                  "quant_input": {"value": jnp.int8},
-                  "scale_input": {"value": jnp.float32},
-                  "quant_kernel": {"value": jnp.int8},
-                  "scale_kernel": {"value": jnp.float32},
+                  "quant_input": {"frozen": jnp.int8},
+                  "scale_input": {"frozen": jnp.float32},
+                  "quant_kernel": {"frozen": jnp.int8},
+                  "scale_kernel": {"frozen": jnp.float32},
               }
           },
           "Dense_1": {
               "AqtDotGeneral_0": {
-                  "quant_input": {"value": jnp.int8},
-                  "scale_input": {"value": jnp.float32},
-                  "quant_kernel": {"value": jnp.int8},
-                  "scale_kernel": {"value": jnp.float32},
+                  "quant_input": {"frozen": jnp.int8},
+                  "scale_input": {"frozen": jnp.float32},
+                  "quant_kernel": {"frozen": jnp.int8},
+                  "scale_kernel": {"frozen": jnp.float32},
               }
           },
       }
