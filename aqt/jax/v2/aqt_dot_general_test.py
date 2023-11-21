@@ -14,7 +14,6 @@
 
 """Tests for dot_general."""
 import copy
-import functools
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
@@ -648,11 +647,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
 
-  @parameterized.parameters([
-      dict(preprocess=False),
-      dict(preprocess=True),
-  ])
-  def test_mnist_training(self, preprocess):
+  def test_mnist_training(self):
     batch_size = 4
     dataset_size = 8
     target_loss = {
@@ -673,20 +668,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     train_cfg = TrainConfig()
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
-    aqt_cfg = config.fully_quantized(fwd_bits=8, bwd_bits=8)
-    if preprocess:
-      aqt_cfg.fwd.lhs.preprocess_quant_cls = functools.partial(
-          aqt_flax.Freezer, name="quant_input"
-      )
-      aqt_cfg.fwd.lhs.preprocess_scale_cls = functools.partial(
-          aqt_flax.Freezer, name="scale_input"
-      )
-      aqt_cfg.fwd.rhs.preprocess_quant_cls = functools.partial(
-          aqt_flax.Freezer, name="quant_kernel"
-      )
-      aqt_cfg.fwd.rhs.preprocess_scale_cls = functools.partial(
-          aqt_flax.Freezer, name="scale_kernel"
-      )
+    aqt_cfg = aqt_flax.config_v4(
+        fwd_bits=8,
+        dlhs_bits=8,
+        drhs_bits=8,
+        freeze_lhs=False,  # freeze lhs
+        freeze_rhs=True,  # freeze rhs
+        use_frozen=False,  # update sowed values
+    )
+    # below 3 lines are differences between config_v4/v3 and fully_quantized
+    config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
+    aqt_cfg.dlhs.rhs.use_fwd_quant = True
+    aqt_cfg.drhs.rhs.use_fwd_quant = True
     state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
     rng, ds_rng = jax.random.split(rng)
     train_ds = {
@@ -702,29 +695,22 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         state, train_ds, batch_size, input_rng
     )
     assert train_loss in target_loss[jax.devices()[0].device_kind]
-    if preprocess:
-      aqt_tree = {
-          "Dense_0": {
-              "AqtDotGeneral_0": {
-                  "quant_input": {"frozen": jnp.int8},
-                  "scale_input": {"frozen": jnp.float32},
-                  "quant_kernel": {"frozen": jnp.int8},
-                  "scale_kernel": {"frozen": jnp.float32},
-              }
-          },
-          "Dense_1": {
-              "AqtDotGeneral_0": {
-                  "quant_input": {"frozen": jnp.int8},
-                  "scale_input": {"frozen": jnp.float32},
-                  "quant_kernel": {"frozen": jnp.int8},
-                  "scale_kernel": {"frozen": jnp.float32},
-              }
-          },
-      }
-      state_dtype_tree = jax.tree_util.tree_map(lambda x: x.dtype, state.model)
-      assert state_dtype_tree["aqt"] == aqt_tree
-    else:
-      assert "aqt" not in state.model.keys()
+    aqt_tree = {
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "rhs": {"frozen": jnp.int8},
+                "rhs_scale": {"frozen": jnp.float32},
+            }
+        },
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "rhs": {"frozen": jnp.int8},
+                "rhs_scale": {"frozen": jnp.float32},
+            }
+        },
+    }
+    state_dtype_tree = jax.tree_util.tree_map(lambda x: x.dtype, state.model)
+    assert state_dtype_tree["aqt"] == aqt_tree
 
 
 if __name__ == "__main__":
