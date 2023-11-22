@@ -21,7 +21,7 @@ from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
 import aqt.jax.v2.examples.mnist as aqt_mnist
-import aqt.jax.v2.flax.aqt_dot_general as aqt_flax
+from aqt.jax.v2.flax import aqt_flax
 import flax.linen.linear as fl
 import jax
 import jax.numpy as jnp

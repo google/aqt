@@ -32,7 +32,7 @@ Next, import necessary files.
 
 ```python
 # necessary imports
-import aqt.jax.v2.flax.aqt_dot_general as aqt
+import aqt.jax.v2.flax.aqt_flax as aqt
 import aqt.jax.v2.config as aqt_config
 import flax.linen as nn
 ```

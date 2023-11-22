@@ -17,7 +17,7 @@ import functools
 from typing import Any, Callable
 from absl import app
 from aqt.jax.v2 import config as aqt_config
-from aqt.jax.v2.flax import aqt_dot_general
+from aqt.jax.v2.flax import aqt_flax
 from flax import linen as nn
 from flax import struct
 from flax.metrics import tensorboard
@@ -36,7 +36,7 @@ class CNN(nn.Module):
 
   @nn.compact
   def __call__(self, x):
-    aqt_dg = functools.partial(aqt_dot_general.AqtDotGeneral, self.aqt_cfg)
+    aqt_dg = functools.partial(aqt_flax.AqtDotGeneral, self.aqt_cfg)
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
