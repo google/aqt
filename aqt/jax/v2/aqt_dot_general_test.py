@@ -665,21 +665,36 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       learning_rate = 0.1
       momentum = 0.9
 
+    def make_aqt_cfg(freeze_rhs: bool, use_frozen: bool | None):
+      aqt_cfg = aqt_flax.config_v4(
+          fwd_bits=8,
+          dlhs_bits=8,
+          drhs_bits=8,
+          freeze_lhs=False,  # freeze lhs
+          freeze_rhs=freeze_rhs,  # freeze rhs
+          use_frozen=use_frozen,  # update sowed values
+      )
+      # below 3 lines are differences between config_v4/v3 and fully_quantized
+      config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
+      aqt_cfg.dlhs.rhs.use_fwd_quant = True
+      aqt_cfg.drhs.rhs.use_fwd_quant = True
+      return aqt_cfg
+
+    def forward(model, freeze_rhs: bool, use_frozen: bool | None):
+      aqt_cfg = make_aqt_cfg(freeze_rhs, use_frozen)
+      logits, updated_model = aqt_mnist.CNN(False, aqt_cfg).apply(
+          model,
+          train_ds["image"],
+          rngs={"params": jax.random.PRNGKey(0)},
+          mutable=True,
+      )
+      return logits, updated_model
+
     train_cfg = TrainConfig()
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
-    aqt_cfg = aqt_flax.config_v4(
-        fwd_bits=8,
-        dlhs_bits=8,
-        drhs_bits=8,
-        freeze_lhs=False,  # freeze lhs
-        freeze_rhs=True,  # freeze rhs
-        use_frozen=False,  # update sowed values
-    )
-    # below 3 lines are differences between config_v4/v3 and fully_quantized
-    config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
-    aqt_cfg.dlhs.rhs.use_fwd_quant = True
-    aqt_cfg.drhs.rhs.use_fwd_quant = True
+    # stage 1: regular training
+    aqt_cfg = make_aqt_cfg(freeze_rhs=False, use_frozen=None)
     state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
     rng, ds_rng = jax.random.split(rng)
     train_ds = {
@@ -695,7 +710,17 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         state, train_ds, batch_size, input_rng
     )
     assert train_loss in target_loss[jax.devices()[0].device_kind]
-    aqt_tree = {
+
+    # Run forward once to get the training loss
+    logits_stage1, _ = forward(state.model, freeze_rhs=False, use_frozen=None)
+
+    # stage 2: conversion / freeze weights
+    logits_stage2, freezed_model = forward(
+        state.model, freeze_rhs=True, use_frozen=False
+    )
+
+    assert (logits_stage2 == logits_stage1).all()
+    expected_aqt_collection = {
         "Dense_0": {
             "AqtDotGeneral_0": {
                 "rhs": {"frozen": jnp.int8},
@@ -709,8 +734,37 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             }
         },
     }
-    state_dtype_tree = jax.tree_util.tree_map(lambda x: x.dtype, state.model)
-    assert state_dtype_tree["aqt"] == aqt_tree
+    aqt_collection = jax.tree_util.tree_map(lambda x: x.dtype, freezed_model)
+    assert aqt_collection["aqt"] == expected_aqt_collection
+    # zero out unquantized kernels
+    def zero_out_params(model, layer: str):
+      updated_model = copy.deepcopy(model)
+      updated_model["params"][layer]["kernel"] = jnp.zeros_like(
+          updated_model["params"][layer]["kernel"]
+      )
+      return updated_model
+
+    freezed_model = zero_out_params(freezed_model, "Dense_0")
+    freezed_model = zero_out_params(freezed_model, "Dense_1")
+
+    # stage 3: inference mode
+    logits_stage3, _ = forward(freezed_model, freeze_rhs=True, use_frozen=True)
+    assert (logits_stage2 == logits_stage3).all()
+
+    # sanity check
+    sanity_model = zero_out_params(freezed_model, "Conv_0")
+    logits_sanity, _ = forward(sanity_model, freeze_rhs=True, use_frozen=True)
+    assert not (logits_sanity == logits_stage3).all()
+
+    freezed_model["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"] = (
+        jnp.zeros_like(
+            freezed_model["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"]
+        )
+    )
+    logits_sanity_aqt, _ = forward(
+        freezed_model, freeze_rhs=True, use_frozen=True
+    )
+    assert not (logits_sanity_aqt == logits_stage3).all()
 
 
 if __name__ == "__main__":
