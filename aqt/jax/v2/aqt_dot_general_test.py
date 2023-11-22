@@ -659,14 +659,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         "TPU v5 lite": [3.991421222686767578125000000000],
     }
 
-    def make_aqt_cfg(freeze_rhs: bool, use_frozen: bool | None):
+    def make_aqt_cfg(mode: aqt_flax.QuantMode):
       aqt_cfg = aqt_flax.config_v4(
           fwd_bits=8,
           dlhs_bits=8,
           drhs_bits=8,
-          freeze_lhs=False,  # freeze lhs
-          freeze_rhs=freeze_rhs,  # freeze rhs
-          use_frozen=use_frozen,  # update sowed values
+          rhs_quant_mode=mode,
       )
       # below 3 lines are differences between config_v4/v3 and fully_quantized
       config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
@@ -674,8 +672,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       aqt_cfg.drhs.rhs.use_fwd_quant = True
       return aqt_cfg
 
-    def forward(model, freeze_rhs: bool, use_frozen: bool | None):
-      aqt_cfg = make_aqt_cfg(freeze_rhs, use_frozen)
+    def forward(model, mode: aqt_flax.QuantMode):
+      aqt_cfg = make_aqt_cfg(mode)
       logits, updated_model = aqt_mnist.CNN(False, aqt_cfg).apply(
           model,
           ds["image"],
@@ -701,7 +699,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     }
 
     # Stage 1: regular training
-    aqt_cfg = make_aqt_cfg(freeze_rhs=False, use_frozen=None)
+    aqt_cfg = make_aqt_cfg(aqt_flax.QuantMode.DYNAMIC)
     state = aqt_mnist.create_train_state(init_rng, aqt_cfg)
 
     state, train_loss, _ = aqt_mnist.train_epoch(
@@ -712,11 +710,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     model_training = state.model
 
     # Run forward once more in the same mode to get logits for testing below.
-    logits_s1, _ = forward(model_training, freeze_rhs=False, use_frozen=None)
+    logits_s1, _ = forward(model_training, aqt_flax.QuantMode.DYNAMIC)
 
     # Stage 2: Model conversion (quantized weights freezing)
     logits_s2, model_serving = forward(
-        model_training, freeze_rhs=True, use_frozen=False
+        model_training, aqt_flax.QuantMode.FREEZE
     )
 
     assert (logits_s2 == logits_s1).all()
@@ -748,14 +746,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     model_serving = zero_out_params(model_serving, "Dense_0")
     model_serving = zero_out_params(model_serving, "Dense_1")
 
-    # Stage 3: use_frozen=True is the inference mode.
-    logits_s3, _ = forward(model_serving, freeze_rhs=True, use_frozen=True)
+    # Stage 3: inference mode.
+    logits_s3, _ = forward(model_serving, aqt_flax.QuantMode.SERVE_FROZEN)
     assert (logits_s3 == logits_s2).all()
 
     # Sanity check 1: We can't zero out Conv_0 because it was not frozen.
     sanity_model = zero_out_params(model_serving, "Conv_0")
-    logits_sanity, _ = forward(sanity_model, freeze_rhs=True, use_frozen=True)
-    assert not (logits_sanity == logits_s3).all()
+    bad_logits, _ = forward(sanity_model, aqt_flax.QuantMode.SERVE_FROZEN)
+    assert not (bad_logits == logits_s3).all()
 
     # Sanity check 2: Frozen weights are indeed used for inference.
     #   If we zero them out, loss would change.
@@ -764,10 +762,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"]
         )
     )
-    logits_sanity_aqt, _ = forward(
-        model_serving, freeze_rhs=True, use_frozen=True
-    )
-    assert not (logits_sanity_aqt == logits_s3).all()
+    bad_logits, _ = forward(model_serving, aqt_flax.QuantMode.SERVE_FROZEN)
+    assert not (bad_logits == logits_s3).all()
 
 
 if __name__ == "__main__":

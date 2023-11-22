@@ -13,6 +13,7 @@
 # limitations under the License.
 """Flax layer for AQT injection."""
 
+import enum
 import functools
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import calibration
@@ -92,6 +93,12 @@ class AqtEinsum(nn.Module):
     return jnp.einsum(eqn, lhs, rhs, _dot_general=aqt_dg)
 
 
+class QuantMode(enum.Enum):
+  DYNAMIC = 1
+  FREEZE = 2
+  SERVE_FROZEN = 3
+
+
 def config_v4(
     *,
     fwd_bits: int | None,
@@ -105,12 +112,11 @@ def config_v4(
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
     drhs_accumulator_dtype: ... = jnp.int32,
-    freeze_lhs: bool = False,
-    freeze_rhs: bool = False,
+    lhs_quant_mode: QuantMode = QuantMode.DYNAMIC,
+    rhs_quant_mode: QuantMode = QuantMode.DYNAMIC,
     freeze_collection: str = 'aqt',
-    use_frozen: bool | None = None,
 ) -> config.DotGeneral:
-  """Fully Quantized Training."""
+  """Version 4 of user-visible AQT config."""
 
   def tensor_config(bits: int | None) -> config.Tensor:
     assert bits is None or bits >= 2, 'Need at least 2 bits.'
@@ -194,11 +200,11 @@ def config_v4(
       drhs_dtype=drhs_accumulator_dtype,
   )
 
-  def mk(name):
-    assert use_frozen is not None, (
-        'use_frozen=False during model conversion for serving. '
-        'use_frozen=True during serving.'
-    )
+  def mk(name: str, mode: QuantMode):
+    assert mode in QuantMode
+    if mode == QuantMode.DYNAMIC:
+      return None
+    use_frozen = mode == QuantMode.SERVE_FROZEN
     return functools.partial(
         Freezer,
         name=name,
@@ -206,11 +212,16 @@ def config_v4(
         var_collection=freeze_collection,
     )
 
-  if freeze_lhs:
-    cfg.fwd.lhs.preprocess_quant_cls = mk('lhs')
-    cfg.fwd.lhs.preprocess_scale_cls = mk('lhs_scale')
-  if freeze_rhs:
-    cfg.fwd.rhs.preprocess_quant_cls = mk('rhs')
-    cfg.fwd.rhs.preprocess_scale_cls = mk('rhs_scale')
+  assert (
+      lhs_quant_mode == QuantMode.DYNAMIC or rhs_quant_mode == QuantMode.DYNAMIC
+  ), (
+      'It seems unlikely that both sides of the matmul should be frozen.'
+      ' E.g. both sides of the matmul be weights. '
+  )
+
+  cfg.fwd.lhs.preprocess_quant_cls = mk('lhs', lhs_quant_mode)
+  cfg.fwd.lhs.preprocess_scale_cls = mk('lhs_scale', lhs_quant_mode)
+  cfg.fwd.rhs.preprocess_quant_cls = mk('rhs', rhs_quant_mode)
+  cfg.fwd.rhs.preprocess_scale_cls = mk('rhs_scale', rhs_quant_mode)
 
   return cfg
