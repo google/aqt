@@ -180,6 +180,40 @@ One has to understand how to configure them.
 
 We will be updating config file with current best practices.
 
+## Serving
+
+During serving, weights should have already been quantized.
+[Here is a guide](https://github.com/google/aqt/blob/71d8638a24485b408aa62a71fc249c80cbfc0626/aqt/jax/v2/aqt_dot_general_test.py#L703-L753) on how AQT loads integer weights and avoid duplicated quantization overhead.
+There are three stages to achieve this, controlled by the `freeze_rhs` and `use_frozen` flags in the [config](https://github.com/google/aqt/blob/71d8638a24485b408aa62a71fc249c80cbfc0626/aqt/jax/v2/flax/aqt_flax.py#L108-L111).
+All three stages use `nn.Module.apply`.
+There is no manual checkpoint/pytree editing needed.
+
+The first stage performs regular training, during which weights are stored as floating-point.
+The following option is used when creating AQT config
+(note that whether to freeze rhs or lhs depends on which side represents model weights):
+
+```python
+freeze_rhs = False
+use_frozen = None
+```
+
+The second stage converts floating-point weights to integer.
+The `apply` function call adds integer variable collections and save them in the checkpoint.
+Use the following option for config creation:
+
+```python
+freeze_rhs = True
+use_frozen = False
+```
+
+The third stage is the serving mode.
+Integer weights in the checkpoint are reused, making old unquantized weights dead code.
+
+```python
+freeze_rhs = True
+use_frozen = True
+```
+
 ## How AQT Works Internally
 
 In this section we:
