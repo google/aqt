@@ -23,7 +23,6 @@ from flax import struct
 from flax.metrics import tensorboard
 import jax
 import jax.numpy as jnp
-import ml_collections
 import numpy as np
 import optax
 import tensorflow_datasets as tfds
@@ -138,11 +137,13 @@ class TrainState(struct.PyTreeNode):
   opt_state: optax.OptState = struct.field(pytree_node=True)
 
 
-def create_train_state(rng, config, aqt_cfg):
+def create_train_state(rng, aqt_cfg):
   """Creates initial `TrainState`."""
   cnn_train = CNN(bn_use_stats=True, aqt_cfg=aqt_cfg)
   model = cnn_train.init({'params': rng}, jnp.ones([1, 28, 28, 1]))
-  tx = optax.sgd(config.learning_rate, config.momentum)
+  learning_rate = 0.1
+  momentum = 0.9
+  tx = optax.sgd(learning_rate, momentum)
   cnn_eval = CNN(bn_use_stats=False, aqt_cfg=aqt_cfg)
   return TrainState(
       apply_fn_train=cnn_train.apply,
@@ -153,32 +154,22 @@ def create_train_state(rng, config, aqt_cfg):
   )
 
 
-def train_and_evaluate(
-    config: ml_collections.ConfigDict, workdir: str
-) -> TrainState:
-  """Execute model training and evaluation loop.
-
-  Args:
-    config: Hyperparameter configuration for training and evaluation.
-    workdir: Directory where the tensorboard summaries are written to.
-
-  Returns:
-    The train state (which includes the `.params`).
-  """
+def train_and_evaluate(num_epochs: int, workdir: str) -> TrainState:
+  """Execute model training and evaluation loop."""
   train_ds, test_ds = get_datasets()
   rng = jax.random.key(0)
 
   summary_writer = tensorboard.SummaryWriter(workdir)
-  summary_writer.hparams(dict(config))
 
   rng, init_rng = jax.random.split(rng)
   aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
-  state = create_train_state(init_rng, config, aqt_cfg)
+  state = create_train_state(init_rng, aqt_cfg)
 
-  for epoch in range(1, config.num_epochs + 1):
+  batch_size = 128
+  for epoch in range(1, num_epochs + 1):
     rng, input_rng = jax.random.split(rng)
     state, train_loss, train_accuracy = train_epoch(
-        state, train_ds, config.batch_size, input_rng
+        state, train_ds, batch_size, input_rng
     )
     _, test_loss, test_accuracy, _ = apply_model(
         state, test_ds['image'], test_ds['label'], train=False
@@ -208,13 +199,7 @@ def train_and_evaluate(
 
 def main(argv):
   del argv
-  cfg = ml_collections.ConfigDict()
-  cfg.learning_rate = 0.1
-  cfg.momentum = 0.9
-  cfg.batch_size = 128
-  cfg.num_epochs = 10
-  cfg.num_epochs = 2
-  train_and_evaluate(cfg, workdir='/tmp/aqt_mnist_example')
+  train_and_evaluate(num_epochs=10, workdir='/tmp/aqt_mnist_example')
 
 
 if __name__ == '__main__':

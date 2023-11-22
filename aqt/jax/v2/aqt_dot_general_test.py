@@ -648,8 +648,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     assert drhs == expected_product
 
   def test_mnist_training(self):
-    batch_size = 4
-    dataset_size = 8
     target_loss = {
         "cpu": [
             3.981118679046630859375000000000,  # rome, milan
@@ -660,10 +658,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         "TPU v4": [3.992439270019531250000000000000],
         "TPU v5 lite": [3.991421222686767578125000000000],
     }
-
-    class TrainConfig:
-      learning_rate = 0.1
-      momentum = 0.9
 
     def make_aqt_cfg(freeze_rhs: bool, use_frozen: bool | None):
       aqt_cfg = aqt_flax.config_v4(
@@ -684,43 +678,49 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       aqt_cfg = make_aqt_cfg(freeze_rhs, use_frozen)
       logits, updated_model = aqt_mnist.CNN(False, aqt_cfg).apply(
           model,
-          train_ds["image"],
+          ds["image"],
           rngs={"params": jax.random.PRNGKey(0)},
           mutable=True,
       )
       return logits, updated_model
 
-    train_cfg = TrainConfig()
+    # RNGs
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
-    # stage 1: regular training
-    aqt_cfg = make_aqt_cfg(freeze_rhs=False, use_frozen=None)
-    state = aqt_mnist.create_train_state(init_rng, train_cfg, aqt_cfg)
     rng, ds_rng = jax.random.split(rng)
-    train_ds = {
-        "image": jax.random.uniform(
-            key=ds_rng, shape=(dataset_size, 28, 28, 1)
-        ),
+    rng, input_rng = jax.random.split(rng)
+    del rng
+
+    # Dataset
+    ds_size = 8
+    ds = {
+        "image": jax.random.uniform(key=ds_rng, shape=(ds_size, 28, 28, 1)),
         "label": jax.random.randint(
-            key=ds_rng, shape=(dataset_size,), minval=0, maxval=10
+            key=ds_rng, shape=(ds_size,), minval=0, maxval=10
         ),
     }
-    _, input_rng = jax.random.split(rng)
+
+    # Stage 1: regular training
+    aqt_cfg = make_aqt_cfg(freeze_rhs=False, use_frozen=None)
+    state = aqt_mnist.create_train_state(init_rng, aqt_cfg)
+
     state, train_loss, _ = aqt_mnist.train_epoch(
-        state, train_ds, batch_size, input_rng
+        state, ds, batch_size=ds_size // 2, rng=input_rng
     )
+
     assert train_loss in target_loss[jax.devices()[0].device_kind]
+    model_training = state.model
 
-    # Run forward once to get the training loss
-    logits_stage1, _ = forward(state.model, freeze_rhs=False, use_frozen=None)
+    # Run forward once more in the same mode to get logits for testing below.
+    logits_s1, _ = forward(model_training, freeze_rhs=False, use_frozen=None)
 
-    # stage 2: conversion / freeze weights
-    logits_stage2, freezed_model = forward(
-        state.model, freeze_rhs=True, use_frozen=False
+    # Stage 2: Model conversion (quantized weights freezing)
+    logits_s2, model_serving = forward(
+        model_training, freeze_rhs=True, use_frozen=False
     )
 
-    assert (logits_stage2 == logits_stage1).all()
-    expected_aqt_collection = {
+    assert (logits_s2 == logits_s1).all()
+    expected_aqt_pytree = {
         "Dense_0": {
             "AqtDotGeneral_0": {
                 "rhs": {"frozen": jnp.int8},
@@ -734,9 +734,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             }
         },
     }
-    aqt_collection = jax.tree_util.tree_map(lambda x: x.dtype, freezed_model)
-    assert aqt_collection["aqt"] == expected_aqt_collection
-    # zero out unquantized kernels
+    servin_pytree = jax.tree_util.tree_map(lambda x: x.dtype, model_serving)
+    assert servin_pytree["aqt"] == expected_aqt_pytree
+
     def zero_out_params(model, layer: str):
       updated_model = copy.deepcopy(model)
       updated_model["params"][layer]["kernel"] = jnp.zeros_like(
@@ -744,27 +744,30 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       )
       return updated_model
 
-    freezed_model = zero_out_params(freezed_model, "Dense_0")
-    freezed_model = zero_out_params(freezed_model, "Dense_1")
+    # We can, but do not have to delete unquantized weights.
+    model_serving = zero_out_params(model_serving, "Dense_0")
+    model_serving = zero_out_params(model_serving, "Dense_1")
 
-    # stage 3: inference mode
-    logits_stage3, _ = forward(freezed_model, freeze_rhs=True, use_frozen=True)
-    assert (logits_stage2 == logits_stage3).all()
+    # Stage 3: use_frozen=True is the inference mode.
+    logits_s3, _ = forward(model_serving, freeze_rhs=True, use_frozen=True)
+    assert (logits_s3 == logits_s2).all()
 
-    # sanity check
-    sanity_model = zero_out_params(freezed_model, "Conv_0")
+    # Sanity check 1: We can't zero out Conv_0 because it was not frozen.
+    sanity_model = zero_out_params(model_serving, "Conv_0")
     logits_sanity, _ = forward(sanity_model, freeze_rhs=True, use_frozen=True)
-    assert not (logits_sanity == logits_stage3).all()
+    assert not (logits_sanity == logits_s3).all()
 
-    freezed_model["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"] = (
+    # Sanity check 2: Frozen weights are indeed used for inference.
+    #   If we zero them out, loss would change.
+    model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"] = (
         jnp.zeros_like(
-            freezed_model["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"]
+            model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"]
         )
     )
     logits_sanity_aqt, _ = forward(
-        freezed_model, freeze_rhs=True, use_frozen=True
+        model_serving, freeze_rhs=True, use_frozen=True
     )
-    assert not (logits_sanity_aqt == logits_stage3).all()
+    assert not (logits_sanity_aqt == logits_s3).all()
 
 
 if __name__ == "__main__":
