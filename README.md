@@ -1,19 +1,38 @@
 # AQT : Accurate Quantized Training
 
-AQT is a software library designed for easy tensor opeartion quantization in JAX. AQT simultaneously provides:
+AQT is a software library designed for easy tensor opeartion quantization in JAX.
 
-  * excellent quantized model quality with no hand-tuning,
-  * excellent training performance in production using contemporary ML accelerators,
-  * simple and flexible APIs suitable for both production and research.
+## Features
 
-AQT is designed for both quantization researchers and production workloads. It has the following features:
+  * Excellent quantized int8 model quality with no hand-tuning at all.
+  * Excellent training speedup in production using contemporary ML accelerators.
+  * Simple and flexible APIs suitable for both production and research.
+  * AQT is a tensor op (matmul, einsum, conv, ...) quantization library.
+    Does not make assumptions about the computations to be Neural Net.
+  * AQT can be injected into any Jax computation.
+    Well tested in:
+    - [Flax](https://github.com/google/flax),
+    - [Pax](https://github.com/google/paxml),
+    - [MaxText](https://github.com/google/maxtext)
+    - and other frameworks at Google.
+  * AQT is designed for production workloads.
+    It is well exemplified by these blog entries:
+    - [Cloud ML AQT introduction](https://cloud.google.com/blog/products/compute/accurate-quantized-training-aqt-for-tpu-v5e/)
+    - [50000+ TPU Cloud Ml training with AQT](https://cloud.google.com/blog/products/compute/the-worlds-largest-distributed-llm-training-job-on-tpu-v5e)
+  * AQT is designed for research.
+    It is well exemplified by these papers:
+    - [Pareto-Optimal Quantized ResNet Is Mostly 4-bit](https://arxiv.org/abs/2105.03536)
+    - [PokeBNN: A Binary Pursuit of Lightweight Accuracy](https://arxiv.org/abs/2112.00133)
+    - [4-bit Conformer with Native Quantization Aware Training for Speech Recognition](https://arxiv.org/abs/2203.15952)
+    - [Binarized Neural Machine Translation](https://arxiv.org/abs/2302.04907)
+  * WYTIWYS (What you train is what you serve).
+    AQT quantized models are bit-exact the same during training and serving.
+    This side-steps the conventional issue of quantization-induced training-serving bias
+    that typically happens for Post Training Quantization (PTQ).
 
-  * What you train is what you serve. AQT quantized models are bit-exact the same during training and serving. This side-steps the conventional issue of quantization-induced training-serving bias that typically happens for Post Training Quantization (PTQ).
-  * JAX universal and easy to use. AQT leverages quantization injection to quantize all JAX tensor ops. The injection method has been adopted by [Flax](https://github.com/google/flax), [Pax](https://github.com/google/paxml), and other frameworks at Google.
 
 Let us know if you have any problem with aqt applications by filing an issue on Github.
 
-**Note:  Users are recommended to use `aqt.jax.v2`. Other jax versions are obsolete.**
 
 ## Usage
 
@@ -28,7 +47,8 @@ First, install the AQT package named as `aqtp` in PyPI.
 !pip install aqtp
 ```
 
-Next, import necessary files.
+Next, import `aqt.jax.v2`.
+Other (AQT versions)[#aqt-versions] are obsolete.
 
 ```python
 # necessary imports
