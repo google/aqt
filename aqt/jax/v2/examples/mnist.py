@@ -13,8 +13,9 @@
 # limitations under the License.
 """Mnist example."""
 
+import copy
 import functools
-from typing import Any, Callable
+from typing import Any
 from absl import app
 from aqt.jax.v2 import config as aqt_config
 from aqt.jax.v2.flax import aqt_flax
@@ -56,9 +57,9 @@ class CNN(nn.Module):
 def apply_model(state, images, labels, train):
   """Computes gradients, loss and accuracy for a single batch."""
 
-  apply_fn = state.apply_fn_train if train else state.apply_fn_eval
+  cnn = state.cnn_train if train else state.cnn_eval
   def loss_fn(model):
-    logits, updated_var = apply_fn(
+    logits, updated_var = cnn.apply(
         model,
         images,
         rngs={'params': jax.random.PRNGKey(0)},
@@ -130,8 +131,8 @@ def get_datasets():
 class TrainState(struct.PyTreeNode):
   """Train state."""
 
-  apply_fn_train: Callable[..., Any] = struct.field(pytree_node=False)
-  apply_fn_eval: Callable[..., Any] = struct.field(pytree_node=False)
+  cnn_train: Any = struct.field(pytree_node=False)
+  cnn_eval: Any = struct.field(pytree_node=False)
   model: Any = struct.field(pytree_node=True)
   tx: optax.GradientTransformation = struct.field(pytree_node=False)
   opt_state: optax.OptState = struct.field(pytree_node=True)
@@ -146,8 +147,8 @@ def create_train_state(rng, aqt_cfg):
   tx = optax.sgd(learning_rate, momentum)
   cnn_eval = CNN(bn_use_stats=False, aqt_cfg=aqt_cfg)
   return TrainState(
-      apply_fn_train=cnn_train.apply,
-      apply_fn_eval=cnn_eval.apply,
+      cnn_train=cnn_train,
+      cnn_eval=cnn_eval,
       model=model,
       tx=tx,
       opt_state=tx.init(model['params']),
@@ -197,9 +198,47 @@ def train_and_evaluate(num_epochs: int, workdir: str) -> TrainState:
   return state
 
 
+def serving_conversion(train_state, input_shape):
+  """Model conversion (quantized weights freezing)."""
+  freeze_collection = 'aqt'
+  cnn_freeze = copy.deepcopy(train_state.cnn_eval)
+  aqt_flax.set_rhs_quant_mode(
+      cnn_freeze.aqt_cfg, aqt_flax.QuantMode.FREEZE, freeze_collection
+  )
+  _, model_serving = cnn_freeze.apply(
+      train_state.model,
+      jnp.zeros(input_shape),
+      rngs={'params': jax.random.PRNGKey(0)},
+      mutable=True,
+  )
+  cnn_serve = copy.deepcopy(train_state.cnn_eval)
+  aqt_flax.set_rhs_quant_mode(
+      cnn_serve.aqt_cfg, aqt_flax.QuantMode.SERVE_FROZEN
+  )
+  return cnn_serve.apply, model_serving
+
+
+def serve(state):
+  """Take train state, freeze integer weights, and serve."""
+  # get sample serving data
+  _, test_ds = get_datasets()
+  sample_image, sample_label = test_ds['image'][:64], test_ds['label'][:64]
+  # serving
+  serve_fn, model_serving = serving_conversion(state, sample_image.shape)
+  logits = serve_fn(
+      model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
+  )
+  # compute serving loss
+  one_hot = jax.nn.one_hot(sample_label, 10)
+  loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
+  return loss
+
+
 def main(argv):
   del argv
-  train_and_evaluate(num_epochs=10, workdir='/tmp/aqt_mnist_example')
+  state = train_and_evaluate(num_epochs=2, workdir='/tmp/aqt_mnist_example')
+  loss = serve(state)
+  print('serve loss on sample ds: {}'.format(loss))
 
 
 if __name__ == '__main__':

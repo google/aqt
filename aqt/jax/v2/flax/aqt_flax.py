@@ -99,6 +99,33 @@ class QuantMode(enum.Enum):
   SERVE_FROZEN = 3
 
 
+def mk_freezer(name: str, freeze_collection: str, mode: QuantMode):
+  assert mode in QuantMode
+  if mode == QuantMode.DYNAMIC:
+    return None
+  use_frozen = mode == QuantMode.SERVE_FROZEN
+  return functools.partial(
+      Freezer,
+      name=name,
+      use_frozen=use_frozen,
+      var_collection=freeze_collection,
+  )
+
+
+def set_rhs_quant_mode(
+    cfg: config.DotGeneral, mode: QuantMode, collection='aqt'
+):
+  cfg.fwd.rhs.preprocess_quant_cls = mk_freezer('rhs', collection, mode)
+  cfg.fwd.rhs.preprocess_scale_cls = mk_freezer('rhs_scale', collection, mode)
+
+
+def set_lhs_quant_mode(
+    cfg: config.DotGeneral, mode: QuantMode, collection='aqt'
+):
+  cfg.fwd.lhs.preprocess_quant_cls = mk_freezer('lhs', collection, mode)
+  cfg.fwd.lhs.preprocess_scale_cls = mk_freezer('lhs_scale', collection, mode)
+
+
 def config_v4(
     *,
     fwd_bits: int | None,
@@ -200,18 +227,6 @@ def config_v4(
       drhs_dtype=drhs_accumulator_dtype,
   )
 
-  def mk(name: str, mode: QuantMode):
-    assert mode in QuantMode
-    if mode == QuantMode.DYNAMIC:
-      return None
-    use_frozen = mode == QuantMode.SERVE_FROZEN
-    return functools.partial(
-        Freezer,
-        name=name,
-        use_frozen=use_frozen,
-        var_collection=freeze_collection,
-    )
-
   assert (
       lhs_quant_mode == QuantMode.DYNAMIC or rhs_quant_mode == QuantMode.DYNAMIC
   ), (
@@ -219,9 +234,7 @@ def config_v4(
       ' E.g. both sides of the matmul be weights. '
   )
 
-  cfg.fwd.lhs.preprocess_quant_cls = mk('lhs', lhs_quant_mode)
-  cfg.fwd.lhs.preprocess_scale_cls = mk('lhs_scale', lhs_quant_mode)
-  cfg.fwd.rhs.preprocess_quant_cls = mk('rhs', rhs_quant_mode)
-  cfg.fwd.rhs.preprocess_scale_cls = mk('rhs_scale', rhs_quant_mode)
+  set_rhs_quant_mode(cfg, rhs_quant_mode, freeze_collection)
+  set_lhs_quant_mode(cfg, lhs_quant_mode, freeze_collection)
 
   return cfg
