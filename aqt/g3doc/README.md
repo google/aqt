@@ -28,7 +28,7 @@ yielding similarly good results.
 
 ## Public README.md
 
-Most of the AQT documentation is in the [open-source README.md](README.md).
+Most of the AQT documentation is in the [open-source README.md](../README.md).
 It contains:
 
 -   list of features,
