@@ -158,7 +158,7 @@ class Tensor:
   use_fwd_quant: Optional[bool]  # use quantized fwd in the bwd pass
 ```
 
-## AQT versions
+## AQT Versions
 
 As of today there are several independent AQT implementations in this package:
 
@@ -175,7 +175,7 @@ AQTv2 is the recommended library.
 We plan to port remaining features from AQTv1 to AQTv2 and
 delete AQTv1 in early Q1 2024. Below we describe details about that.
 
-## Inference acceleration
+## Inference Acceleration
 
 The most important AQTv2 (to be ported from AQTv1) missing features are:
 
@@ -187,7 +187,7 @@ Lack of these features prevents AQTv2 from accelerating inference with small bat
 The only option today is dynamic quantization where
 each tensor op is quantized independently and quantization scales are found just-in-time.
 
-## Backpropagation acceleration
+## Backpropagation Acceleration
 
 AQTv2 speeds up training and fine-tuning.
 We verified 1.2x to 1.4x reduction in step time on 1B to 16B large Transformer
@@ -278,13 +278,4 @@ aqt_matmul_int8(a, w):
 ```
 
 ## Citing AQT
-Please use a following bibtex entry:
-
-```
-@software{aqt2022github,
-  author = {Lew, Lukasz and Feinberg, Vlad and Agrawal, Shivani and Lee, Jihwan and Malmaud, Jonathan and Wang, Lisa and  Dormiani, Pouya and Pope, Reiner },
-  title = {AQT: Accurate Quantized Training)},
-  url = {http://github.com/google/aqt},
-  year = {2022},
-}
-```
+We will be publishing AQT whitepaper soon.
