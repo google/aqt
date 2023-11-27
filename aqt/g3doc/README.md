@@ -2,14 +2,30 @@
 
 go/aqt2
 
-AQT is a JAX library has two primary goals:
+## Main README.md
 
-1.  Acceleration of JAX computation using int8, int4 and float8 available on
-    existing hardware.
-1.  Research on quantization to aid design of future ML hardware.
+Most of the AQT documentation is in the [main README.md](../README.md). It
+contains:
+
+-   list of features,
+-   links to Cloud ML blog posts and research papers,
+-   tutorial on how to use it with JAX and Flax libraries,
+-   the AQT configuration,
+-   relation of different AQT versions (v1, v2, TF, ...)
+-   simplified description of the internal AQT math.
+
+## Blog post
 
 [Cloud ML AQT introduction](https://cloud.google.com/blog/products/compute/accurate-quantized-training-aqt-for-tpu-v5e/)
-is a nice well-polished first read.
+is a well-polished general introduction to AQT.
+
+## AQT goals
+
+AQT is a JAX library has two primary goals:
+
+1.  Acceleration of JAX computation and memory transfers using int8, int4,
+    float8 and other numerical formats available on the existing hardware.
+1.  Research on quantization to aid design of future Google TPUs.
 
 ## AQT value
 
@@ -26,17 +42,8 @@ speedup in MLPerf training 2023.
 AQT training acceleration is applicable to both pre-training and fine-tuning
 yielding similarly good results.
 
-## Public README.md
-
-Most of the AQT documentation is in the [open-source README.md](../README.md).
-It contains:
-
--   list of features,
--   links to Cloud ML blog posts and research papers,
--   tutorial on how to use it on JAX level,
--   the AQT configuration,
--   relation of different AQT versions (v1, v2, TF, ...)
--   rudimentary description of the internal AQT math.
+[Cloud ML AQT introduction](https://cloud.google.com/blog/products/compute/accurate-quantized-training-aqt-for-tpu-v5e/)
+has some more quality details.
 
 ## How to use AQT in Pax
 
