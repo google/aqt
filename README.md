@@ -48,7 +48,7 @@ First, install the AQT package named as `aqtp` in PyPI.
 ```
 
 Next, import `aqt.jax.v2`.
-Other (AQT versions)[#aqt-versions] are obsolete.
+Other [AQT versions](#aqt-versions) are obsolete.
 
 ```python
 # necessary imports
