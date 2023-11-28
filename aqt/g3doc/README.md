@@ -2,6 +2,12 @@
 
 go/aqt2
 
+## AQT Users chat
+
+*go/aqt-users*
+
+Feel free to have any AQT-related discussion there. (Consider starting threads with **bolded title**).
+
 ## Main README.md
 
 Most of the AQT documentation is in the [main README.md](../README.md). It
@@ -59,13 +65,54 @@ the reader with some example links:
 
 We will try extend a documentation whenever questions appear on AQT Users chat.
 
-## AQT Users chat
+## Research with AQT
 
-Please join [AQT Users](https://chat.google.com/room/AAAASQ4OKpw?cls=1) google
-internal chat. Feel free to have any AQT-related discussion there. Consider
-starting threads with *bolded title*.
+We are constantly working to make AQTv2 a modular library.
+The aim is to make it easy to add new quantization and sparsity algorithms.
+
+For instance one can implement custom calibrations instead of
+[AbsMax](https://source.corp.google.com/piper///depot/google3/third_party/py/aqt/jax/v2/calibration.py).
+(We are just waiting for an opportunity to port
+[AQTv1 excellent calibrations](http://google3/third_party/py/aqt/jax/aqt_tensor.py;l=169;rcl=568584281)
+to this API.)
+
+One can implement custom weight/activation representation as well. This is
+[general int numerics](https://source.corp.google.com/piper///depot/google3/third_party/py/aqt/jax/v2/int_numerics.py).
+*float8* will be submitted soon.
+
+There are many algorithms that do not fit into these two simple abstractions,
+but we will extend AQT to be universal quantization glue.
+
+## AQT Infrastructure and AQT Algorithms
+
+Making AQT more modular leads to a situation where AQT factors
+itself into two part.
+[This presentation](https://docs.google.com/presentation/d/1vxO_EUNfCO9oGkFQZGqRxf97BSWInJ2neVFSzN4RqEY/edit#slide=id.p)
+has much more details.
+
+### AQT Infrastructure
+
+Turns out that the most of AQT code is infrastructure:
+
+-   attaches custom gradient,
+-   handles passing configuration,
+-   handles passing state from Flax/Pax/Gemax to pure JAX algos,
+-   implements complex transpositions needed for dot_general gradient,
+-   and more.
+
+It might make sense to integrate this part into JAX/Flax (some code was copied from there).
+
+### AQT Algorithms
+
+The successful AQT algorithms are simple equations. They are encoded in
+calibration and numerics linked in [section above](#research-with-aqt).
+This is fairly small amount of code, making AQT easy to use for researchers.
+The added benefit is being able to easily try new algorithms on
+production models that adopted AQT.
 
 ## AQT Catalyst team
 
 AQT is developed by
 [AQT Catalyst team](https://moma.corp.google.com/team/1448391999960).
+
+All our presentations are here: go/catalyst-presentations.
