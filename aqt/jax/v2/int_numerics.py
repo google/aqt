@@ -15,12 +15,13 @@
 
 from typing import Optional
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2.numerics import numerics
 import flax.struct
 from jax import lax
 import jax.numpy as jnp
 
 
-class IntNumerics(flax.struct.PyTreeNode):
+class IntNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
   """Numerics for int8, int4, binary, etc."""
 
   bits: int

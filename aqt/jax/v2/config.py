@@ -15,10 +15,11 @@
 
 import abc
 import dataclasses
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2.numerics import numerics
 import flax.struct
 import jax
 import jax.numpy as jnp
@@ -36,23 +37,33 @@ class Preprocess(abc.ABC):
     pass
 
 
-class NoNumerics(flax.struct.PyTreeNode):
+class NoNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
+  """No quantization, use a native type such as bf16."""
+
   # TODO(lew): This is a workaround. We should separate Stochastic Rounding.
   # noise_fn has no effect in NoNumerics.
   noise_fn: Optional[stochastic_rounding.NoiseFn] = None
 
-  """No quantization, use a native type such as bf16."""
-  pass
+  # TODO(lew): This is a hack. We treat check isinstance(NoNumerics) and treat
+  # it in a special way right now. These functions are never called
+  def fwd(self, x, context):
+    pass
 
+  def abs_val_mapped_to(self):
+    pass
 
-Numerics = Union[NoNumerics, int_numerics.IntNumerics]
+  def vjp_fwd(self, x, context):
+    pass
+
+  def vjp_bwd(self, res, grad):
+    pass
 
 
 @dataclasses.dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
-  numerics: Numerics
+  numerics: numerics.AqtNumerics
   calib_shared_axes: Optional[list[int]]
   scale_stop_grad: bool
   # noise+clip+round
@@ -172,10 +183,10 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
 def tensor_make(bits: Optional[int]) -> 'Tensor':
   """Makes config.Tensor."""
   if bits is None:
-    numerics = NoNumerics()
+    effective_numerics = NoNumerics()
   else:
     pz = False if bits == 1 else True
-    numerics = int_numerics.IntNumerics(
+    effective_numerics = int_numerics.IntNumerics(
         bits=bits,
         preserve_zero=pz,
         preserve_max_val=False,
@@ -186,7 +197,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
     )
 
   return Tensor(
-      numerics=numerics,
+      numerics=effective_numerics,
       calib_shared_axes=None,
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
