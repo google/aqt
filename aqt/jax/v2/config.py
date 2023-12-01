@@ -287,8 +287,8 @@ def dot_general_make(
 
 def fully_quantized(
     *,
-    fwd_bits: int | None = 8,
-    bwd_bits: int | None = 8,
+    fwd_bits: Optional[int] = 8,
+    bwd_bits: Optional[int] = 8,
     use_fwd_quant: bool = True,
     use_stochastic_rounding: Optional[bool] = True,
     # Typically we have (but it's a caller's responsibility to check):
@@ -348,9 +348,9 @@ def fully_quantized(
 
 def config_v3(
     *,
-    fwd_bits: int | None,
-    dlhs_bits: int | None,
-    drhs_bits: int | None,
+    fwd_bits: Optional[int],
+    dlhs_bits: Optional[int],
+    drhs_bits: Optional[int],
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'

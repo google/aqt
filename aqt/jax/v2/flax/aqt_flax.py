@@ -15,6 +15,7 @@
 
 import enum
 import functools
+from typing import Optional
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
@@ -53,8 +54,8 @@ class Freezer(nn.Module, config.Preprocess):
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
-  cfg: config.DotGeneral | None = None
-  prng_name: str | None = 'params'
+  cfg: Optional[config.DotGeneral] = None
+  prng_name: Optional[str] = 'params'
 
   @nn.compact
   def __call__(
@@ -81,8 +82,8 @@ class AqtDotGeneral(nn.Module):
 class AqtEinsum(nn.Module):
   """Quantized Einsum class for model injection."""
 
-  cfg: config.DotGeneral | None = None
-  prng_name: str | None = 'params'
+  cfg: Optional[config.DotGeneral] = None
+  prng_name: Optional[str] = 'params'
 
   @nn.compact
   def __call__(self, eqn, lhs, rhs):
@@ -128,14 +129,14 @@ def set_lhs_quant_mode(
 
 def config_v4(
     *,
-    fwd_bits: int | None,
-    dlhs_bits: int | None,
-    drhs_bits: int | None,
+    fwd_bits: Optional[int],
+    dlhs_bits: Optional[int],
+    drhs_bits: Optional[int],
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
-    dlhs_local_aqt: config.LocalAqt | None = None,
-    drhs_local_aqt: config.LocalAqt | None = None,
+    dlhs_local_aqt: Optional[config.LocalAqt] = None,
+    drhs_local_aqt: Optional[config.LocalAqt] = None,
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
     drhs_accumulator_dtype: ... = jnp.int32,
@@ -145,7 +146,7 @@ def config_v4(
 ) -> config.DotGeneral:
   """Version 4 of user-visible AQT config."""
 
-  def tensor_config(bits: int | None) -> config.Tensor:
+  def tensor_config(bits: Optional[int]) -> config.Tensor:
     assert bits is None or bits >= 2, 'Need at least 2 bits.'
     if bits is None:
       numerics = config.NoNumerics()
