@@ -127,6 +127,11 @@ class DotGeneral:
 # Functions below are auxiliary helpers.
 
 
+def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
+  cfg.fwd.lhs.numerics = fwd_numerics
+  cfg.fwd.rhs.numerics = fwd_numerics
+
+
 def set_accumulator_dtype(
     cfg: DotGeneral,
     fwd_dtype: Optional[DType],

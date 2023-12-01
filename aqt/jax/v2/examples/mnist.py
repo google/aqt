@@ -155,7 +155,9 @@ def create_train_state(rng, aqt_cfg):
   )
 
 
-def train_and_evaluate(num_epochs: int, workdir: str) -> TrainState:
+def train_and_evaluate(
+    num_epochs: int, workdir: str, aqt_cfg: aqt_config.DotGeneral
+) -> TrainState:
   """Execute model training and evaluation loop."""
   train_ds, test_ds = get_datasets()
   rng = jax.random.key(0)
@@ -163,7 +165,6 @@ def train_and_evaluate(num_epochs: int, workdir: str) -> TrainState:
   summary_writer = tensorboard.SummaryWriter(workdir)
 
   rng, init_rng = jax.random.split(rng)
-  aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
   state = create_train_state(init_rng, aqt_cfg)
 
   batch_size = 128
@@ -228,16 +229,23 @@ def serve(state):
   logits = serve_fn(
       model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
   )
+  # The following XLA graph is only needed for debugging purpose
+  hlo = jax.xla_computation(serve_fn)(
+      model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
+  ).as_hlo_module()
   # compute serving loss
   one_hot = jax.nn.one_hot(sample_label, 10)
   loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
-  return loss
+  return loss, hlo
 
 
 def main(argv):
   del argv
-  state = train_and_evaluate(num_epochs=2, workdir='/tmp/aqt_mnist_example')
-  loss = serve(state)
+  aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+  state = train_and_evaluate(
+      num_epochs=2, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
+  )
+  loss, _ = serve(state)
   print('serve loss on sample ds: {}'.format(loss))
 
 
