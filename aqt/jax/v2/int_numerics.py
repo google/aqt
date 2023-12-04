@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for int8, int4, binary and other integer types."""
 
-from typing import Optional
+from typing import Optional, Any
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.numerics import numerics
 import flax.struct
@@ -33,6 +33,7 @@ class IntNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
   clip_gradient: bool
   round: bool
   noise_fn: Optional[stochastic_rounding.NoiseFn]
+  dtype: Optional[Any] = None
 
   # pylint: disable=line-too-long
   # Verifying the correctness of these functions amounts to verifying this table:
@@ -70,6 +71,9 @@ class IntNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
       # Reducing fwd_clip_bound by any value in (0.0, 1.0) is correct.
       fwd_clip_bound -= 0.5
     return fwd_clip_bound
+
+  def get_dtype(self):
+    return self.dtype
 
   def fwd(self, x, context):
     """Forward pass."""

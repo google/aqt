@@ -22,7 +22,9 @@ from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
 import aqt.jax.v2.examples.mnist as aqt_mnist
 from aqt.jax.v2.flax import aqt_flax
+from aqt.jax.v2.numerics import numerics
 import flax.linen.linear as fl
+import flax.struct
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -50,10 +52,9 @@ def test_jaxpr_dtype(f, cfgs: list[config.DotGeneralRaw], float_dtype):
   assert len(trityps) == len(cfgs)
   for (lhs_sa, rhs_sa, out_sa), cfg in zip(trityps, cfgs):
     # If cfg has None, the type is inherited from the arguments' type.
-    in_dtype = cfg.dg_in_dtype or float_dtype
     out_dtype = cfg.dg_accumulator_dtype or float_dtype
-    assert lhs_sa.dtype == in_dtype
-    assert rhs_sa.dtype == in_dtype
+    assert lhs_sa.dtype == (cfg.lhs.numerics.get_dtype() or float_dtype)
+    assert rhs_sa.dtype == (cfg.rhs.numerics.get_dtype() or float_dtype)
     assert out_sa.dtype == out_dtype
 
 
@@ -271,7 +272,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg = copy.deepcopy(readonly_cfg)
       if fwd_lhs_tricky_clip_and_round:
         # Tricky means that we have zero gradient on x < 0
-        class TrickyNumerics:
+        class TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
+          # Needed because int8 casting would do additional clip and round.
+          dtype = None
+
+          def get_dtype(self):
+            return self.dtype
 
           def abs_val_mapped_to(self) -> jnp.ndarray:
             return jnp.array(1.0)
@@ -291,8 +297,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             return (ret, None)
 
         cfg.fwd.lhs.numerics = TrickyNumerics()
-        # Needed because int8 casting would do additional clip and round.
-        cfg.fwd.dg_in_dtype = None
 
       # Setting po2_scale is ensuring that fake_quant and full dot_general
       # have the same numerics when scales are power of two (po2).
@@ -317,7 +321,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg.drhs.rhs.use_fake_quant = use_fake_quant
 
       def disable_quant_types(c):
-        c.dg_in_dtype = None
+        c.lhs.numerics = c.lhs.numerics.replace(dtype=None)
+        c.rhs.numerics = c.rhs.numerics.replace(dtype=None)
         c.dg_accumulator_dtype = None
 
       if use_fake_quant:
@@ -559,7 +564,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
     test_jaxpr_dtype(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
-    assert cfg.dg_in_dtype == jnp.int8
+    assert cfg.lhs.numerics.get_dtype() == jnp.int8
+    assert cfg.rhs.numerics.get_dtype() == jnp.int8
 
   @parameterized.parameters([
       (1, 1),

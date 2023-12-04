@@ -43,9 +43,13 @@ class NoNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
   # TODO(lew): This is a workaround. We should separate Stochastic Rounding.
   # noise_fn has no effect in NoNumerics.
   noise_fn: Optional[stochastic_rounding.NoiseFn] = None
+  dtype: Optional[DType] = None
 
   # TODO(lew): This is a hack. We treat check isinstance(NoNumerics) and treat
   # it in a special way right now. These functions are never called
+  def get_dtype(self):
+    pass
+
   def fwd(self, x, context):
     pass
 
@@ -97,7 +101,6 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
-  dg_in_dtype: Optional[DType]
   dg_accumulator_dtype: Optional[DType]
   local_aqt: Optional[LocalAqt]
 
@@ -191,6 +194,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
     effective_numerics = NoNumerics()
   else:
     pz = False if bits == 1 else True
+    dtype = jnp.int8 if 2 <= bits <= 8 and pz else None
     effective_numerics = int_numerics.IntNumerics(
         bits=bits,
         preserve_zero=pz,
@@ -199,6 +203,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
         round=True,
         noise_fn=None,
         clip_gradient=False,  # This can be disabled when using abs-max scaling.
+        dtype=dtype,
     )
 
   return Tensor(
@@ -231,17 +236,13 @@ def dot_general_raw_make(
       and 2 <= lhs_bits <= 8
       and 2 <= rhs_bits <= 8
   ):
-    dg_in_dtype = jnp.int8
     dg_accumulator_dtype = jnp.int32
   else:
-    # Use None to determine the dtype on the fly in aqt_dot_general
-    dg_in_dtype = None
     dg_accumulator_dtype = None
 
   return DotGeneralRaw(
       lhs=lhs_cfg,
       rhs=rhs_cfg,
-      dg_in_dtype=dg_in_dtype,
       dg_accumulator_dtype=dg_accumulator_dtype,
       local_aqt=local_aqt,
   )

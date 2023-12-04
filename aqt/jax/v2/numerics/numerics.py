@@ -19,6 +19,16 @@ import flax.struct
 class AqtNumerics(flax.struct.PyTreeNode, abc.ABC):
   """Numerics for int8, int4, binary, etc."""
 
+  # TODO(lew): Currently this is a part of API, only because it is used to set
+  # it in test. Remove and leave only get_dtype(
+  @property
+  def dtype(self):
+    pass
+
+  @abc.abstractmethod
+  def get_dtype(self):
+    pass
+
   @abc.abstractmethod
   def fwd(self, x, context):
     """Forward pass."""

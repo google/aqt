@@ -159,6 +159,7 @@ def config_v4(
           round=True,
           noise_fn=None,
           clip_gradient=False,  # Can be False when using abs-max scaling.
+          dtype=jnp.int8 if 2 <= bits <= 8 else None,
       )
 
     return config.Tensor(
@@ -184,17 +185,14 @@ def config_v4(
         and lhs_bits <= 8
         and rhs_bits <= 8
     ):
-      dg_in_dtype = jnp.int8
       dg_accumulator_dtype = jnp.int32
     else:
       # None determines the dtype on the fly in aqt_dot_general
-      dg_in_dtype = None
       dg_accumulator_dtype = None
 
     return config.DotGeneralRaw(
         lhs=lhs_cfg,
         rhs=rhs_cfg,
-        dg_in_dtype=dg_in_dtype,
         dg_accumulator_dtype=dg_accumulator_dtype,
         local_aqt=local_aqt,
     )
