@@ -21,9 +21,6 @@ class AqtNumerics(flax.struct.PyTreeNode, abc.ABC):
 
   # TODO(lew): Currently this is a part of API, only because it is used to set
   # it in test. Remove and leave only get_dtype(
-  @property
-  def dtype(self):
-    pass
 
   @abc.abstractmethod
   def get_dtype(self):
