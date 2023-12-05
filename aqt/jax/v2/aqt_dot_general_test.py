@@ -52,10 +52,12 @@ def test_jaxpr_dtype(f, cfgs: list[config.DotGeneralRaw], float_dtype):
   assert len(trityps) == len(cfgs)
   for (lhs_sa, rhs_sa, out_sa), cfg in zip(trityps, cfgs):
     # If cfg has None, the type is inherited from the arguments' type.
-    out_dtype = cfg.dg_accumulator_dtype or float_dtype
-    assert lhs_sa.dtype == (cfg.lhs.numerics.get_dtype() or float_dtype)
-    assert rhs_sa.dtype == (cfg.rhs.numerics.get_dtype() or float_dtype)
-    assert out_sa.dtype == out_dtype
+    def assert_dtype_eq(dtype1, dtype2):
+      assert dtype1 == dtype2, f"dtype1 != dtype2: {dtype1=} != {dtype2=}"
+
+    assert_dtype_eq(lhs_sa.dtype, cfg.lhs.numerics.get_dtype() or float_dtype)
+    assert_dtype_eq(rhs_sa.dtype, cfg.rhs.numerics.get_dtype() or float_dtype)
+    assert_dtype_eq(out_sa.dtype, cfg.dg_accumulator_dtype or float_dtype)
 
 
 def rand_unif(shape, maxval, seed, dtype=jnp.float32):
@@ -185,7 +187,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): test
 
   @parameterized.parameters([
-      dict(cfg=config.config_v3(fwd_bits=3, dlhs_bits=4, drhs_bits=5)),
+      dict(
+          cfg=config.config_v3(
+              fwd_bits=3,
+              dlhs_bits=4,
+              drhs_bits=5,
+              drhs_accumulator_dtype=jnp.int32,  # overwriting the default None
+          )
+      ),
       dict(cfg=config.dot_general_make(None, None)),
       dict(cfg=config.dot_general_make(1, 1)),
       dict(cfg=config.dot_general_make(1, 2)),
@@ -297,6 +306,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             return (ret, None)
 
         cfg.fwd.lhs.numerics = TrickyNumerics()
+        cfg.fwd.dg_accumulator_dtype = None
 
       # Setting po2_scale is ensuring that fake_quant and full dot_general
       # have the same numerics when scales are power of two (po2).

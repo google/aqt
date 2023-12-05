@@ -48,7 +48,7 @@ class NoNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
   # TODO(lew): This is a hack. We treat check isinstance(NoNumerics) and treat
   # it in a special way right now. These functions are never called
   def get_dtype(self):
-    pass
+    return None
 
   def fwd(self, x, context):
     pass
@@ -349,9 +349,9 @@ def fully_quantized(
 
 def config_v3(
     *,
-    fwd_bits: Optional[int],
-    dlhs_bits: Optional[int],
-    drhs_bits: Optional[int],
+    fwd_bits: Optional[int] = 8,
+    dlhs_bits: Optional[int] = 8,
+    drhs_bits: Optional[int] = None,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
@@ -359,7 +359,7 @@ def config_v3(
     drhs_local_aqt: Optional[LocalAqt] = None,
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
-    drhs_accumulator_dtype: ... = jnp.int32,
+    drhs_accumulator_dtype: ... = None,
 ) -> DotGeneral:
   """Fully Quantized Training."""
   fwd = dot_general_raw_make(fwd_bits, fwd_bits)

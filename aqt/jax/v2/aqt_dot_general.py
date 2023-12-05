@@ -331,6 +331,15 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
     if cfg.rhs.preprocess_scale_cls is not None:
       preprocess_scale_rhs = cfg.rhs.preprocess_scale_cls()
       rhs_inv_scale_t = preprocess_scale_rhs(rhs_inv_scale_t)
+
+    dtype_ms = (
+        f'Found {cfg.dg_accumulator_dtype=}, {lhs_cast_dtype=} and'
+        f' {rhs_cast_dtype=}. Dot general accumulator dtype can only be'
+        ' jnp.int32 when both inputs are int8. Otherwise it is recommended to'
+        ' be None to let lax.dot_general automatically decide it.'
+    )
+    if cfg.dg_accumulator_dtype == jnp.int32:
+      assert lhs_cast_dtype == jnp.int8 and rhs_cast_dtype == jnp.int8, dtype_ms
     out = lax.dot_general(
         lhs_q,
         rhs_q,

@@ -129,9 +129,9 @@ def set_lhs_quant_mode(
 
 def config_v4(
     *,
-    fwd_bits: Optional[int],
-    dlhs_bits: Optional[int],
-    drhs_bits: Optional[int],
+    fwd_bits: Optional[int] = 8,
+    dlhs_bits: Optional[int] = 8,
+    drhs_bits: Optional[int] = None,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
