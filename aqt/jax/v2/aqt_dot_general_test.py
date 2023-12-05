@@ -677,10 +677,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def make_aqt_cfg(mode: aqt_flax.QuantMode):
       aqt_cfg = aqt_flax.config_v4(
-          fwd_bits=8,
-          dlhs_bits=8,
           drhs_bits=8,
           rhs_quant_mode=mode,
+          drhs_accumulator_dtype=jnp.int32,  # overwrite the default None
       )
       # below 3 lines are differences between config_v4/v3 and fully_quantized
       config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")

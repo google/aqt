@@ -139,7 +139,7 @@ def config_v4(
     drhs_local_aqt: Optional[config.LocalAqt] = None,
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
-    drhs_accumulator_dtype: ... = jnp.int32,
+    drhs_accumulator_dtype: ... = None,
     lhs_quant_mode: QuantMode = QuantMode.DYNAMIC,
     rhs_quant_mode: QuantMode = QuantMode.DYNAMIC,
     freeze_collection: str = 'aqt',
