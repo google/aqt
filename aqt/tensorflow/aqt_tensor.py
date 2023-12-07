@@ -894,25 +894,25 @@ def validate_dynamic(config: aqt_config.AqtScheduleConfig) -> None:
   """Validates the config conforms with dynamic quantization."""
   if config.stats_config.ema_update_count != 1:
     raise aqt_config.ConfigError(
-        'ema_update_count={config.stats_config.ema_update_count} must be 1 '
+        f'ema_update_count={config.stats_config.ema_update_count} must be 1 '
         'for dynamic quantization.'
     )
   if config.use_quantized_variable:
     raise aqt_config.ConfigError(
-        'dynamic quantization  does not memorized the quantized variable as '
+        'dynamic quantization does not memorize the quantized variable as '
         'it is history-independent.'
     )
   for tensor_config in config.tensor_configs:
     # When a tensor config is not FloatConfig, the quantizer may use
-    # non-trivial quantization scales and dynamic quantization should not use
+    # non-trivial quantization scales and dynamic quantization should not freeze
     # scales in such cases.
     if (
-        isinstance(tensor_config, aqt_config.FloatConfig)
+        not isinstance(tensor_config.quant_config, aqt_config.FloatConfig)
         and tensor_config.freeze_scale_at_begin
     ):
       raise aqt_config.ConfigError(
           'Dynamic quantization should not freeze_scale_at_begin for non-float '
-          'config but got {tensor_config}.'
+          f'config but got {tensor_config}.'
       )
 
 

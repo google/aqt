@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for aqt_tensor."""
 
+import copy
 from typing import Set
 
 from absl import logging
@@ -280,6 +281,44 @@ class AqtTensorQuantizerTest(aqt_tensor_test_base.AqtTensorQuantizerTest):
         with self.cached_session():
           tf.global_variables_initializer().run()
           self.assertAllEqual(var_qx, alt_qx)
+
+  def test_non_dynamic_config(self):
+    sc = aqt_config.StatsConfig(
+        ema_update_count=1,
+        share_stats_axes=[0, 1],
+        tpu_cross_replica_sum=False,
+    )
+    tensor_config = aqt_config.AqtTensorConfig(
+        aqt_config.IntQuantConfig(
+            bits=8,
+        ),
+        aqt_config.CalibrationConfig(l1_dev_coeff=2),
+        freeze_scale_at_begin=False,
+    )
+
+    with self.assertRaisesRegex(
+        aqt_config.ConfigError, 'ema_update_count.* must be 1'
+    ):
+      invalid_sc = copy.deepcopy(sc)
+      invalid_sc.ema_update_count = 2
+      dynamic_config = aqt_config.AqtScheduleConfig(invalid_sc, [tensor_config])
+      _ = aqt_tensor.DynamicTensorQuantizer([4, 8], dynamic_config, name='dtq1')
+
+    with self.assertRaisesRegex(
+        aqt_config.ConfigError, 'dynamic quantization does not memorize'
+    ):
+      dynamic_config = aqt_config.AqtScheduleConfig(sc, [tensor_config])
+      dynamic_config.use_quantized_variable = True
+      _ = aqt_tensor.DynamicTensorQuantizer([4, 8], dynamic_config, name='dtq1')
+
+    with self.assertRaisesRegex(
+        aqt_config.ConfigError, 'Dynamic quantization should not freeze'
+    ):
+      invalid_tensor_config = copy.deepcopy(tensor_config)
+      invalid_tensor_config.begin_at_event = 10
+      invalid_tensor_config.freeze_scale_at_begin = True
+      dynamic_config = aqt_config.AqtScheduleConfig(sc, [invalid_tensor_config])
+      _ = aqt_tensor.DynamicTensorQuantizer([4, 8], dynamic_config, name='dtq1')
 
   @parameterized.product(
       get_weight=[
