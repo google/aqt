@@ -33,7 +33,7 @@ class CNN(nn.Module):
   bn_use_stats: bool
   aqt_cfg: aqt_config.DotGeneral
   demo_einsum: bool = False
-  quant_mode: aqt_flax.QuantMode = aqt_flax.QuantMode.DYNAMIC
+  quant_mode: aqt_flax.QuantMode = aqt_flax.QuantMode.TRAIN
 
   @nn.compact
   def __call__(self, x):
@@ -219,7 +219,7 @@ def serving_conversion(train_state):
   cnn_freeze = CNN(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
-      quant_mode=aqt_flax.QuantMode.FREEZE,
+      quant_mode=aqt_flax.QuantMode.CONVERT,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -230,7 +230,7 @@ def serving_conversion(train_state):
   cnn_serve = CNN(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
-      quant_mode=aqt_flax.QuantMode.SERVE_FROZEN,
+      quant_mode=aqt_flax.QuantMode.SERVE,
   )
 
   return cnn_serve.apply, model_serving

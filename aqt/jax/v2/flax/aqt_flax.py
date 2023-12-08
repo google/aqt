@@ -26,9 +26,9 @@ import jax.numpy as jnp
 
 
 class QuantMode(enum.Enum):
-  DYNAMIC = 1
-  FREEZE = 2
-  SERVE_FROZEN = 3
+  TRAIN = 1
+  CONVERT = 2
+  SERVE = 3
 
 
 class Freezer(nn.Module, config.Preprocess):
@@ -46,28 +46,28 @@ class Freezer(nn.Module, config.Preprocess):
 
   # If you set it to True, instead of returning the current input
   # will return last input it got.
-  quant_mode: QuantMode = QuantMode.DYNAMIC
+  quant_mode: QuantMode = QuantMode.TRAIN
 
   @nn.compact
   def __call__(self, inputs):
     collection = self.var_collection
     if inputs is None:  # getter mode
-      if self.quant_mode == QuantMode.DYNAMIC:
+      if self.quant_mode == QuantMode.TRAIN:
         return inputs
-      elif self.quant_mode == QuantMode.FREEZE:
+      elif self.quant_mode == QuantMode.CONVERT:
         return inputs
-      elif self.quant_mode == QuantMode.SERVE_FROZEN:
+      elif self.quant_mode == QuantMode.SERVE:
         frozen = self.variable(collection, 'frozen', jnp.zeros, None)
         return frozen.value
       else:
         assert False, 'Unknown quant mode.'
     else:  # setter mode
-      if self.quant_mode == QuantMode.DYNAMIC:
+      if self.quant_mode == QuantMode.TRAIN:
         pass
-      elif self.quant_mode == QuantMode.FREEZE:
+      elif self.quant_mode == QuantMode.CONVERT:
         frozen = self.variable(collection, 'frozen', jnp.zeros, inputs.shape)
         frozen.value = inputs
-      elif self.quant_mode == QuantMode.SERVE_FROZEN:
+      elif self.quant_mode == QuantMode.SERVE:
         # TODO(lew): Optionally compare stored and served value.
         pass
       else:
@@ -80,8 +80,8 @@ class AqtQuantized(nn.Module):
 
   cfg: Optional[config.DotGeneral] = None
   prng_name: Optional[str] = 'params'
-  lhs_quant_mode: QuantMode = QuantMode.DYNAMIC
-  rhs_quant_mode: QuantMode = QuantMode.DYNAMIC
+  lhs_quant_mode: QuantMode = QuantMode.TRAIN
+  rhs_quant_mode: QuantMode = QuantMode.TRAIN
   quant_collection: str = 'aqt'
 
   def make_aqt_dg(self):
