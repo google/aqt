@@ -80,10 +80,10 @@ class Tensor:
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
   # Operation applied to the quantized inputs to the dot general
-  preprocess_quant_cls: Optional[Callable[[], Preprocess]]
+  preprocess_quant: Optional[Preprocess]
   # lax.dot_general output is multiplied by (int transposed) scales.
   # preprocess_scale will be applied to these scales before the multiplication.
-  preprocess_scale_cls: Optional[Callable[[], Preprocess]]
+  preprocess_scale: Optional[Preprocess]
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
@@ -215,8 +215,8 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       use_fake_quant=False,
       # dtype_x=dtype,
       use_fwd_quant=None,
-      preprocess_quant_cls=None,
-      preprocess_scale_cls=None,
+      preprocess_quant=None,
+      preprocess_scale=None,
   )
 
 

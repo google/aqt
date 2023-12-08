@@ -404,7 +404,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     def aqt_dg_raw(use_fake_quant):
       cfg = modify_cfg(use_fake_quant=use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, dims, test_context)[0]
+      return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims, test_context)[
+          0
+      ]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -415,12 +417,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def lax_dg_248(lhs, rhs):
       def dg_mul(delta):
+
         def dg(
             lhs,
             rhs,
+            lhs_qt,
+            rhs_qt,
             dimension_numbers,
             context,
         ):
+          del lhs_qt, rhs_qt
           if isinstance(rhs, aqt.MultiTensor):
             rhs = rhs.x
 
@@ -448,9 +454,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       m1 = dg_mul(2.0)
       m2 = dg_mul(4.0)
       m3 = dg_mul(8.0)
-      return aqt._dot_general_raw_attach_gradient(m1, m2, m3)(
-          lhs, rhs, dims, context=aqt.Context(key=None, train_step=None)
+      out, (out_lhs_qt, out_rhs_qt) = aqt._dot_general_raw_attach_gradient(
+          m1, m2, m3
+      )(
+          lhs,
+          rhs,
+          None,
+          None,
+          dims,
+          context=aqt.Context(key=None, train_step=None),
       )
+      # TODO(lew): Test values instead of del.
+      del out_lhs_qt, out_rhs_qt
+      return out
 
     test_jaxpr_dtype(
         lambda: aqt_dg_full(False)(lhs, rhs),
@@ -564,6 +580,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       ret, _ = aqt._make_dot_general_raw(cfg)(
           lhs,
           rhs,
+          None,
+          None,
           (((1,), (0,)), ((), ())),
           aqt.Context(key=None, train_step=None),
       )

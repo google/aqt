@@ -13,7 +13,6 @@
 # limitations under the License.
 """Mnist example."""
 
-import copy
 import functools
 from typing import Any
 from absl import app
@@ -33,10 +32,17 @@ class CNN(nn.Module):
   """A simple CNN model."""
   bn_use_stats: bool
   aqt_cfg: aqt_config.DotGeneral
+  demo_einsum: bool = False
+  quant_mode: aqt_flax.QuantMode = aqt_flax.QuantMode.DYNAMIC
 
   @nn.compact
   def __call__(self, x):
-    aqt_dg = functools.partial(aqt_flax.AqtDotGeneral, self.aqt_cfg)
+    aqt_dg = functools.partial(
+        aqt_flax.AqtDotGeneral,
+        self.aqt_cfg,
+        # In nn.Dense, it is RHS that has the kernel.
+        rhs_quant_mode=self.quant_mode,
+    )
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
@@ -50,6 +56,13 @@ class CNN(nn.Module):
     x = nn.Dense(features=256, dot_general_cls=aqt_dg)(x)
     x = nn.relu(x)
     x = nn.Dense(features=10, dot_general_cls=aqt_dg)(x)
+
+    # Simple demonstration of how to quantize einsum.
+    if self.demo_einsum:
+      # TODO(lew): make these trainable.
+      identity = jnp.identity(10, dtype=x.dtype)
+      einsum = aqt_flax.AqtEinsum(self.aqt_cfg, rhs_quant_mode=self.quant_mode)
+      x = einsum('ab,bc->ac', x, identity)
     return x
 
 
@@ -199,44 +212,61 @@ def train_and_evaluate(
   return state
 
 
-def serving_conversion(train_state, input_shape):
+def serving_conversion(train_state):
   """Model conversion (quantized weights freezing)."""
-  freeze_collection = 'aqt'
-  cnn_freeze = copy.deepcopy(train_state.cnn_eval)
-  aqt_flax.set_rhs_quant_mode(
-      cnn_freeze.aqt_cfg, aqt_flax.QuantMode.FREEZE, freeze_collection
+  aqt_cfg = train_state.cnn_eval.aqt_cfg
+  input_shape = (1, 28, 28, 1)
+  cnn_freeze = CNN(
+      bn_use_stats=False,
+      aqt_cfg=aqt_cfg,
+      quant_mode=aqt_flax.QuantMode.FREEZE,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
-      jnp.zeros(input_shape),
+      jnp.ones(input_shape),
       rngs={'params': jax.random.PRNGKey(0)},
       mutable=True,
   )
-  cnn_serve = copy.deepcopy(train_state.cnn_eval)
-  aqt_flax.set_rhs_quant_mode(
-      cnn_serve.aqt_cfg, aqt_flax.QuantMode.SERVE_FROZEN
+  cnn_serve = CNN(
+      bn_use_stats=False,
+      aqt_cfg=aqt_cfg,
+      quant_mode=aqt_flax.QuantMode.SERVE_FROZEN,
   )
+
   return cnn_serve.apply, model_serving
 
 
+@jax.jit
 def serve(state):
   """Take train state, freeze integer weights, and serve."""
   # get sample serving data
   _, test_ds = get_datasets()
   sample_image, sample_label = test_ds['image'][:64], test_ds['label'][:64]
   # serving
-  serve_fn, model_serving = serving_conversion(state, sample_image.shape)
+  serve_fn, model_serving = serving_conversion(state)
   logits = serve_fn(
       model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
   )
-  # The following XLA graph is only needed for debugging purpose
-  hlo = jax.xla_computation(serve_fn)(
-      model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
-  ).as_hlo_module()
   # compute serving loss
   one_hot = jax.nn.one_hot(sample_label, 10)
   loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
-  return loss, hlo
+  return loss
+
+
+def serve_fn_hlo(state):
+  """Example on how to inspect HLO to verify if everything was quantized."""
+  # get sample serving data
+  _, test_ds = get_datasets()
+  sample_image = test_ds['image'][:64]
+  # serving
+  serve_fn, model_serving = serving_conversion(state)
+  # The following XLA graph is only needed for debugging purpose
+  hlo = jax.xla_computation(serve_fn)(
+      model_serving,
+      sample_image,
+      rngs={'params': jax.random.PRNGKey(0)},
+  ).as_hlo_module()
+  return hlo
 
 
 def main(argv):
@@ -245,7 +275,7 @@ def main(argv):
   state = train_and_evaluate(
       num_epochs=2, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
   )
-  loss, _ = serve(state)
+  loss = serve(state)
   print('serve loss on sample ds: {}'.format(loss))
 
 

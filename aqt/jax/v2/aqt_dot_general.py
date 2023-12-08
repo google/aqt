@@ -23,7 +23,6 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
-import copy
 import functools
 from typing import Callable, Optional, Union
 from aqt.jax.v2 import config
@@ -196,23 +195,25 @@ def _maybe_inv(x):
   return 1.0 / x
 
 
-def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
+def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
   msg = 'Custom calib_shared_axes not implemented for local AQT.'
-  assert gcfg.lhs.calib_shared_axes is None, msg
-  assert gcfg.rhs.calib_shared_axes is None, msg
+  assert cfg.lhs.calib_shared_axes is None, msg
+  assert cfg.rhs.calib_shared_axes is None, msg
 
   def dot_general_raw(
       lhs: jnp.ndarray,
       rhs: Union[jnp.ndarray, MultiTensor],
+      # xhs_qt are used in serving.
+      lhs_qt: Optional[QTensor],
+      rhs_qt: Optional[QTensor],
       dimension_numbers,
       context,
   ):
     """Creates a dot_general function without custom gradient."""
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
     # We need to copy because we modify cfg to populate some defaults.
-    cfg = copy.deepcopy(gcfg)
 
     # TODO(lew):
     #  - Use qx.value with the int type.
@@ -266,31 +267,45 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
     context_lhs, context_rhs = _context_split(context)
     del context
 
-    lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
-        lhs, cfg=cfg.lhs, ca=lhs_ca, context=context_lhs
-    )
-    lhs_inv_scale_t = _lhs_scale_transpose(
-        lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
-    )
-    lhs_qx = (
-        None
-        if lhs_inv_scale_t is None
-        else QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
-    )
+    # TODO(lew): Have a function to handle lhs and rhs uniformly.
+    if lhs_qt is not None:
+      lhs_q, lhs_inv_scale_t = (lhs_qt.qvalue, lhs_qt.qvalue_scale_t)
+      lhs_quant_grad = 'Poison. Not needed in serving'
+      lhs_inv_scale = 'Poison. Fake quant not used in serving.'
+      lhs_qx = lhs_qt
+    else:
+      lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
+          lhs, cfg=cfg.lhs, ca=lhs_ca, context=context_lhs
+      )
+      lhs_inv_scale_t = _lhs_scale_transpose(
+          lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+      )
+      lhs_qx = (
+          None
+          if lhs_inv_scale_t is None
+          else QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
+      )
+
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qx)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
-    rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
-        rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
-    )
-    rhs_inv_scale_t = _rhs_scale_transpose(
-        rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
-    )
-    rhs_qx = (
-        None
-        if rhs_inv_scale_t is None
-        else QTensor(qvalue=rhs_q, qvalue_scale_t=rhs_inv_scale_t)
-    )
+    if rhs_qt is not None:
+      rhs_q, rhs_inv_scale_t = (rhs_qt.qvalue, rhs_qt.qvalue_scale_t)
+      rhs_quant_grad = 'Poison. Not needed in serving'
+      rhs_inv_scale = 'Poison. Fake quant not used in serving.'
+      rhs_qx = rhs_qt
+    else:
+      rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
+          rhs, cfg=cfg.rhs, ca=rhs_ca, context=context_rhs
+      )
+      rhs_inv_scale_t = _rhs_scale_transpose(
+          rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+      )
+      rhs_qx = (
+          None
+          if rhs_inv_scale_t is None
+          else QTensor(qvalue=rhs_q, qvalue_scale_t=rhs_inv_scale_t)
+      )
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qx)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
@@ -318,19 +333,6 @@ def _make_dot_general_raw(gcfg: config.DotGeneralRaw):
         lhs_q = lhs_q.astype(lhs_cast_dtype)
       if rhs_cast_dtype is not None:
         rhs_q = rhs_q.astype(rhs_cast_dtype)
-
-    if cfg.lhs.preprocess_quant_cls is not None:
-      preprocess_quant_lhs = cfg.lhs.preprocess_quant_cls()
-      lhs_q = preprocess_quant_lhs(lhs_q)
-    if cfg.lhs.preprocess_scale_cls is not None:
-      preprocess_scale_lhs = cfg.lhs.preprocess_scale_cls()
-      lhs_inv_scale_t = preprocess_scale_lhs(lhs_inv_scale_t)
-    if cfg.rhs.preprocess_quant_cls is not None:
-      preprocess_quant_rhs = cfg.rhs.preprocess_quant_cls()
-      rhs_q = preprocess_quant_rhs(rhs_q)
-    if cfg.rhs.preprocess_scale_cls is not None:
-      preprocess_scale_rhs = cfg.rhs.preprocess_scale_cls()
-      rhs_inv_scale_t = preprocess_scale_rhs(rhs_inv_scale_t)
 
     dtype_ms = (
         f'Found {cfg.dg_accumulator_dtype=}, {lhs_cast_dtype=} and'
@@ -376,9 +378,12 @@ def _dot_general_raw_attach_gradient(
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
   def make_fwd(return_residual):
+
     def fwd(
         lhs,
         rhs,
+        lhs_qt,
+        rhs_qt,
         dimension_numbers,
         context,
     ):
@@ -386,11 +391,18 @@ def _dot_general_raw_attach_gradient(
       ret, res = fwd_dot_general_raw(
           lhs,
           rhs,
+          lhs_qt,
+          rhs_qt,
           dimension_numbers,
           context,
       )
       ret = ret.astype(lhs.dtype)
-      return (ret, res) if return_residual else ret
+      # We return these values to allow for materialization.
+      qret = (res.lhs.mt.qx, res.rhs.mt.qx)
+      if return_residual:
+        return ((ret, qret), res)
+      else:
+        return (ret, qret)
 
     return fwd
 
@@ -399,6 +411,8 @@ def _dot_general_raw_attach_gradient(
       res: DotGeneralRes,
       g,
   ):
+    # g[1] is gradient with respect to qret which we are ignoring.
+    g = g[0]
     def ranges_like(*xs):
       start = 0
       for x in xs:
@@ -427,7 +441,7 @@ def _dot_general_raw_attach_gradient(
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
-      out, _ = dot_general(g, y_res.mt, dims, context)
+      out, _ = dot_general(g, y_res.mt, None, None, dims, context)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
@@ -451,10 +465,14 @@ def _dot_general_raw_attach_gradient(
         True,
         context2,
     )
-    return (dlhs, drhs, None)
+    # Alternative to returning None here is to mark them as nondiff_argnums
+    # and handle it as fwd_dimension_numbers.
+    # TODO(lew): fwd_dimension_numbers in DotGeneralRes could be cleaner.
+    return (dlhs, drhs, None, None, None)
 
-  vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(2,))
+  vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(4,))
   vjp.defvjp(make_fwd(True), vjp_bwd)
+
   return vjp
 
 
@@ -500,12 +518,63 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         'The only reason we need that, is because we need to determine return'
         ' type.'
     )
-    out = dg(
+    # TODO(lew): Refactor Have a flax class with get and set.
+    # TODO(lew): Have the freezer freeze both scale and value.
+    # TODO(lew): Have a function to handle lhs and rhs uniformly.
+    lhs_qt = None
+    if (
+        cfg.fwd.lhs.preprocess_quant is not None
+        and cfg.fwd.lhs.preprocess_scale is not None
+    ):
+      # lhs_q is quantized dtype.
+      # we are breaking the invariant that QTensor has a float qvalue
+      # But it will just be cast again to the same type.
+      lhs_q = cfg.fwd.lhs.preprocess_quant(None)
+      lhs_inv_scale_t = cfg.fwd.lhs.preprocess_scale(None)
+      if lhs_q is not None and lhs_inv_scale_t is not None:
+        lhs_qt = QTensor(lhs_q, lhs_inv_scale_t)
+      else:
+        lhs_qt = None
+    rhs_qt = None
+    if (
+        cfg.fwd.rhs.preprocess_quant is not None
+        and cfg.fwd.rhs.preprocess_scale is not None
+    ):
+      rhs_q = cfg.fwd.rhs.preprocess_quant(None)
+      rhs_inv_scale_t = cfg.fwd.rhs.preprocess_scale(None)
+      if rhs_q is not None and rhs_inv_scale_t is not None:
+        rhs_qt = QTensor(rhs_q, rhs_inv_scale_t)
+      else:
+        rhs_qt = None
+
+    out, (out_lhs_qt, out_rhs_qt) = dg(
         lhs=lhs,
         rhs=rhs,
+        lhs_qt=lhs_qt,
+        rhs_qt=rhs_qt,
         dimension_numbers=dimension_numbers,
         context=context,
     )
+
+    if (
+        cfg.fwd.lhs.preprocess_quant is not None
+        and cfg.fwd.lhs.preprocess_scale is not None
+    ):
+      dtype = cfg.fwd.lhs.numerics.get_dtype()
+      none = cfg.fwd.lhs.preprocess_quant(out_lhs_qt.qvalue.astype(dtype))
+      assert none is None
+      none = cfg.fwd.lhs.preprocess_scale(out_lhs_qt.qvalue_scale_t)
+      assert none is None
+    if (
+        cfg.fwd.rhs.preprocess_quant is not None
+        and cfg.fwd.rhs.preprocess_scale is not None
+    ):
+      dtype = cfg.fwd.rhs.numerics.get_dtype()
+      none = cfg.fwd.rhs.preprocess_quant(out_rhs_qt.qvalue.astype(dtype))
+      assert none is None
+      none = cfg.fwd.rhs.preprocess_scale(out_rhs_qt.qvalue_scale_t)
+      assert none is None
+
     return out
 
   return ret_dg
@@ -514,7 +583,6 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
 def make_conv_general_dilated(cfg: config.DotGeneralRaw):
   """Makes quantized lax.make_conv_general_dilated replacement."""
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific cfg.
-  cfg = copy.deepcopy(cfg)
   if cfg is None:
     cfg = config.DotGeneralRaw.make()
 

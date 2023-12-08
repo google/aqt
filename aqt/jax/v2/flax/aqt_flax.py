@@ -13,6 +13,7 @@
 # limitations under the License.
 """Flax layer for AQT injection."""
 
+import copy
 import enum
 import functools
 from typing import Optional
@@ -22,6 +23,12 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import int_numerics
 import flax.linen as nn
 import jax.numpy as jnp
+
+
+class QuantMode(enum.Enum):
+  DYNAMIC = 1
+  FREEZE = 2
+  SERVE_FROZEN = 3
 
 
 class Freezer(nn.Module, config.Preprocess):
@@ -39,23 +46,73 @@ class Freezer(nn.Module, config.Preprocess):
 
   # If you set it to True, instead of returning the current input
   # will return last input it got.
-  use_frozen: bool = False
+  quant_mode: QuantMode = QuantMode.DYNAMIC
 
   @nn.compact
   def __call__(self, inputs):
-    # return inputs or the frozen value
     collection = self.var_collection
-    frozen = self.variable(collection, 'frozen', jnp.zeros, inputs.shape)
-    if not self.use_frozen:
-      frozen.value = inputs
-    return frozen.value
+    if inputs is None:  # getter mode
+      if self.quant_mode == QuantMode.DYNAMIC:
+        return inputs
+      elif self.quant_mode == QuantMode.FREEZE:
+        return inputs
+      elif self.quant_mode == QuantMode.SERVE_FROZEN:
+        frozen = self.variable(collection, 'frozen', jnp.zeros, None)
+        return frozen.value
+      else:
+        assert False, 'Unknown quant mode.'
+    else:  # setter mode
+      if self.quant_mode == QuantMode.DYNAMIC:
+        pass
+      elif self.quant_mode == QuantMode.FREEZE:
+        frozen = self.variable(collection, 'frozen', jnp.zeros, inputs.shape)
+        frozen.value = inputs
+      elif self.quant_mode == QuantMode.SERVE_FROZEN:
+        # TODO(lew): Optionally compare stored and served value.
+        pass
+      else:
+        assert False, 'Unknown quant mode.'
+      return None
 
 
-class AqtDotGeneral(nn.Module):
-  """A layer that can be injected into flax.nn.Dense, etc."""
+class AqtQuantized(nn.Module):
+  """Base class for model injection."""
 
   cfg: Optional[config.DotGeneral] = None
   prng_name: Optional[str] = 'params'
+  lhs_quant_mode: QuantMode = QuantMode.DYNAMIC
+  rhs_quant_mode: QuantMode = QuantMode.DYNAMIC
+  quant_collection: str = 'aqt'
+
+  def make_aqt_dg(self):
+    cfg = copy.deepcopy(self.cfg)
+    if cfg is not None:
+      col = self.quant_collection
+      rhs_qm = self.rhs_quant_mode
+      lhs_qm = self.lhs_quant_mode
+
+      msg = 'The only function that is setting preprocess can be AqtQuantized.'
+      assert cfg.fwd.rhs.preprocess_quant is None, msg
+      assert cfg.fwd.rhs.preprocess_scale is None, msg
+      assert cfg.fwd.lhs.preprocess_quant is None, msg
+      assert cfg.fwd.lhs.preprocess_scale is None, msg
+
+      def mk_freezer(name: str, col: str, mode: QuantMode):
+        return Freezer(name=name, var_collection=col, quant_mode=mode)
+
+      cfg.fwd.rhs.preprocess_quant = mk_freezer('rhs', col, rhs_qm)
+      cfg.fwd.rhs.preprocess_scale = mk_freezer('rhs_scale', col, rhs_qm)
+      cfg.fwd.lhs.preprocess_quant = mk_freezer('lhs', col, lhs_qm)
+      cfg.fwd.lhs.preprocess_scale = mk_freezer('lhs_scale', col, lhs_qm)
+    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
+    context = aqt_dot_general.Context(key=key, train_step=None)
+    aqt_dg = aqt_dot_general.make_dot_general(cfg)
+    aqt_dg = functools.partial(aqt_dg, context=context)
+    return aqt_dg
+
+
+class AqtDotGeneral(AqtQuantized):
+  """A layer that can be injected into flax.nn.Dense, etc."""
 
   @nn.compact
   def __call__(
@@ -66,10 +123,7 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
-    context = aqt_dot_general.Context(key=key, train_step=None)
-    aqt_dg = aqt_dot_general.make_dot_general(self.cfg)
-    aqt_dg = functools.partial(aqt_dg, context=context)
+    aqt_dg = self.make_aqt_dg()
     return aqt_dg(
         lhs,
         rhs,
@@ -79,52 +133,13 @@ class AqtDotGeneral(nn.Module):
     )
 
 
-class AqtEinsum(nn.Module):
+class AqtEinsum(AqtQuantized):
   """Quantized Einsum class for model injection."""
-
-  cfg: Optional[config.DotGeneral] = None
-  prng_name: Optional[str] = 'params'
 
   @nn.compact
   def __call__(self, eqn, lhs, rhs):
-    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
-    context = aqt_dot_general.Context(key=key, train_step=None)
-    aqt_dg = aqt_dot_general.make_dot_general(self.cfg)
-    aqt_dg = functools.partial(aqt_dg, context=context)
+    aqt_dg = self.make_aqt_dg()
     return jnp.einsum(eqn, lhs, rhs, _dot_general=aqt_dg)
-
-
-class QuantMode(enum.Enum):
-  DYNAMIC = 1
-  FREEZE = 2
-  SERVE_FROZEN = 3
-
-
-def mk_freezer(name: str, freeze_collection: str, mode: QuantMode):
-  assert mode in QuantMode
-  if mode == QuantMode.DYNAMIC:
-    return None
-  use_frozen = mode == QuantMode.SERVE_FROZEN
-  return functools.partial(
-      Freezer,
-      name=name,
-      use_frozen=use_frozen,
-      var_collection=freeze_collection,
-  )
-
-
-def set_rhs_quant_mode(
-    cfg: config.DotGeneral, mode: QuantMode, collection='aqt'
-):
-  cfg.fwd.rhs.preprocess_quant_cls = mk_freezer('rhs', collection, mode)
-  cfg.fwd.rhs.preprocess_scale_cls = mk_freezer('rhs_scale', collection, mode)
-
-
-def set_lhs_quant_mode(
-    cfg: config.DotGeneral, mode: QuantMode, collection='aqt'
-):
-  cfg.fwd.lhs.preprocess_quant_cls = mk_freezer('lhs', collection, mode)
-  cfg.fwd.lhs.preprocess_scale_cls = mk_freezer('lhs_scale', collection, mode)
 
 
 def config_v4(
@@ -140,9 +155,6 @@ def config_v4(
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
     drhs_accumulator_dtype: ... = None,
-    lhs_quant_mode: QuantMode = QuantMode.DYNAMIC,
-    rhs_quant_mode: QuantMode = QuantMode.DYNAMIC,
-    freeze_collection: str = 'aqt',
 ) -> config.DotGeneral:
   """Version 4 of user-visible AQT config."""
 
@@ -171,8 +183,8 @@ def config_v4(
         use_fake_quant=False,
         # dtype_x=dtype,
         use_fwd_quant=None,
-        preprocess_quant_cls=None,
-        preprocess_scale_cls=None,
+        preprocess_quant=None,
+        preprocess_scale=None,
     )
 
   def dg_raw_config(lhs_bits, rhs_bits, local_aqt=None) -> config.DotGeneralRaw:
@@ -225,15 +237,5 @@ def config_v4(
       dlhs_dtype=dlhs_accumulator_dtype,
       drhs_dtype=drhs_accumulator_dtype,
   )
-
-  assert (
-      lhs_quant_mode == QuantMode.DYNAMIC or rhs_quant_mode == QuantMode.DYNAMIC
-  ), (
-      'It seems unlikely that both sides of the matmul should be frozen.'
-      ' E.g. both sides of the matmul be weights. '
-  )
-
-  set_rhs_quant_mode(cfg, rhs_quant_mode, freeze_collection)
-  set_lhs_quant_mode(cfg, lhs_quant_mode, freeze_collection)
 
   return cfg
