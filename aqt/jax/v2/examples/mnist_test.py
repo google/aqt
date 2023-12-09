@@ -92,28 +92,68 @@ class MnistTest(parameterized.TestCase):
 
     apply_serving, model_serving = mnist.serving_conversion(state)
 
+    dtype = jnp.dtype
     expected_aqt_pytree = {
-        "Dense_0": {
-            "AqtDotGeneral_0": {
-                "rhs": {"frozen": jnp.int8},
-                "rhs_scale": {"frozen": jnp.float32},
-            }
+        "aqt": {
+            "AqtEinsum_0": {
+                "rhs": {"frozen": (dtype("int8"), (10, 10))},
+                "rhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+            },
+            "Dense_0": {
+                "AqtDotGeneral_0": {
+                    "rhs": {"frozen": (dtype("int8"), (3136, 256))},
+                    "rhs_scale": {"frozen": (dtype("float32"), (1, 256))},
+                }
+            },
+            "Dense_1": {
+                "AqtDotGeneral_0": {
+                    "rhs": {"frozen": (dtype("int8"), (256, 10))},
+                    "rhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+                }
+            },
         },
-        "Dense_1": {
-            "AqtDotGeneral_0": {
-                "rhs": {"frozen": jnp.int8},
-                "rhs_scale": {"frozen": jnp.float32},
-            }
+        "batch_stats": {
+            "BatchNorm_0": {
+                "mean": (dtype("float32"), (32,)),
+                "var": (dtype("float32"), (32,)),
+            },
+            "BatchNorm_1": {
+                "mean": (dtype("float32"), (64,)),
+                "var": (dtype("float32"), (64,)),
+            },
         },
-        "AqtEinsum_0": {
-            "rhs": {"frozen": jnp.int8},
-            "rhs_scale": {"frozen": jnp.float32},
+        "params": {
+            "BatchNorm_0": {
+                "bias": (dtype("float32"), (32,)),
+                "scale": (dtype("float32"), (32,)),
+            },
+            "BatchNorm_1": {
+                "bias": (dtype("float32"), (64,)),
+                "scale": (dtype("float32"), (64,)),
+            },
+            "Conv_0": {
+                "bias": (dtype("float32"), (32,)),
+                "kernel": (dtype("float32"), (3, 3, 1, 32)),
+            },
+            "Conv_1": {
+                "bias": (dtype("float32"), (64,)),
+                "kernel": (dtype("float32"), (3, 3, 32, 64)),
+            },
+            "Dense_0": {
+                "bias": (dtype("float32"), (256,)),
+                "kernel": (dtype("float32"), (3136, 256)),
+            },
+            "Dense_1": {
+                "bias": (dtype("float32"), (10,)),
+                "kernel": (dtype("float32"), (256, 10)),
+            },
         },
     }
 
-    serving_pytree = jax.tree_util.tree_map(lambda x: x.dtype, model_serving)
-    assert "aqt" in serving_pytree.keys(), serving_pytree
-    assert serving_pytree["aqt"] == expected_aqt_pytree, serving_pytree
+    serving_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), model_serving
+    )
+    assert serving_pytree == expected_aqt_pytree, serving_pytree
 
     def zero_out_params(model, layer: str):
       updated_model = copy.deepcopy(model)
