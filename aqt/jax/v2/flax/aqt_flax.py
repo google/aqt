@@ -16,12 +16,15 @@
 import copy
 import enum
 import functools
+from typing import Iterable
 from typing import Optional
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2 import int_numerics
 import flax.linen as nn
+import jax
+from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 
 
@@ -40,6 +43,8 @@ class Freezer(nn.Module, config.Preprocess):
   scales in the checkpoint for serving.
   """
 
+  shape: Iterable[int]
+
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
   var_collection: str = 'aqt'
@@ -57,7 +62,7 @@ class Freezer(nn.Module, config.Preprocess):
       elif self.quant_mode == QuantMode.CONVERT:
         return inputs
       elif self.quant_mode == QuantMode.SERVE:
-        frozen = self.variable(collection, 'frozen', jnp.zeros, None)
+        frozen = self.variable(collection, 'frozen', jnp.zeros, self.shape)
         return frozen.value
       else:
         assert False, 'Unknown quant mode.'
@@ -84,7 +89,29 @@ class AqtQuantized(nn.Module):
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   quant_collection: str = 'aqt'
 
-  def make_aqt_dg(self):
+  def make_aqt_dg(
+      self,
+      lhs_shape,
+      rhs_shape,
+      dimension_numbers: tuple[Iterable[int], Iterable[int]],
+  ):
+    lhs_scale_shape = list(lhs_shape)
+    rhs_scale_shape = list(rhs_shape)
+    (contr, _) = dimension_numbers
+    for li, ri in zip(*contr):
+      lhs_scale_shape[li] = 1
+      rhs_scale_shape[ri] = 1
+    lhs_scale = aqt_dot_general._lhs_scale_transpose(  # pylint: disable=protected-access
+        jnp.zeros(lhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
+    )
+    assert lhs_scale is not None
+    lhs_scale_shape = lhs_scale.shape
+    rhs_scale = aqt_dot_general._rhs_scale_transpose(  # pylint: disable=protected-access
+        jnp.zeros(rhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
+    )
+    assert rhs_scale is not None
+    rhs_scale_shape = rhs_scale.shape
+
     cfg = copy.deepcopy(self.cfg)
     if cfg is not None:
       col = self.quant_collection
@@ -97,13 +124,24 @@ class AqtQuantized(nn.Module):
       assert cfg.fwd.lhs.preprocess_quant is None, msg
       assert cfg.fwd.lhs.preprocess_scale is None, msg
 
-      def mk_freezer(name: str, col: str, mode: QuantMode):
-        return Freezer(name=name, var_collection=col, quant_mode=mode)
+      def mk_freezer(
+          name: str, col: str, mode: QuantMode, shape: Iterable[int]
+      ):
+        return Freezer(
+            shape=shape,
+            name=name,
+            var_collection=col,
+            quant_mode=mode,
+        )
 
-      cfg.fwd.rhs.preprocess_quant = mk_freezer('rhs', col, rhs_qm)
-      cfg.fwd.rhs.preprocess_scale = mk_freezer('rhs_scale', col, rhs_qm)
-      cfg.fwd.lhs.preprocess_quant = mk_freezer('lhs', col, lhs_qm)
-      cfg.fwd.lhs.preprocess_scale = mk_freezer('lhs_scale', col, lhs_qm)
+      cfg.fwd.rhs.preprocess_quant = mk_freezer('rhs', col, rhs_qm, rhs_shape)
+      cfg.fwd.rhs.preprocess_scale = mk_freezer(
+          'rhs_scale', col, rhs_qm, rhs_scale_shape
+      )
+      cfg.fwd.lhs.preprocess_quant = mk_freezer('lhs', col, lhs_qm, lhs_shape)
+      cfg.fwd.lhs.preprocess_scale = mk_freezer(
+          'lhs_scale', col, lhs_qm, lhs_scale_shape
+      )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
@@ -123,7 +161,7 @@ class AqtDotGeneral(AqtQuantized):
       precision,
       preferred_element_type=None,
   ):
-    aqt_dg = self.make_aqt_dg()
+    aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
     return aqt_dg(
         lhs,
         rhs,
@@ -138,8 +176,31 @@ class AqtEinsum(AqtQuantized):
 
   @nn.compact
   def __call__(self, eqn, lhs, rhs):
-    aqt_dg = self.make_aqt_dg()
-    return jnp.einsum(eqn, lhs, rhs, _dot_general=aqt_dg)
+    make_aqt_dg_args = None
+
+    def einsum(dg):
+      operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
+          eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
+      )
+      contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
+      return jax.named_call(lax_numpy._einsum, name=eqn)(  # pylint: disable=protected-access
+          operands,
+          contractions,
+          precision=None,
+          preferred_element_type=None,
+          _dot_general=dg,
+      )
+
+    def save_dot_general(lhs, rhs, dims, precision, preferred_element_type):
+      del precision, preferred_element_type
+      nonlocal make_aqt_dg_args
+      make_aqt_dg_args = lhs.shape, rhs.shape, dims
+      return jax.lax.dot_general(lhs, rhs, dims)
+
+    _ = einsum(save_dot_general)
+    assert make_aqt_dg_args is not None
+    aqt_dg = self.make_aqt_dg(*make_aqt_dg_args)
+    return einsum(aqt_dg)
 
 
 def config_v4(

@@ -13,7 +13,6 @@
 # limitations under the License.
 
 """Test for mnist."""
-
 import copy
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -27,16 +26,16 @@ import jax.numpy as jnp
 class MnistTest(parameterized.TestCase):
 
   def test_mnist_training(self):
-    # TODO(lew): use einsum in mnist test
+
     target_loss = {
         "cpu": [
-            3.981118679046630859375000000000,  # rome, milan
-            3.981118917465209960937500000000,  # skylake
+            3.981977701187134,
+            3.981868982315063476562500000000,
         ],
-        "TPU v2": [3.991446971893310546875000000000],
-        "TPU v3": [3.991446971893310546875000000000],
-        "TPU v4": [3.992439270019531250000000000000],
-        "TPU v5 lite": [3.991421222686767578125000000000],
+        "TPU v2": [3.998917341232299804687500000000],
+        "TPU v3": [3.998917341232299804687500000000],
+        "TPU v4": [3.9959707260131836],
+        "TPU v5 lite": [3.998862504959106445312500000000],
     }
 
     aqt_cfg = aqt_flax.config_v4(
@@ -79,7 +78,12 @@ class MnistTest(parameterized.TestCase):
         state, ds, batch_size=ds_size // 2, rng=input_rng
     )
 
-    assert train_loss in target_loss[jax.devices()[0].device_kind]
+    device_kind = jax.devices()[0].device_kind
+    expected_train_loss = target_loss[device_kind]
+    if train_loss not in expected_train_loss:
+      msg = "train_loss changed. Consider updating with the following:\n"
+      msg += f'        "{device_kind}": [{train_loss:.30f}]'
+      assert False, msg
 
     # Run forward once more in the same mode to get logits for testing below.
     logits_s1, _ = forward(state.model, state.cnn_eval.apply)
@@ -100,6 +104,10 @@ class MnistTest(parameterized.TestCase):
                 "rhs": {"frozen": jnp.int8},
                 "rhs_scale": {"frozen": jnp.float32},
             }
+        },
+        "AqtEinsum_0": {
+            "rhs": {"frozen": jnp.int8},
+            "rhs_scale": {"frozen": jnp.float32},
         },
     }
 

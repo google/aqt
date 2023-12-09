@@ -32,7 +32,6 @@ class CNN(nn.Module):
   """A simple CNN model."""
   bn_use_stats: bool
   aqt_cfg: aqt_config.DotGeneral
-  demo_einsum: bool = False
   quant_mode: aqt_flax.QuantMode = aqt_flax.QuantMode.TRAIN
 
   @nn.compact
@@ -58,11 +57,9 @@ class CNN(nn.Module):
     x = nn.Dense(features=10, dot_general_cls=aqt_dg)(x)
 
     # Simple demonstration of how to quantize einsum.
-    if self.demo_einsum:
-      # TODO(lew): make these trainable.
-      identity = jnp.identity(10, dtype=x.dtype)
-      einsum = aqt_flax.AqtEinsum(self.aqt_cfg, rhs_quant_mode=self.quant_mode)
-      x = einsum('ab,bc->ac', x, identity)
+    identity = jnp.identity(10, dtype=x.dtype)
+    einsum = aqt_flax.AqtEinsum(self.aqt_cfg, rhs_quant_mode=self.quant_mode)
+    x = einsum('ab,bc->ac', x, identity)
     return x
 
 
