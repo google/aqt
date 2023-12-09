@@ -43,26 +43,21 @@ class Freezer(nn.Module, config.Preprocess):
   scales in the checkpoint for serving.
   """
 
+  quant_collection: str
+  quant_mode: QuantMode
   shape: Iterable[int]
-
-  # If you want use 'params' make sure that there is another mechanism to hide
-  # these variables from the optimizer.
-  var_collection: str = 'aqt'
-
-  # If you set it to True, instead of returning the current input
-  # will return last input it got.
-  quant_mode: QuantMode = QuantMode.TRAIN
+  init: nn.initializers.Initializer
 
   @nn.compact
   def __call__(self, inputs):
-    collection = self.var_collection
+    collection = self.quant_collection
     if inputs is None:  # getter mode
       if self.quant_mode == QuantMode.TRAIN:
         return inputs
       elif self.quant_mode == QuantMode.CONVERT:
         return inputs
       elif self.quant_mode == QuantMode.SERVE:
-        frozen = self.variable(collection, 'frozen', jnp.zeros, self.shape)
+        frozen = self.variable(collection, 'frozen', self.init, self.shape)
         return frozen.value
       else:
         assert False, 'Unknown quant mode.'
@@ -70,7 +65,7 @@ class Freezer(nn.Module, config.Preprocess):
       if self.quant_mode == QuantMode.TRAIN:
         pass
       elif self.quant_mode == QuantMode.CONVERT:
-        frozen = self.variable(collection, 'frozen', jnp.zeros, inputs.shape)
+        frozen = self.variable(collection, 'frozen', self.init, inputs.shape)
         frozen.value = inputs
       elif self.quant_mode == QuantMode.SERVE:
         # TODO(lew): Optionally compare stored and served value.
@@ -85,8 +80,18 @@ class AqtQuantized(nn.Module):
 
   cfg: Optional[config.DotGeneral] = None
   prng_name: Optional[str] = 'params'
+
+  # TODO(lew): split out separate class for each side.
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
+  lhs_init: nn.initializers.Initializer = jnp.zeros
+  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
+  rhs_init: nn.initializers.Initializer = jnp.zeros
+  rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
+  # If you want use 'params' make sure that there is another mechanism to hide
+  # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
   def make_aqt_dg(
@@ -114,7 +119,6 @@ class AqtQuantized(nn.Module):
 
     cfg = copy.deepcopy(self.cfg)
     if cfg is not None:
-      col = self.quant_collection
       rhs_qm = self.rhs_quant_mode
       lhs_qm = self.lhs_quant_mode
 
@@ -124,23 +128,26 @@ class AqtQuantized(nn.Module):
       assert cfg.fwd.lhs.preprocess_quant is None, msg
       assert cfg.fwd.lhs.preprocess_scale is None, msg
 
-      def mk_freezer(
-          name: str, col: str, mode: QuantMode, shape: Iterable[int]
-      ):
+      def mk_freezer(name, quant_mode, shape, init):
         return Freezer(
-            shape=shape,
             name=name,
-            var_collection=col,
-            quant_mode=mode,
+            quant_mode=quant_mode,
+            shape=shape,
+            init=init,
+            quant_collection=self.quant_collection,
         )
 
-      cfg.fwd.rhs.preprocess_quant = mk_freezer('rhs', col, rhs_qm, rhs_shape)
-      cfg.fwd.rhs.preprocess_scale = mk_freezer(
-          'rhs_scale', col, rhs_qm, rhs_scale_shape
+      cfg.fwd.lhs.preprocess_quant = mk_freezer(
+          'lhs', lhs_qm, lhs_shape, self.lhs_init
       )
-      cfg.fwd.lhs.preprocess_quant = mk_freezer('lhs', col, lhs_qm, lhs_shape)
       cfg.fwd.lhs.preprocess_scale = mk_freezer(
-          'lhs_scale', col, lhs_qm, lhs_scale_shape
+          'lhs_scale', lhs_qm, lhs_scale_shape, self.lhs_scale_init
+      )
+      cfg.fwd.rhs.preprocess_quant = mk_freezer(
+          'rhs', rhs_qm, rhs_shape, self.rhs_init
+      )
+      cfg.fwd.rhs.preprocess_scale = mk_freezer(
+          'rhs_scale', rhs_qm, rhs_scale_shape, self.rhs_scale_init
       )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
