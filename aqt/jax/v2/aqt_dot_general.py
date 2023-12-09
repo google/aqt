@@ -465,9 +465,9 @@ def _dot_general_raw_attach_gradient(
         True,
         context2,
     )
-    # Alternative to returning None here is to mark them as nondiff_argnums
-    # and handle it as fwd_dimension_numbers.
-    # TODO(lew): fwd_dimension_numbers in DotGeneralRes could be cleaner.
+    # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
+    # None as grad to it. This is because it is a tuple of Python integers
+    # that cannot be traced by Jax.
     return (dlhs, drhs, None, None, None)
 
   vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(4,))
