@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for int8, int4, binary and other integer types."""
 
-from typing import Optional, Any
+from typing import Any, Optional
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.numerics import numerics
 import flax.struct

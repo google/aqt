@@ -77,7 +77,7 @@ For instance one can implement custom calibrations instead of
 to this API.)
 
 One can implement custom weight/activation representation as well. This is
-[general int numerics](https://source.corp.google.com/piper///depot/google3/third_party/py/aqt/jax/v2/int_numerics.py).
+[general int numerics](https://source.corp.google.com/piper///depot/google3/third_party/py/aqt/jax/v2/numerics/int_numerics.py).
 *float8* will be submitted soon.
 
 There are many algorithms that do not fit into these two simple abstractions,

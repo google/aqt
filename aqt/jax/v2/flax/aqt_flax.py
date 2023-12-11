@@ -21,7 +21,7 @@ from typing import Optional
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
-from aqt.jax.v2 import int_numerics
+from aqt.jax.v2.numerics import int_numerics
 import flax.linen as nn
 import jax
 from jax._src.numpy import lax_numpy

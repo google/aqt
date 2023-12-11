@@ -17,8 +17,8 @@ import abc
 import dataclasses
 from typing import Any, Callable, Optional
 from aqt.jax.v2 import calibration
-from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import numerics
 import flax.struct
 import jax

@@ -17,9 +17,9 @@ import copy
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
-from aqt.jax.v2 import int_numerics
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
+from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import numerics
 import flax.linen.linear as fl
 import flax.struct
@@ -417,7 +417,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def lax_dg_248(lhs, rhs):
       def dg_mul(delta):
-
         def dg(
             lhs,
             rhs,
