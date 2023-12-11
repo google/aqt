@@ -22,6 +22,7 @@ from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import int_numerics
+from aqt.jax.v2.numerics import no_numerics
 import flax.linen as nn
 import jax
 from jax._src.numpy import lax_numpy
@@ -229,7 +230,7 @@ def config_v4(
   def tensor_config(bits: Optional[int]) -> config.Tensor:
     assert bits is None or bits >= 2, 'Need at least 2 bits.'
     if bits is None:
-      numerics = config.NoNumerics()
+      numerics = no_numerics.NoNumerics()
     else:
       numerics = int_numerics.IntNumerics(
           bits=bits,

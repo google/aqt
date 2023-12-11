@@ -19,8 +19,8 @@ from typing import Any, Callable, Optional
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.numerics import int_numerics
+from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
-import flax.struct
 import jax
 import jax.numpy as jnp
 
@@ -34,32 +34,6 @@ class Preprocess(abc.ABC):
 
   @abc.abstractmethod
   def __call__(self, inputs):
-    pass
-
-
-class NoNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
-  """No quantization, use a native type such as bf16."""
-
-  # TODO(lew): This is a workaround. We should separate Stochastic Rounding.
-  # noise_fn has no effect in NoNumerics.
-  noise_fn: Optional[stochastic_rounding.NoiseFn] = None
-  dtype: Optional[DType] = None
-
-  # TODO(lew): This is a hack. We treat check isinstance(NoNumerics) and treat
-  # it in a special way right now. These functions are never called
-  def get_dtype(self):
-    return None
-
-  def fwd(self, x, context):
-    pass
-
-  def abs_val_mapped_to(self):
-    pass
-
-  def vjp_fwd(self, x, context):
-    pass
-
-  def vjp_bwd(self, res, grad):
     pass
 
 
@@ -191,7 +165,7 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
 def tensor_make(bits: Optional[int]) -> 'Tensor':
   """Makes config.Tensor."""
   if bits is None:
-    effective_numerics = NoNumerics()
+    effective_numerics = no_numerics.NoNumerics()
   else:
     pz = False if bits == 1 else True
     dtype = jnp.int8 if 2 <= bits <= 8 and pz else None

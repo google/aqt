@@ -26,6 +26,7 @@
 import functools
 from typing import Callable, Optional, Union
 from aqt.jax.v2 import config
+from aqt.jax.v2.numerics import no_numerics
 import flax.struct
 import jax
 from jax import lax
@@ -61,7 +62,7 @@ def _scale_quant(x, *, cfg, ca, context):
   # TODO(lew): After we implement optimization to not double-quantize,
   #   what would happen if we pass fq value (xhs_q2) in residual?
 
-  if isinstance(cfg.numerics, config.NoNumerics):
+  if isinstance(cfg.numerics, no_numerics.NoNumerics):
     return x, None, None
   shared_axes = cfg.calib_shared_axes or ca
   bound = cfg.calibration.get_bound(x, shared_axes)

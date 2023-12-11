@@ -20,6 +20,7 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_dot_general as aqt
 from aqt.jax.v2.numerics import int_numerics
+from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
 import flax.linen.linear as fl
 import flax.struct
@@ -354,8 +355,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         disable_quant(cfg.fwd)
         disable_quant(cfg.dlhs)
         disable_quant(cfg.drhs)
-        lhs_quant = not isinstance(cfg.fwd.lhs.numerics, config.NoNumerics)
-        rhs_quant = not isinstance(cfg.fwd.rhs.numerics, config.NoNumerics)
+        lhs_quant = not isinstance(cfg.fwd.lhs.numerics, no_numerics.NoNumerics)
+        rhs_quant = not isinstance(cfg.fwd.rhs.numerics, no_numerics.NoNumerics)
         if lhs_quant:
           cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
         if rhs_quant:
