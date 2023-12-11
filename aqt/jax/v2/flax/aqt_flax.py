@@ -35,7 +35,7 @@ class QuantMode(enum.Enum):
   SERVE = 3
 
 
-class Freezer(nn.Module, config.Preprocess):
+class Freezer(nn.Module):
   """Identity function that can freeze its input.
 
   On default it is an identity function that saves the input in a variable.

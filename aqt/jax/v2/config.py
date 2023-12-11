@@ -13,7 +13,6 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
-import abc
 import dataclasses
 from typing import Any, Callable, Optional
 from aqt.jax.v2 import calibration
@@ -28,13 +27,6 @@ DType = Any
 Context = Any  # TODO(lew): We could put Context in a separate file.
 
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
-
-
-class Preprocess(abc.ABC):
-
-  @abc.abstractmethod
-  def __call__(self, inputs):
-    pass
 
 
 @dataclasses.dataclass
@@ -54,10 +46,14 @@ class Tensor:
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
   # Operation applied to the quantized inputs to the dot general
-  preprocess_quant: Optional[Preprocess]
+  preprocess_quant: Optional[
+      Callable[[Optional[jnp.ndarray]], Optional[jnp.ndarray]]
+  ]
   # lax.dot_general output is multiplied by (int transposed) scales.
   # preprocess_scale will be applied to these scales before the multiplication.
-  preprocess_scale: Optional[Preprocess]
+  preprocess_scale: Optional[
+      Callable[[Optional[jnp.ndarray]], Optional[jnp.ndarray]]
+  ]
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
