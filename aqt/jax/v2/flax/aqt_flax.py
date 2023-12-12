@@ -76,22 +76,23 @@ class Freezer(nn.Module):
       return None
 
 
+class AqtParams(nn.Module):
+  var_name: str
+  quant_mode: QuantMode = QuantMode.TRAIN
+  init: nn.initializers.Initializer = jnp.zeros
+  scale_init: nn.initializers.Initializer = jnp.zeros
+
+
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
   cfg: Optional[config.DotGeneral] = None
   prng_name: Optional[str] = 'params'
 
-  # TODO(lew): split out separate class for each side.
-  lhs_quant_mode: QuantMode = QuantMode.TRAIN
-  lhs_init: nn.initializers.Initializer = jnp.zeros
-  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  lhs_var_name: str = 'lhs'
-
-  rhs_quant_mode: QuantMode = QuantMode.TRAIN
-  rhs_init: nn.initializers.Initializer = jnp.zeros
-  rhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  rhs_var_name: str = 'rhs'
+  # TODO(lew): If in future there is a setup() method and it changes lhs or rhs
+  #   Would it alias other instance of AqtDotGeneral like in dataclasses.
+  lhs_params: AqtParams = AqtParams('lhs')
+  rhs_params: AqtParams = AqtParams('rhs')
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -122,8 +123,8 @@ class AqtDotGeneral(nn.Module):
 
     cfg = copy.deepcopy(self.cfg)
     if cfg is not None:
-      rhs_qm = self.rhs_quant_mode
-      lhs_qm = self.lhs_quant_mode
+      rhs_qm = self.rhs_params.quant_mode
+      lhs_qm = self.lhs_params.quant_mode
 
       msg = 'The only function that is setting preprocess can be AqtQuantized.'
       assert cfg.fwd.rhs.preprocess_quant is None, msg
@@ -141,22 +142,22 @@ class AqtDotGeneral(nn.Module):
         )
 
       cfg.fwd.lhs.preprocess_quant = mk_freezer(
-          self.lhs_var_name, lhs_qm, lhs_shape, self.lhs_init
+          self.lhs_params.var_name, lhs_qm, lhs_shape, self.lhs_params.init
       )
       cfg.fwd.lhs.preprocess_scale = mk_freezer(
-          self.lhs_var_name + '_scale',
+          self.lhs_params.var_name + '_scale',
           lhs_qm,
           lhs_scale_shape,
-          self.lhs_scale_init,
+          self.lhs_params.scale_init,
       )
       cfg.fwd.rhs.preprocess_quant = mk_freezer(
-          self.rhs_var_name, rhs_qm, rhs_shape, self.rhs_init
+          self.rhs_params.var_name, rhs_qm, rhs_shape, self.rhs_params.init
       )
       cfg.fwd.rhs.preprocess_scale = mk_freezer(
-          self.rhs_var_name + '_scale',
+          self.rhs_params.var_name + '_scale',
           rhs_qm,
           rhs_scale_shape,
-          self.rhs_scale_init,
+          self.rhs_params.scale_init,
       )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
@@ -189,16 +190,8 @@ class AqtEinsum(nn.Module):
   cfg: Optional[config.DotGeneral] = None
   prng_name: Optional[str] = 'params'
 
-  # TODO(lew): split out separate class for each side.
-  lhs_quant_mode: QuantMode = QuantMode.TRAIN
-  lhs_init: nn.initializers.Initializer = jnp.zeros
-  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  lhs_var_name: str = 'lhs'
-
-  rhs_quant_mode: QuantMode = QuantMode.TRAIN
-  rhs_init: nn.initializers.Initializer = jnp.zeros
-  rhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  rhs_var_name: str = 'rhs'
+  lhs: AqtParams = AqtParams('lhs')
+  rhs: AqtParams = AqtParams('rhs')
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -229,39 +222,21 @@ class AqtEinsum(nn.Module):
 
     cfg = copy.deepcopy(self.cfg)
     prng_name = self.prng_name
-
-    lhs_quant_mode = self.lhs_quant_mode
-    lhs_init = self.lhs_init
-    lhs_scale_init = self.lhs_scale_init
-    lhs_var_name = self.lhs_var_name
-
-    rhs_quant_mode = self.rhs_quant_mode
-    rhs_init = self.rhs_init
-    rhs_scale_init = self.rhs_scale_init
-    rhs_var_name = self.rhs_var_name
-
+    lhs = self.lhs
+    rhs = self.rhs
     quant_collection = self.quant_collection
 
     if yes_swap:
       if cfg is not None:
         cfg.fwd.lhs, cfg.fwd.rhs = cfg.fwd.rhs, cfg.fwd.lhs
         cfg.dlhs, cfg.drhs = cfg.drhs, cfg.dlhs
-      lhs_quant_mode, rhs_quant_mode = rhs_quant_mode, lhs_quant_mode
-      lhs_init, rhs_init = rhs_init, lhs_init
-      lhs_scale_init, rhs_scale_init = rhs_scale_init, lhs_scale_init
-      lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
+      lhs, rhs = rhs, lhs
 
     aqt_dg = AqtDotGeneral(
         cfg=cfg,
         prng_name=prng_name,
-        lhs_quant_mode=lhs_quant_mode,
-        lhs_init=lhs_init,
-        lhs_scale_init=lhs_scale_init,
-        lhs_var_name=lhs_var_name,
-        rhs_quant_mode=rhs_quant_mode,
-        rhs_init=rhs_init,
-        rhs_scale_init=rhs_scale_init,
-        rhs_var_name=rhs_var_name,
+        lhs_params=lhs,
+        rhs_params=rhs,
         quant_collection=quant_collection,
     )
     return einsum(lhs_g, rhs_g, aqt_dg)

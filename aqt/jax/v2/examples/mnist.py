@@ -36,12 +36,15 @@ class CNN(nn.Module):
 
   @nn.compact
   def __call__(self, x):
-    aqt_dg = functools.partial(
-        aqt_flax.AqtDotGeneral,
-        self.aqt_cfg,
-        # In nn.Dense, it is RHS that has the kernel.
-        rhs_quant_mode=self.quant_mode,
-    )
+
+    def dg_factory():
+      rhs_params = aqt_flax.AqtParams('rhs', quant_mode=self.quant_mode)
+      aqt_dg = aqt_flax.AqtDotGeneral(
+          self.aqt_cfg,
+          rhs_params=rhs_params,  # In nn.Dense, it is RHS that has the kernel.
+      )
+      return aqt_dg
+
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
@@ -52,13 +55,14 @@ class CNN(nn.Module):
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = x.reshape((x.shape[0], -1))  # flatten
-    x = nn.Dense(features=256, dot_general_cls=aqt_dg)(x)
+    x = nn.Dense(features=256, dot_general_cls=dg_factory)(x)
     x = nn.relu(x)
-    x = nn.Dense(features=10, dot_general_cls=aqt_dg)(x)
+    x = nn.Dense(features=10, dot_general_cls=dg_factory)(x)
 
     # Simple demonstration of how to quantize einsum.
     identity = jnp.identity(10, dtype=x.dtype)
-    einsum = aqt_flax.AqtEinsum(self.aqt_cfg, lhs_quant_mode=self.quant_mode)
+    params = aqt_flax.AqtParams('lhs', quant_mode=self.quant_mode)
+    einsum = aqt_flax.AqtEinsum(self.aqt_cfg, lhs=params)
     # Note for AQT developers:
     #   This equation is harder because jnp.einsum and einsum swap lhs and rhs.
     x = einsum('bc,ab->ac', identity, x)
