@@ -94,8 +94,8 @@ class MnistTest(parameterized.TestCase):
         "aqt": {
             "AqtEinsum_0": {
                 "AqtDotGeneral_0": {
-                    "rhs": {"frozen": (dtype("int8"), (10, 10))},
-                    "rhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+                    "lhs": {"frozen": (dtype("int8"), (10, 10))},
+                    "lhs_scale": {"frozen": (dtype("float32"), (1, 10))},
                 }
             },
             "Dense_0": {

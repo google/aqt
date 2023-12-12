@@ -58,8 +58,10 @@ class CNN(nn.Module):
 
     # Simple demonstration of how to quantize einsum.
     identity = jnp.identity(10, dtype=x.dtype)
-    einsum = aqt_flax.AqtEinsum(self.aqt_cfg, rhs_quant_mode=self.quant_mode)
-    x = einsum('ab,bc->ac', x, identity)
+    einsum = aqt_flax.AqtEinsum(self.aqt_cfg, lhs_quant_mode=self.quant_mode)
+    # Note for AQT developers:
+    #   This equation is harder because jnp.einsum and einsum swap lhs and rhs.
+    x = einsum('bc,ab->ac', identity, x)
     return x
 
 

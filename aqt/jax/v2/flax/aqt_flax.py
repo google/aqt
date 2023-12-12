@@ -86,10 +86,12 @@ class AqtDotGeneral(nn.Module):
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  lhs_var_name: str = 'lhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  rhs_var_name: str = 'rhs'
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -139,16 +141,22 @@ class AqtDotGeneral(nn.Module):
         )
 
       cfg.fwd.lhs.preprocess_quant = mk_freezer(
-          'lhs', lhs_qm, lhs_shape, self.lhs_init
+          self.lhs_var_name, lhs_qm, lhs_shape, self.lhs_init
       )
       cfg.fwd.lhs.preprocess_scale = mk_freezer(
-          'lhs_scale', lhs_qm, lhs_scale_shape, self.lhs_scale_init
+          self.lhs_var_name + '_scale',
+          lhs_qm,
+          lhs_scale_shape,
+          self.lhs_scale_init,
       )
       cfg.fwd.rhs.preprocess_quant = mk_freezer(
-          'rhs', rhs_qm, rhs_shape, self.rhs_init
+          self.rhs_var_name, rhs_qm, rhs_shape, self.rhs_init
       )
       cfg.fwd.rhs.preprocess_scale = mk_freezer(
-          'rhs_scale', rhs_qm, rhs_scale_shape, self.rhs_scale_init
+          self.rhs_var_name + '_scale',
+          rhs_qm,
+          rhs_scale_shape,
+          self.rhs_scale_init,
       )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
@@ -185,20 +193,22 @@ class AqtEinsum(nn.Module):
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  lhs_var_name: str = 'lhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  rhs_var_name: str = 'rhs'
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
   @nn.compact
-  def __call__(self, eqn, lhs, rhs):
-    def einsum(dg):
+  def __call__(self, eqn, lhs_g, rhs_g):
+    def einsum(lhs_l, rhs_l, dg=jax.lax.dot_general):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
-          eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
+          eqn, lhs_l, rhs_l, einsum_call=True, use_blas=True, optimize='optimal'
       )
       contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
       return jax.named_call(lax_numpy._einsum, name=eqn)(  # pylint: disable=protected-access
@@ -209,18 +219,52 @@ class AqtEinsum(nn.Module):
           _dot_general=dg,
       )
 
+    # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
+    a = jax.make_jaxpr(einsum)(lhs_g, rhs_g)
+    [lhs_g_id, rhs_g_id] = a.eqns[0].invars
+    [lhs_l_id, rhs_l_id] = a.jaxpr.invars
+    not_swap = lhs_g_id == lhs_l_id and rhs_g_id == rhs_l_id
+    yes_swap = lhs_g_id == rhs_l_id and rhs_g_id == lhs_l_id
+    assert not_swap != yes_swap
+
+    cfg = copy.deepcopy(self.cfg)
+    prng_name = self.prng_name
+
+    lhs_quant_mode = self.lhs_quant_mode
+    lhs_init = self.lhs_init
+    lhs_scale_init = self.lhs_scale_init
+    lhs_var_name = self.lhs_var_name
+
+    rhs_quant_mode = self.rhs_quant_mode
+    rhs_init = self.rhs_init
+    rhs_scale_init = self.rhs_scale_init
+    rhs_var_name = self.rhs_var_name
+
+    quant_collection = self.quant_collection
+
+    if yes_swap:
+      if cfg is not None:
+        cfg.fwd.lhs, cfg.fwd.rhs = cfg.fwd.rhs, cfg.fwd.lhs
+        cfg.dlhs, cfg.drhs = cfg.drhs, cfg.dlhs
+      lhs_quant_mode, rhs_quant_mode = rhs_quant_mode, lhs_quant_mode
+      lhs_init, rhs_init = rhs_init, lhs_init
+      lhs_scale_init, rhs_scale_init = rhs_scale_init, lhs_scale_init
+      lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
+
     aqt_dg = AqtDotGeneral(
-        cfg=self.cfg,
-        prng_name=self.prng_name,
-        lhs_quant_mode=self.lhs_quant_mode,
-        lhs_init=self.lhs_init,
-        lhs_scale_init=self.lhs_scale_init,
-        rhs_quant_mode=self.rhs_quant_mode,
-        rhs_init=self.rhs_init,
-        rhs_scale_init=self.rhs_scale_init,
-        quant_collection=self.quant_collection,
+        cfg=cfg,
+        prng_name=prng_name,
+        lhs_quant_mode=lhs_quant_mode,
+        lhs_init=lhs_init,
+        lhs_scale_init=lhs_scale_init,
+        lhs_var_name=lhs_var_name,
+        rhs_quant_mode=rhs_quant_mode,
+        rhs_init=rhs_init,
+        rhs_scale_init=rhs_scale_init,
+        rhs_var_name=rhs_var_name,
+        quant_collection=quant_collection,
     )
-    return einsum(aqt_dg)
+    return einsum(lhs_g, rhs_g, aqt_dg)
 
 
 def config_v4(
