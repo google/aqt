@@ -76,8 +76,8 @@ class Freezer(nn.Module):
       return None
 
 
-class AqtQuantized(nn.Module):
-  """Base class for model injection."""
+class AqtDotGeneral(nn.Module):
+  """A layer that can be injected into flax.nn.Dense, etc."""
 
   cfg: Optional[config.DotGeneral] = None
   prng_name: Optional[str] = 'params'
@@ -156,10 +156,6 @@ class AqtQuantized(nn.Module):
     aqt_dg = functools.partial(aqt_dg, context=context)
     return aqt_dg
 
-
-class AqtDotGeneral(AqtQuantized):
-  """A layer that can be injected into flax.nn.Dense, etc."""
-
   @nn.compact
   def __call__(
       self,
@@ -179,13 +175,27 @@ class AqtDotGeneral(AqtQuantized):
     )
 
 
-class AqtEinsum(AqtQuantized):
+class AqtEinsum(nn.Module):
   """Quantized Einsum class for model injection."""
+
+  cfg: Optional[config.DotGeneral] = None
+  prng_name: Optional[str] = 'params'
+
+  # TODO(lew): split out separate class for each side.
+  lhs_quant_mode: QuantMode = QuantMode.TRAIN
+  lhs_init: nn.initializers.Initializer = jnp.zeros
+  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
+  rhs_quant_mode: QuantMode = QuantMode.TRAIN
+  rhs_init: nn.initializers.Initializer = jnp.zeros
+  rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
+  # If you want use 'params' make sure that there is another mechanism to hide
+  # these variables from the optimizer.
+  quant_collection: str = 'aqt'
 
   @nn.compact
   def __call__(self, eqn, lhs, rhs):
-    make_aqt_dg_args = None
-
     def einsum(dg):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
           eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
@@ -199,15 +209,17 @@ class AqtEinsum(AqtQuantized):
           _dot_general=dg,
       )
 
-    def save_dot_general(lhs, rhs, dims, precision, preferred_element_type):
-      del precision, preferred_element_type
-      nonlocal make_aqt_dg_args
-      make_aqt_dg_args = lhs.shape, rhs.shape, dims
-      return jax.lax.dot_general(lhs, rhs, dims)
-
-    _ = einsum(save_dot_general)
-    assert make_aqt_dg_args is not None
-    aqt_dg = self.make_aqt_dg(*make_aqt_dg_args)
+    aqt_dg = AqtDotGeneral(
+        cfg=self.cfg,
+        prng_name=self.prng_name,
+        lhs_quant_mode=self.lhs_quant_mode,
+        lhs_init=self.lhs_init,
+        lhs_scale_init=self.lhs_scale_init,
+        rhs_quant_mode=self.rhs_quant_mode,
+        rhs_init=self.rhs_init,
+        rhs_scale_init=self.rhs_scale_init,
+        quant_collection=self.quant_collection,
+    )
     return einsum(aqt_dg)
 
 

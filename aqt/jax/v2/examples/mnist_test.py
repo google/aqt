@@ -28,14 +28,11 @@ class MnistTest(parameterized.TestCase):
   def test_mnist_training(self):
 
     target_loss = {
-        "cpu": [
-            3.981977701187134,
-            3.981868982315063476562500000000,
-        ],
-        "TPU v2": [3.998917341232299804687500000000],
-        "TPU v3": [3.998917341232299804687500000000],
-        "TPU v4": [3.9959707260131836],
-        "TPU v5 lite": [3.998862504959106445312500000000],
+        "cpu": [3.967379331588745117187500000000],
+        "TPU v2": [3.986936807632446289062500000000],
+        "TPU v3": [3.987155437469482421875000000000],
+        "TPU v4": [3.986746311187744140625000000000],
+        "TPU v5 lite": [3.988214492797851562500000000000],
     }
 
     aqt_cfg = aqt_flax.config_v4(
@@ -83,7 +80,7 @@ class MnistTest(parameterized.TestCase):
     if train_loss not in expected_train_loss:
       msg = "train_loss changed. Consider updating with the following:\n"
       msg += f'        "{device_kind}": [{train_loss:.30f}]'
-      assert False, msg
+      self.fail(msg)
 
     # Run forward once more in the same mode to get logits for testing below.
     logits_s1, _ = forward(state.model, state.cnn_eval.apply)
@@ -96,8 +93,10 @@ class MnistTest(parameterized.TestCase):
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
-                "rhs": {"frozen": (dtype("int8"), (10, 10))},
-                "rhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+                "AqtDotGeneral_0": {
+                    "rhs": {"frozen": (dtype("int8"), (10, 10))},
+                    "rhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+                }
             },
             "Dense_0": {
                 "AqtDotGeneral_0": {
