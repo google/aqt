@@ -45,15 +45,11 @@ class Tensor:
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
-  # Operation applied to the quantized inputs to the dot general
-  preprocess_quant: Optional[
-      Callable[[Optional[jnp.ndarray]], Optional[jnp.ndarray]]
-  ]
-  # lax.dot_general output is multiplied by (int transposed) scales.
-  # preprocess_scale will be applied to these scales before the multiplication.
-  preprocess_scale: Optional[
-      Callable[[Optional[jnp.ndarray]], Optional[jnp.ndarray]]
-  ]
+  # Operations for retrieving or storing quantized tensors and their scales
+  # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
+  # The following dtype Any should be aqt_dot_general.QTensor but that triggers
+  # recursive importing
+  preprocess: Optional[Callable[[Optional[Any]], Optional[Any]]]
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
@@ -185,8 +181,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       use_fake_quant=False,
       # dtype_x=dtype,
       use_fwd_quant=None,
-      preprocess_quant=None,
-      preprocess_scale=None,
+      preprocess=None,
   )
 
 

@@ -23,6 +23,7 @@ from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
+import flax
 import flax.linen as nn
 import jax
 from jax._src.numpy import lax_numpy
@@ -46,11 +47,15 @@ class Freezer(nn.Module):
 
   quant_collection: str
   quant_mode: QuantMode
-  shape: Iterable[int]
-  init: nn.initializers.Initializer
+  q_shape: Iterable[int]
+  q_init: nn.initializers.Initializer
+  s_shape: Iterable[int]
+  s_init: nn.initializers.Initializer
 
   @nn.compact
-  def __call__(self, inputs):
+  def __call__(
+      self, inputs: Optional[aqt_dot_general.QTensor]
+  ) -> Optional[aqt_dot_general.QTensor]:
     collection = self.quant_collection
     if inputs is None:  # getter mode
       if self.quant_mode == QuantMode.TRAIN:
@@ -58,16 +63,22 @@ class Freezer(nn.Module):
       elif self.quant_mode == QuantMode.CONVERT:
         return inputs
       elif self.quant_mode == QuantMode.SERVE:
-        frozen = self.variable(collection, 'frozen', self.init, self.shape)
-        return frozen.value
+        # We could have created one self.variable whose value is a QTensor,
+        # but this would complicate the init function, which could potentially
+        # be used by adding metadata such as sharding axises, etc.
+        qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
+        scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
+        return aqt_dot_general.QTensor(qvalue.value, scale.value)
       else:
         assert False, 'Unknown quant mode.'
     else:  # setter mode
       if self.quant_mode == QuantMode.TRAIN:
         pass
       elif self.quant_mode == QuantMode.CONVERT:
-        frozen = self.variable(collection, 'frozen', self.init, inputs.shape)
-        frozen.value = inputs
+        qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
+        scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
+        qvalue.value = inputs.qvalue
+        scale.value = inputs.qvalue_scale_t
       elif self.quant_mode == QuantMode.SERVE:
         # TODO(lew): Optionally compare stored and served value.
         pass
@@ -86,12 +97,12 @@ class AqtDotGeneral(nn.Module):
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  lhs_var_name: str = 'lhs'
+  lhs_var_name: str = 'qlhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  rhs_var_name: str = 'rhs'
+  rhs_var_name: str = 'qrhs'
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -126,37 +137,25 @@ class AqtDotGeneral(nn.Module):
       lhs_qm = self.lhs_quant_mode
 
       msg = 'The only function that is setting preprocess can be AqtQuantized.'
-      assert cfg.fwd.rhs.preprocess_quant is None, msg
-      assert cfg.fwd.rhs.preprocess_scale is None, msg
-      assert cfg.fwd.lhs.preprocess_quant is None, msg
-      assert cfg.fwd.lhs.preprocess_scale is None, msg
-
-      def mk_freezer(name, quant_mode, shape, init):
-        return Freezer(
-            name=name,
-            quant_mode=quant_mode,
-            shape=shape,
-            init=init,
-            quant_collection=self.quant_collection,
-        )
-
-      cfg.fwd.lhs.preprocess_quant = mk_freezer(
-          self.lhs_var_name, lhs_qm, lhs_shape, self.lhs_init
+      assert cfg.fwd.rhs.preprocess is None, msg
+      assert cfg.fwd.lhs.preprocess is None, msg
+      cfg.fwd.lhs.preprocess = Freezer(
+          name=self.lhs_var_name,
+          quant_mode=lhs_qm,
+          q_shape=lhs_shape,
+          q_init=self.lhs_init,
+          s_shape=lhs_scale_shape,
+          s_init=self.lhs_scale_init,
+          quant_collection=self.quant_collection,
       )
-      cfg.fwd.lhs.preprocess_scale = mk_freezer(
-          self.lhs_var_name + '_scale',
-          lhs_qm,
-          lhs_scale_shape,
-          self.lhs_scale_init,
-      )
-      cfg.fwd.rhs.preprocess_quant = mk_freezer(
-          self.rhs_var_name, rhs_qm, rhs_shape, self.rhs_init
-      )
-      cfg.fwd.rhs.preprocess_scale = mk_freezer(
-          self.rhs_var_name + '_scale',
-          rhs_qm,
-          rhs_scale_shape,
-          self.rhs_scale_init,
+      cfg.fwd.rhs.preprocess = Freezer(
+          name=self.rhs_var_name,
+          quant_mode=rhs_qm,
+          q_shape=rhs_shape,
+          q_init=self.rhs_init,
+          s_shape=rhs_scale_shape,
+          s_init=self.rhs_scale_init,
+          quant_collection=self.quant_collection,
       )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.Context(key=key, train_step=None)
@@ -183,7 +182,7 @@ class AqtDotGeneral(nn.Module):
     )
 
 
-class AqtEinsum(nn.Module):
+class AqtEinsum(flax.struct.PyTreeNode):
   """Quantized Einsum class for model injection."""
 
   cfg: Optional[config.DotGeneral] = None
@@ -193,18 +192,17 @@ class AqtEinsum(nn.Module):
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  lhs_var_name: str = 'lhs'
+  lhs_var_name: str = 'qlhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  rhs_var_name: str = 'rhs'
+  rhs_var_name: str = 'qrhs'
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
-  @nn.compact
   def __call__(self, eqn, lhs_g, rhs_g):
     def einsum(lhs_l, rhs_l, dg=jax.lax.dot_general):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
@@ -308,8 +306,7 @@ def config_v4(
         use_fake_quant=False,
         # dtype_x=dtype,
         use_fwd_quant=None,
-        preprocess_quant=None,
-        preprocess_scale=None,
+        preprocess=None,
     )
 
   def dg_raw_config(lhs_bits, rhs_bits, local_aqt=None) -> config.DotGeneralRaw:

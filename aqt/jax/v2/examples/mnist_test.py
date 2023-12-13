@@ -28,11 +28,14 @@ class MnistTest(parameterized.TestCase):
   def test_mnist_training(self):
 
     target_loss = {
-        "cpu": [3.967379331588745117187500000000],
-        "TPU v2": [3.986936807632446289062500000000],
-        "TPU v3": [3.987155437469482421875000000000],
-        "TPU v4": [3.986746311187744140625000000000],
-        "TPU v5 lite": [3.988214492797851562500000000000],
+        "cpu": [
+            3.953551054000854492187500000000,
+            3.953551530838012695312500000000,
+        ],
+        "TPU v2": [3.965954065322875976562500000000],
+        "TPU v3": [3.965954065322875976562500000000],
+        "TPU v4": [3.965274810791015625000000000000],
+        "TPU v5 lite": [3.965142011642456054687500000000],
     }
 
     aqt_cfg = aqt_flax.config_v4(
@@ -92,22 +95,26 @@ class MnistTest(parameterized.TestCase):
     dtype = jnp.dtype
     expected_aqt_pytree = {
         "aqt": {
-            "AqtEinsum_0": {
-                "AqtDotGeneral_0": {
-                    "lhs": {"frozen": (dtype("int8"), (10, 10))},
-                    "lhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "scale": (dtype("float32"), (1, 10)),
+                    "value": (dtype("int8"), (10, 10)),
                 }
             },
             "Dense_0": {
                 "AqtDotGeneral_0": {
-                    "rhs": {"frozen": (dtype("int8"), (3136, 256))},
-                    "rhs_scale": {"frozen": (dtype("float32"), (1, 256))},
+                    "qrhs": {
+                        "scale": (dtype("float32"), (1, 256)),
+                        "value": (dtype("int8"), (3136, 256)),
+                    }
                 }
             },
             "Dense_1": {
                 "AqtDotGeneral_0": {
-                    "rhs": {"frozen": (dtype("int8"), (256, 10))},
-                    "rhs_scale": {"frozen": (dtype("float32"), (1, 10))},
+                    "qrhs": {
+                        "scale": (dtype("float32"), (1, 10)),
+                        "value": (dtype("int8"), (256, 10)),
+                    }
                 }
             },
         },
@@ -176,9 +183,9 @@ class MnistTest(parameterized.TestCase):
 
     # Sanity check 2: Frozen weights are indeed used for inference.
     #   If we zero them out, loss would change.
-    model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"] = (
+    model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"]["value"] = (
         jnp.zeros_like(
-            model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["rhs"]["frozen"]
+            model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"]["value"]
         )
     )
     bad_logits, _ = forward(model_serving, apply_serving)

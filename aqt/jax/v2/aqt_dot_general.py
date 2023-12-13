@@ -520,30 +520,14 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     # TODO(lew): Refactor Have a flax class with get and set.
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     lhs_qt = None
-    if (
-        cfg.fwd.lhs.preprocess_quant is not None
-        and cfg.fwd.lhs.preprocess_scale is not None
-    ):
+    if cfg.fwd.lhs.preprocess is not None:
       # lhs_q is quantized dtype.
       # we are breaking the invariant that QTensor has a float qvalue
       # But it will just be cast again to the same type.
-      lhs_q = cfg.fwd.lhs.preprocess_quant(None)
-      lhs_inv_scale_t = cfg.fwd.lhs.preprocess_scale(None)
-      if lhs_q is not None and lhs_inv_scale_t is not None:
-        lhs_qt = QTensor(lhs_q, lhs_inv_scale_t)
-      else:
-        lhs_qt = None
+      lhs_qt = cfg.fwd.lhs.preprocess(None)
     rhs_qt = None
-    if (
-        cfg.fwd.rhs.preprocess_quant is not None
-        and cfg.fwd.rhs.preprocess_scale is not None
-    ):
-      rhs_q = cfg.fwd.rhs.preprocess_quant(None)
-      rhs_inv_scale_t = cfg.fwd.rhs.preprocess_scale(None)
-      if rhs_q is not None and rhs_inv_scale_t is not None:
-        rhs_qt = QTensor(rhs_q, rhs_inv_scale_t)
-      else:
-        rhs_qt = None
+    if cfg.fwd.rhs.preprocess is not None:
+      rhs_qt = cfg.fwd.rhs.preprocess(None)
 
     out, (out_lhs_qt, out_rhs_qt) = dg(
         lhs=lhs,
@@ -554,23 +538,19 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         context=context,
     )
 
-    if (
-        cfg.fwd.lhs.preprocess_quant is not None
-        and cfg.fwd.lhs.preprocess_scale is not None
-    ):
-      dtype = cfg.fwd.lhs.numerics.get_dtype()
-      none = cfg.fwd.lhs.preprocess_quant(out_lhs_qt.qvalue.astype(dtype))
+    if cfg.fwd.lhs.preprocess is not None:
+      lhs_dtype = cfg.fwd.lhs.numerics.get_dtype()
+      out_lhs_qt = QTensor(
+          out_lhs_qt.qvalue.astype(lhs_dtype), out_lhs_qt.qvalue_scale_t
+      )
+      none = cfg.fwd.lhs.preprocess(out_lhs_qt)
       assert none is None
-      none = cfg.fwd.lhs.preprocess_scale(out_lhs_qt.qvalue_scale_t)
-      assert none is None
-    if (
-        cfg.fwd.rhs.preprocess_quant is not None
-        and cfg.fwd.rhs.preprocess_scale is not None
-    ):
-      dtype = cfg.fwd.rhs.numerics.get_dtype()
-      none = cfg.fwd.rhs.preprocess_quant(out_rhs_qt.qvalue.astype(dtype))
-      assert none is None
-      none = cfg.fwd.rhs.preprocess_scale(out_rhs_qt.qvalue_scale_t)
+    if cfg.fwd.rhs.preprocess is not None:
+      rhs_dtype = cfg.fwd.rhs.numerics.get_dtype()
+      out_rhs_qt = QTensor(
+          out_rhs_qt.qvalue.astype(rhs_dtype), out_rhs_qt.qvalue_scale_t
+      )
+      none = cfg.fwd.rhs.preprocess(out_rhs_qt)
       assert none is None
 
     return out
