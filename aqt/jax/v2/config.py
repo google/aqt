@@ -29,7 +29,7 @@ Context = Any  # TODO(lew): We could put Context in a separate file.
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
@@ -56,12 +56,12 @@ class Tensor:
     return tensor_make(*args, **kwargs)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class LocalAqt:
   contraction_axis_shard_count: int
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
 
@@ -79,7 +79,7 @@ class DotGeneralRaw:
     return conv_general_dilated_make(*args, **kwargs)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class DotGeneral:
   """Configuration of quantization of dot_general and its gradients."""
 
