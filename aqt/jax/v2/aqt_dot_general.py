@@ -312,11 +312,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # TODO(lew): mt.x above should be clipped for clipping calibrations
 
-    # These types match default TPU behavior. GPU would need some work.
-    # Relevant: https://github.com/google/jax/issues/14022
-    # We need this assertion, because we are using lhs.dtype as out dtype.
-    assert lhs.dtype == rhs.dtype
-
     # TODO(yichizh): the same code is applied to lhs and rhs.
     # Should make a function of it that includes preprocess as well.
     lhs_cast_dtype = cfg.lhs.numerics.get_dtype()
@@ -349,7 +344,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         dimension_numbers=dimension_numbers,
         preferred_element_type=cfg.dg_accumulator_dtype,
         precision=lax.Precision.DEFAULT,
-    ).astype(lhs.dtype)
+    ).astype(jnp.promote_types(lhs, rhs))
+    # TODO(lew): Do we have a correct precision above?
+    #   Relevant: https://github.com/google/jax/issues/14022
 
     if not cfg.lhs.use_fake_quant:
       out = _maybe_mul(out, lhs_inv_scale_t)
@@ -515,12 +512,12 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     assert (
         precision is None
     ), f'Precision {precision} requested together with quantization.'
-    assert lhs.dtype == rhs.dtype, (
-        'The only reason we need that, is because we need to determine return'
-        ' type.'
-    )
+
+    msg = 'AQT is not yet optimized to accept quantized types directly. '
+    msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
+    assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
+    assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
     # TODO(lew): Refactor Have a flax class with get and set.
-    # TODO(lew): Have the freezer freeze both scale and value.
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     lhs_qt = None
     if (
