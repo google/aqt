@@ -18,6 +18,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
+import aqt.jax.v2.aqt_conv_general as aqt_conv
 import aqt.jax.v2.aqt_dot_general as aqt
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
@@ -626,7 +627,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval, seed + 1)
 
     lax_conv = jax.lax.conv_general_dilated
-    aqt_conv = aqt.make_conv_general_dilated(cfg)
+    aqt_conv_fn = aqt_conv.make_conv_general_dilated(cfg)
     kwargs = {
         "window_strides": (1, 1),
         "padding": "SAME",
@@ -639,7 +640,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         rhs, aqt.Context(key=None, train_step=None)
     )
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
-    prod_aqt = aqt_conv(lhs, rhs, **kwargs)
+    prod_aqt = aqt_conv_fn(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
 
   @parameterized.parameters([
