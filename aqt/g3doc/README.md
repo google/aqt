@@ -6,6 +6,8 @@ go/aqt2
 
 *go/aqt-users*
 
+Note: If for some reason you see a message 'Failed to join', that happened before for unknown reasons. Please ping yichizh@ or lew@ and we will add you manually.
+
 Feel free to have any AQT-related discussion there. (Consider starting threads with **bolded title**).
 
 ## Main README.md
