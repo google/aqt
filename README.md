@@ -200,6 +200,63 @@ One has to understand how to configure them.
 
 We will be updating config file with current best practices.
 
+## AQT Serving
+
+Quantization is applied to both activations and weights right before a matmul.
+During training, gradients flow "through" the operation and update the latent
+floating-point weights.
+During model serving, however, re-quantizing weights is unnecessary and has large overhead because:
+
+1. Weights are stationary during serving. Recomputing weight quantization is a waste.
+2. Recomputing quantization requires loading the latent BF16 weights, which
+consumes 2x more memory bandwidth than loading INT8 weights.
+
+AQT provides a solution to the above problem, which is called "serving conversion".
+Serving conversion is a constant folding process that creates new variables in
+the checkpoint to store the folded INT8 weights.
+It requires running one dummy inference.
+
+Note that:
+
+1. Weights can be either lhs or rhs inputs to a matmul. AQT supports storing
+both in checkpoints, configured by [lhs_quant_mode and rhs_quant_mode](https://github.com/google/aqt/blob/eb445f8fd8cefac33eb965f0115ea2ac3d5cdff5/aqt/jax/v2/flax/aqt_flax.py#L97-L105).
+Users need to set the correct configuration themselves.
+2. In some cases where checkpoint variables require metadata such as sharding axis,
+users can configure [variable initializers](https://github.com/google/aqt/blob/eb445f8fd8cefac33eb965f0115ea2ac3d5cdff5/aqt/jax/v2/flax/aqt_flax.py#L98-L99) to fit their needs.
+
+At serving mode, AQT will look for the INT8 variables in a checkpoint.
+If found, it skips the weight quantization and returns INT8 variables
+as-is as inputs to matmul, thus saving the memory bandwidth and avoids recalculation.
+
+Applying the conversion to an unquantized floating-point model is
+equivalent to post-training quantization (PTQ) serving.
+Applying the conversion to a forward-only quantized AQT model is
+quantization-aware training (QAT) serving.
+In that case it is important to use the same AQT config during training and serving to maintain WYTIWYS.
+
+The [MNIST examples](https://github.com/google/aqt/blob/ce65f7b755a3693ecd368f26a7c814877294f0ff/aqt/jax/v2/examples/mnist.py#L214-L235)
+provides a code snippet on how to perform serving conversion and model serving in AQT.
+
+## Other Weight Transformations
+
+Consider `matmul(a, w)` as an activation-weight matmul.
+Sometimes there is another transformation `T` on weights before passed into the matmul,
+i.e., `matmul(..., T(w))` is computed.
+In this case, quantizing weights directly, i.e., `matmul(..., T(Q(w)))`, can reduce the
+checkpoint size and save memory bandwidth, but it will not accelerate the matmul
+because `T` will likely return floats.
+In order to get matmul acceleration, the quantization function `Q` should be
+inserted just before matmul, i.e., `matmul(..., Q(T(w)))`.
+
+AQT pursues the goal of both compressing the checkpoint AND accelerating the matmul.
+This requires storing the entire `w_q = Q(T(w))` in the checkpoint and
+using it in serving directly, i.e., `matmul(..., w_q)`.
+
+Note that AQT provides a quantized `matmul_aqt`
+as a whole such that `matmul_aqt(..., T(w)) = matmul(..., Q(T(w)))`.
+`Q(T(w))` is not visible outside of `matmul_aqt`.
+The main reason is that `matmul_aqt` has custom gradient defined for it.
+
 ## How AQT Works Internally
 
 In this section we:
