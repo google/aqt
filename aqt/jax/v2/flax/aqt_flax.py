@@ -203,6 +203,8 @@ class AqtEinsum(flax.struct.PyTreeNode):
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
+  name: Optional[str] = None
+
   def __call__(self, eqn, lhs_g, rhs_g):
     def einsum(lhs_l, rhs_l, dg=jax.lax.dot_general):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
@@ -261,6 +263,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
         quant_collection=quant_collection,
+        name=self.name,
     )
     return einsum(lhs_g, rhs_g, aqt_dg)
 
