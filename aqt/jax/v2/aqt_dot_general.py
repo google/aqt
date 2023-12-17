@@ -316,17 +316,20 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # Should make a function of it that includes preprocess as well.
     lhs_cast_dtype = cfg.lhs.numerics.get_dtype()
     rhs_cast_dtype = cfg.rhs.numerics.get_dtype()
+    msg = "Can't cast dtype in fake_quant mode."
     if cfg.lhs.use_fake_quant:
       # TODO(yichizh): replace rounding in numerics with casting to dtype.
       # So fake quant becomes casting to dtype first, then casting to bfloat.
       # This is because FP8 numerics relies on this cast to do the rounding.
-      msg = "Can't cast dtype in fake_quant mode."
-      assert lhs_cast_dtype is None and rhs_cast_dtype is None, msg
+      assert lhs_cast_dtype is None, msg
       lhs_q = _maybe_mul(lhs_q, lhs_inv_scale)
-      rhs_q = _maybe_mul(rhs_q, rhs_inv_scale)
     else:
       if lhs_cast_dtype is not None:
         lhs_q = lhs_q.astype(lhs_cast_dtype)
+    if cfg.rhs.use_fake_quant:
+      assert rhs_cast_dtype is None, msg
+      rhs_q = _maybe_mul(rhs_q, rhs_inv_scale)
+    else:
       if rhs_cast_dtype is not None:
         rhs_q = rhs_q.astype(rhs_cast_dtype)
 
@@ -350,6 +353,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     if not cfg.lhs.use_fake_quant:
       out = _maybe_mul(out, lhs_inv_scale_t)
+    if not cfg.rhs.use_fake_quant:
       out = _maybe_mul(out, rhs_inv_scale_t)
 
     res = DotGeneralRes(
