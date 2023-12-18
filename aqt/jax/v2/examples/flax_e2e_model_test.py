@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Test for mnist."""
+"""Test for flax e2e model."""
 import copy
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
-from aqt.jax.v2.examples import mnist
+from aqt.jax.v2.examples import flax_e2e_model
 from aqt.jax.v2.flax import aqt_flax
 import jax
 import jax.numpy as jnp
@@ -26,7 +26,6 @@ import jax.numpy as jnp
 class MnistTest(parameterized.TestCase):
 
   def test_mnist_training(self):
-
     target_loss = {
         "cpu": [
             3.953551054000854492187500000000,
@@ -72,9 +71,9 @@ class MnistTest(parameterized.TestCase):
     }
 
     # Stage 1: regular training
-    state = mnist.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
 
-    state, train_loss, _ = mnist.train_epoch(
+    state, train_loss, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size=ds_size // 2, rng=input_rng
     )
 
@@ -90,7 +89,7 @@ class MnistTest(parameterized.TestCase):
 
     # Stage 2: Model conversion (quantized weights freezing)
 
-    apply_serving, model_serving = mnist.serving_conversion(state)
+    apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
     expected_aqt_pytree = {
