@@ -52,39 +52,51 @@ class Freezer(nn.Module):
   s_shape: Iterable[int]
   s_init: nn.initializers.Initializer
 
+  def get(self) -> Optional[aqt_dot_general.QTensor]:
+    if self.quant_mode == QuantMode.TRAIN:
+      return None
+    elif self.quant_mode == QuantMode.CONVERT:
+      return None
+    elif self.quant_mode == QuantMode.SERVE:
+      collection = self.quant_collection
+      # We could have created one self.variable whose value is a QTensor,
+      # but this would complicate the init function, which could potentially
+      # be used by adding metadata such as sharding axises, etc.
+      qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
+      scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
+      return aqt_dot_general.QTensor(qvalue.value, scale.value)
+    else:
+      assert False, 'Unknown quant mode.'
+
+  def set(self, inputs: aqt_dot_general.QTensor) -> None:
+    if self.quant_mode == QuantMode.TRAIN:
+      pass
+    elif self.quant_mode == QuantMode.CONVERT:
+      collection = self.quant_collection
+      qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
+      scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
+      qvalue.value = inputs.qvalue
+      scale.value = inputs.qvalue_scale_t
+    elif self.quant_mode == QuantMode.SERVE:
+      # TODO(lew): Optionally compare stored and served value.
+      pass
+    else:
+      assert False, 'Unknown quant mode.'
+    return None
+
   @nn.compact
   def __call__(
       self, inputs: Optional[aqt_dot_general.QTensor]
   ) -> Optional[aqt_dot_general.QTensor]:
-    collection = self.quant_collection
-    if inputs is None:  # getter mode
-      if self.quant_mode == QuantMode.TRAIN:
-        return inputs
-      elif self.quant_mode == QuantMode.CONVERT:
-        return inputs
-      elif self.quant_mode == QuantMode.SERVE:
-        # We could have created one self.variable whose value is a QTensor,
-        # but this would complicate the init function, which could potentially
-        # be used by adding metadata such as sharding axises, etc.
-        qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
-        scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
-        return aqt_dot_general.QTensor(qvalue.value, scale.value)
-      else:
-        assert False, 'Unknown quant mode.'
-    else:  # setter mode
-      if self.quant_mode == QuantMode.TRAIN:
-        pass
-      elif self.quant_mode == QuantMode.CONVERT:
-        qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
-        scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
-        qvalue.value = inputs.qvalue
-        scale.value = inputs.qvalue_scale_t
-      elif self.quant_mode == QuantMode.SERVE:
-        # TODO(lew): Optionally compare stored and served value.
-        pass
-      else:
-        assert False, 'Unknown quant mode.'
-      return None
+    # TODO(yichizh): Two constraints on Module make the call function necessary:
+    # (1) Variables must be created either in setup() or with nn.compact.
+    #     We don't want variables in training mode, so nn.compact is better.
+    # (2) At most one method in a Module can be wrapped with nn.compact.
+    #     so there has to be a fn with the decorator that calls get() and set().
+    if inputs is None:
+      return self.get()
+    else:
+      return self.set(inputs)
 
 
 class AqtDotGeneral(nn.Module):

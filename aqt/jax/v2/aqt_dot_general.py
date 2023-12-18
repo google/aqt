@@ -521,18 +521,20 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
     assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
     assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
-    # TODO(lew): Refactor Have a flax class with get and set.
-    # TODO(lew): Have a function to handle lhs and rhs uniformly.
-    lhs_qt = None
-    if cfg.fwd.lhs.preprocess is not None:
-      # lhs_q is quantized dtype.
-      # we are breaking the invariant that QTensor has a float qvalue
-      # But it will just be cast again to the same type.
-      lhs_qt = cfg.fwd.lhs.preprocess(None)
-    rhs_qt = None
-    if cfg.fwd.rhs.preprocess is not None:
-      rhs_qt = cfg.fwd.rhs.preprocess(None)
 
+    def get_qt(fwd_tensor_cfg: config.Tensor):
+      if fwd_tensor_cfg.preprocess is not None:
+        return fwd_tensor_cfg.preprocess(None)
+      return None
+
+    def set_qt(fwd_tensor_cfg: config.Tensor, qt: QTensor) -> None:
+      if fwd_tensor_cfg.preprocess is not None:
+        dtype = fwd_tensor_cfg.numerics.get_dtype()
+        qt_cast = QTensor(qt.qvalue.astype(dtype), qt.qvalue_scale_t)
+        fwd_tensor_cfg.preprocess(qt_cast)
+
+    lhs_qt = get_qt(cfg.fwd.lhs)
+    rhs_qt = get_qt(cfg.fwd.rhs)
     out, (out_lhs_qt, out_rhs_qt) = dg(
         lhs=lhs,
         rhs=rhs,
@@ -541,21 +543,8 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         dimension_numbers=dimension_numbers,
         context=context,
     )
-
-    if cfg.fwd.lhs.preprocess is not None:
-      lhs_dtype = cfg.fwd.lhs.numerics.get_dtype()
-      out_lhs_qt = QTensor(
-          out_lhs_qt.qvalue.astype(lhs_dtype), out_lhs_qt.qvalue_scale_t
-      )
-      none = cfg.fwd.lhs.preprocess(out_lhs_qt)
-      assert none is None
-    if cfg.fwd.rhs.preprocess is not None:
-      rhs_dtype = cfg.fwd.rhs.numerics.get_dtype()
-      out_rhs_qt = QTensor(
-          out_rhs_qt.qvalue.astype(rhs_dtype), out_rhs_qt.qvalue_scale_t
-      )
-      none = cfg.fwd.rhs.preprocess(out_rhs_qt)
-      assert none is None
+    set_qt(cfg.fwd.lhs, out_lhs_qt)
+    set_qt(cfg.fwd.rhs, out_rhs_qt)
 
     return out
 
