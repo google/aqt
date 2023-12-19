@@ -234,7 +234,7 @@ Applying the conversion to a forward-only quantized AQT model is
 quantization-aware training (QAT) serving.
 In that case it is important to use the same AQT config during training and serving to maintain WYTIWYS.
 
-The [MNIST examples](https://github.com/google/aqt/blob/ce65f7b755a3693ecd368f26a7c814877294f0ff/aqt/jax/v2/examples/mnist.py#L214-L235)
+The [flax end-to-end example](https://github.com/google/aqt/blob/4c3f3d915a84089ff62a5c6cddf007949ed6fd96/aqt/jax/v2/examples/flax_e2e_model.py#L214-L235)
 provides a code snippet on how to perform serving conversion and model serving in AQT.
 
 ## Other Weight Transformations
