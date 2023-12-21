@@ -72,32 +72,14 @@ def init_context_raw(
   )
 
 
-# TODO(yichizh): The current init_context function is temporary. Its goal is to
-# produce the same training loss in test and verify the refactoring doesn't
-# change the functionality of the library. Use the following function to replace
-# def init_context(
-#     key: Optional[jax.Array], train_step: Optional[int]
-# ) -> ContextDotGeneral:
-#   key1, key2, key3 = _split_key(key, num_splits=3)
-#   return ContextDotGeneral(
-#       fwd=init_context_raw(key1, train_step),
-#       dlhs=init_context_raw(key2, train_step),
-#       drhs=init_context_raw(key3, train_step),
-#   )
 def init_context(
     key: Optional[jax.Array], train_step: Optional[int]
 ) -> ContextDotGeneral:
-  if key is None:
-    key_fwd, context_dlhs_fwd, context_drhs_fwd = None, None, None
-  else:
-    key_fwd, key_bwd = _split_key(key, num_splits=2)
-    context_dlhs, context_drhs = _split_key(key_bwd, num_splits=2)
-    context_dlhs_fwd, _ = _split_key(context_dlhs, num_splits=2)
-    context_drhs_fwd, _ = _split_key(context_drhs, num_splits=2)
+  key1, key2, key3 = _split_key(key, num_splits=3)
   return ContextDotGeneral(
-      fwd=init_context_raw(key_fwd, train_step),
-      dlhs=init_context_raw(context_dlhs_fwd, train_step),
-      drhs=init_context_raw(context_drhs_fwd, train_step),
+      fwd=init_context_raw(key1, train_step),
+      dlhs=init_context_raw(key2, train_step),
+      drhs=init_context_raw(key3, train_step),
   )
 
 
