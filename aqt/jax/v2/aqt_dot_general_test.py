@@ -385,7 +385,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
     gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
 
-    test_context = aqt.Context(key=jax.random.PRNGKey(4), train_step=None)
+    test_context = aqt.init_context(key=jax.random.PRNGKey(4), train_step=None)
+    test_context_raw = aqt.init_context_raw(
+        key=jax.random.PRNGKey(4), train_step=None
+    )
 
     def aqt_dg_full(
         use_fake_quant,
@@ -406,9 +409,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     def aqt_dg_raw(use_fake_quant):
       cfg = modify_cfg(use_fake_quant=use_fake_quant).fwd
       dg_raw = aqt._make_dot_general_raw(cfg)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims, test_context)[
-          0
-      ]
+      return lambda lhs, rhs: dg_raw(
+          lhs, rhs, None, None, dims, test_context_raw
+      )[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -427,7 +430,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             dimension_numbers,
             context,
         ):
-          del lhs_qt, rhs_qt
+          del lhs_qt, rhs_qt, context
           if isinstance(rhs, aqt.MultiTensor):
             rhs = rhs.x
 
@@ -444,7 +447,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             )
 
           res = aqt.DotGeneralRes(
-              context_bwd=context,
+              context_dlhs=None,
+              context_drhs=None,
               lhs=res(lhs),
               rhs=res(rhs),
           )
@@ -463,7 +467,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           None,
           None,
           dims,
-          context=aqt.Context(key=None, train_step=None),
+          context=aqt.init_context(key=None, train_step=None),
       )
       # TODO(lew): Test values instead of del.
       del out_lhs_qt, out_rhs_qt
@@ -569,7 +573,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return dg(lhs, rhs, (((0,), (0,)), ((), ())), context=context)
 
     lhs, rhs = jnp.array([3.0, 4.0]), jnp.array([4.0, 5.0])
-    context = aqt.Context(
+    context = aqt.init_context(
         key=jax.random.PRNGKey(4), train_step=None
     )  # xkcd.com/221
     jax.value_and_grad(f)(lhs, rhs, context)
@@ -584,7 +588,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           None,
           None,
           (((1,), (0,)), ((), ())),
-          aqt.Context(key=None, train_step=None),
+          aqt.init_context_raw(key=None, train_step=None),
       )
       return ret
 
@@ -672,7 +676,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         lhs,
         rhs,
         dimension_numbers=(((), ()), ((), ())),
-        context=aqt.Context(key=None, train_step=None),
+        context=aqt.init_context(key=None, train_step=None),
     )
     lhs = jnp.array(lhs)
     rhs = jnp.array([1.0])

@@ -170,7 +170,7 @@ class AqtDotGeneral(nn.Module):
           quant_collection=self.quant_collection,
       )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
-    context = aqt_dot_general.Context(key=key, train_step=None)
+    context = aqt_dot_general.init_context(key=key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
     aqt_dg = functools.partial(aqt_dg, context=context)
     return aqt_dg
