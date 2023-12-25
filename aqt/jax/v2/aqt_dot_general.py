@@ -421,15 +421,16 @@ def _dot_general_raw_attach_gradient(
         context: ContextDotGeneral,
     ):
       assert lhs.dtype == rhs.dtype
-      ret, res = fwd_dot_general_raw(
-          lhs,
-          rhs,
-          lhs_qt,
-          rhs_qt,
-          dimension_numbers,
-          context.fwd,
-      )
-      ret = ret.astype(lhs.dtype)
+      with jax.named_scope('aqt_fwd'):
+        ret, res = fwd_dot_general_raw(
+            lhs,
+            rhs,
+            lhs_qt,
+            rhs_qt,
+            dimension_numbers,
+            context.fwd,
+        )
+        ret = ret.astype(lhs.dtype)
       # We return these values to allow for materialization.
       qret = (res.lhs.mt.qx, res.rhs.mt.qx)
       if return_residual:
@@ -487,20 +488,22 @@ def _dot_general_raw_attach_gradient(
         transposed_out = quant_grad(transposed_out)[0]
       return transposed_out
 
-    dlhs = grad_dot_general(
-        res.rhs,
-        res.lhs.quant_grad,
-        dlhs_dot_general_raw,
-        False,
-        res.context_dlhs,
-    )
-    drhs = grad_dot_general(
-        res.lhs,
-        res.rhs.quant_grad,
-        drhs_dot_general_raw,
-        True,
-        res.context_drhs,
-    )
+    with jax.named_scope('aqt_dlhs'):
+      dlhs = grad_dot_general(
+          res.rhs,
+          res.lhs.quant_grad,
+          dlhs_dot_general_raw,
+          False,
+          res.context_dlhs,
+      )
+    with jax.named_scope('aqt_drhs'):
+      drhs = grad_dot_general(
+          res.lhs,
+          res.rhs.quant_grad,
+          drhs_dot_general_raw,
+          True,
+          res.context_drhs,
+      )
     # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
     # None as grad to it. This is because it is a tuple of Python integers
     # that cannot be traced by Jax.
