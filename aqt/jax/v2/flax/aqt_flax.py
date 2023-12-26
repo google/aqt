@@ -125,6 +125,11 @@ class AqtDotGeneral(nn.Module):
       lhs_shape,
       rhs_shape,
       dimension_numbers: tuple[Iterable[int], Iterable[int]],
+      *,
+      lhs_q=None,
+      lhs_s=None,
+      rhs_q=None,
+      rhs_s=None,
   ):
     lhs_scale_shape = list(lhs_shape)
     rhs_scale_shape = list(rhs_shape)
@@ -151,24 +156,41 @@ class AqtDotGeneral(nn.Module):
       msg = 'The only function that is setting preprocess can be AqtQuantized.'
       assert cfg.fwd.rhs.preprocess is None, msg
       assert cfg.fwd.lhs.preprocess is None, msg
-      cfg.fwd.lhs.preprocess = Freezer(
-          name=self.lhs_var_name,
-          quant_mode=lhs_qm,
-          q_shape=lhs_shape,
-          q_init=self.lhs_init,
-          s_shape=lhs_scale_shape,
-          s_init=self.lhs_scale_init,
-          quant_collection=self.quant_collection,
-      )
-      cfg.fwd.rhs.preprocess = Freezer(
-          name=self.rhs_var_name,
-          quant_mode=rhs_qm,
-          q_shape=rhs_shape,
-          q_init=self.rhs_init,
-          s_shape=rhs_scale_shape,
-          s_init=self.rhs_scale_init,
-          quant_collection=self.quant_collection,
-      )
+      if lhs_s:
+        if lhs_qm != QuantMode.SERVE:
+          cfg.fwd.lhs.preprocess = lambda x: None
+        else:
+          cfg.fwd.lhs.preprocess = lambda x: aqt_dot_general.QTensor(
+              lhs_q, lhs_s
+          )
+      else:
+        cfg.fwd.lhs.preprocess = Freezer(
+            name=self.lhs_var_name,
+            quant_mode=lhs_qm,
+            q_shape=lhs_shape,
+            q_init=self.lhs_init,
+            s_shape=lhs_scale_shape,
+            s_init=self.lhs_scale_init,
+            quant_collection=self.quant_collection,
+        )
+
+      if rhs_s:
+        if rhs_qm != QuantMode.SERVE:
+          cfg.fwd.rhs.preprocess = lambda x: None
+        else:
+          cfg.fwd.rhs.preprocess = lambda x: aqt_dot_general.QTensor(
+              rhs_q, rhs_s
+          )
+      else:
+        cfg.fwd.rhs.preprocess = Freezer(
+            name=self.rhs_var_name,
+            quant_mode=rhs_qm,
+            q_shape=rhs_shape,
+            q_init=self.rhs_init,
+            s_shape=rhs_scale_shape,
+            s_init=self.rhs_scale_init,
+            quant_collection=self.quant_collection,
+        )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     context = aqt_dot_general.init_context(key=key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
@@ -183,8 +205,27 @@ class AqtDotGeneral(nn.Module):
       dimension_numbers,
       precision,
       preferred_element_type=None,
+      *,
+      lhs_s=None,
+      rhs_s=None,
   ):
-    aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
+    # Quantization routine with the scales provided as an input.
+    # This is necessary for KV cache quantization, where cache values should be
+    # updated separately during inference.
+
+    if lhs_s or rhs_s:
+      aqt_dg = self.make_aqt_dg(
+          lhs.shape,
+          rhs.shape,
+          dimension_numbers,
+          lhs_q=lhs,
+          lhs_s=lhs_s,
+          rhs_q=rhs,
+          rhs_s=rhs_s,
+      )
+    else:
+      aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
+
     return aqt_dg(
         lhs,
         rhs,
@@ -217,7 +258,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
 
   name: Optional[str] = None
 
-  def __call__(self, eqn, lhs_g, rhs_g):
+  def __call__(self, eqn, lhs_g, rhs_g, *, lhs_s=None, rhs_s=None):
     def einsum(lhs_l, rhs_l, dg=jax.lax.dot_general):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
           eqn, lhs_l, rhs_l, einsum_call=True, use_blas=True, optimize='optimal'
@@ -277,6 +318,9 @@ class AqtEinsum(flax.struct.PyTreeNode):
         quant_collection=quant_collection,
         name=self.name,
     )
+    if lhs_s or rhs_s:
+      aqt_dg = functools.partial(aqt_dg, lhs_s=lhs_s, rhs_s=rhs_s)
+
     return einsum(lhs_g, rhs_g, aqt_dg)
 
 
