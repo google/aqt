@@ -102,6 +102,7 @@ def tensor_make_fp8(
       get_qtensor=None,
       set_qtensor=None,
       context=config.Context(key=None, train_step=None),
+      multiply_scale_to_other_input=False
   )
 
 

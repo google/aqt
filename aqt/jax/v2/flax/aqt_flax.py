@@ -205,7 +205,12 @@ class AqtDotGeneral(nn.Module):
         cfg.fwd.rhs.set_qtensor = lambda qt: rhs_freezer(qt)
 
       prng_name = self.prng_name
-      key = self.make_rng(prng_name) if prng_name is not None else None
+      try:
+        key = (
+            self.make_rng(prng_name) if prng_name is not None else None
+        )
+      except Exception:  # pylint: disable=broad-exception-caught
+        key = None
       config.set_context(cfg, key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
     return aqt_dg
@@ -282,6 +287,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
     # specific methods to QTensor.
     lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g
     rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g
+    lhs_in, rhs_in = nn.dtypes.promote_dtype(lhs_in, rhs_in)
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
     a = jax.make_jaxpr(einsum)(lhs_in, rhs_in)
     [lhs_g_id, rhs_g_id] = a.eqns[0].invars
@@ -322,6 +328,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
       lhs_init, rhs_init = rhs_init, lhs_init
       lhs_scale_init, rhs_scale_init = rhs_scale_init, lhs_scale_init
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
+      lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
 
     aqt_dg = AqtDotGeneral(
         cfg=cfg,
@@ -389,6 +396,7 @@ def config_v4(
         get_qtensor=None,
         set_qtensor=None,
         context=config.Context(key=None, train_step=None),
+        multiply_scale_to_other_input=False,
     )
 
   def dg_raw_config(lhs_bits, rhs_bits, local_aqt=None) -> config.DotGeneralRaw:

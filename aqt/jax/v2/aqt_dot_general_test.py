@@ -688,8 +688,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ):
     lhs = jnp.zeros(lhs_shape)
     rhs_scale = jnp.zeros(rhs_scale_shape)
-    result = aqt.rhs_scale_transpose_for_lhs_input(
-        rhs_scale, dimension_numbers, lhs.shape
+    result = aqt._rhs_scale_transpose_for_lhs_input(
+        rhs_scale, dimension_numbers, lhs.shape, rhs_scale_shape
     )
 
     self.assertEqual(result.shape, expected_shape)
@@ -715,8 +715,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ):
     lhs_scale = jnp.zeros(lhs_scale_shape)
     rhs = jnp.zeros(rhs_shape)
-    result = aqt.lhs_scale_transpose_for_rhs_input(
-        lhs_scale, dimension_numbers, rhs.shape
+    result = aqt._lhs_scale_transpose_for_rhs_input(
+        lhs_scale, dimension_numbers, lhs_scale_shape, rhs.shape
     )
 
     self.assertEqual(result.shape, expected_shape)

@@ -147,8 +147,12 @@ def _scale_trans_for_other_input(
   return x
 
 
-def lhs_scale_transpose_for_rhs_input(lhs_scale, dimension_numbers, rhs_shape):
+def _lhs_scale_transpose_for_rhs_input(
+    lhs_scale, dimension_numbers, lhs_shape, rhs_shape
+):
   """Transposes lhs_scale to rhs input dimension order."""
+  del lhs_shape
+
   if lhs_scale is None:
     return None
 
@@ -158,8 +162,12 @@ def lhs_scale_transpose_for_rhs_input(lhs_scale, dimension_numbers, rhs_shape):
   )
 
 
-def rhs_scale_transpose_for_lhs_input(rhs_scale, dimension_numbers, lhs_shape):
+def _rhs_scale_transpose_for_lhs_input(
+    rhs_scale, dimension_numbers, lhs_shape, rhs_shape
+):
   """Transposes lhs_scale to rhs input dimension order."""
+  del rhs_shape
+
   if rhs_scale is None:
     return None
 
@@ -239,20 +247,25 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     assert isinstance(rhs, jnp.ndarray)
 
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
+    lhs_scale_transpose = (
+        _lhs_scale_transpose_for_rhs_input
+        if cfg.lhs.multiply_scale_to_other_input
+        else _lhs_scale_transpose
+    )
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
       if lhs_qt.scale_t is None:
         assert lhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
         lhs_scale_t = []
         for scale in lhs_qt.scale:
-          scale_t = _lhs_scale_transpose(
+          scale_t = lhs_scale_transpose(
               scale, dimension_numbers, lhs.shape, rhs.shape
           )
           lhs_scale_t.append(scale_t)
         lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
     else:
       transpose = functools.partial(
-          _lhs_scale_transpose,
+          lhs_scale_transpose,
           dimension_numbers=dimension_numbers,
           lhs_shape=lhs.shape,
           rhs_shape=rhs.shape,
@@ -265,20 +278,25 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
+    rhs_scale_transpose = (
+        _rhs_scale_transpose_for_lhs_input
+        if cfg.rhs.multiply_scale_to_other_input
+        else _rhs_scale_transpose
+    )
     if rhs_qt is not None:
       rhs_quant_grad = 'Poison. Not needed in serving'
       if rhs_qt.scale_t is None:
         assert rhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
         rhs_scale_t = []
         for scale in rhs_qt.scale:
-          scale_t = _rhs_scale_transpose(
+          scale_t = rhs_scale_transpose(
               scale, dimension_numbers, lhs.shape, rhs.shape
           )
           rhs_scale_t.append(scale_t)
         rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     else:
       transpose = functools.partial(
-          _rhs_scale_transpose,
+          rhs_scale_transpose,
           dimension_numbers=dimension_numbers,
           lhs_shape=lhs.shape,
           rhs_shape=rhs.shape,
@@ -322,6 +340,15 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     )
     if cfg.dg_accumulator_dtype == jnp.int32:
       assert lhs_cast_dtype == jnp.int8 and rhs_cast_dtype == jnp.int8, dtype_ms
+
+    if cfg.lhs.multiply_scale_to_other_input and lhs_qt is not None:
+      assert rhs_qin.dtype in [jnp.float32, jnp.bfloat16, jnp.float64]
+      rhs_qin = rhs_qin * lhs_qt.scale_t[0]
+
+    if cfg.rhs.multiply_scale_to_other_input and rhs_qt is not None:
+      assert lhs_qin.dtype in [jnp.float32, jnp.bfloat16, jnp.float64]
+      lhs_qin = lhs_qin * rhs_qt.scale_t[0]
+
     out = lax.dot_general(
         lhs_qin,
         rhs_qin,
@@ -335,9 +362,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
     assert out.scale is not None  # pytype help
 
-    if not cfg.lhs.use_fake_quant:
+    if not cfg.lhs.use_fake_quant and not cfg.lhs.multiply_scale_to_other_input:
       out.scale.extend(lhs_qt.scale_t)
-    if not cfg.rhs.use_fake_quant:
+    if not cfg.rhs.use_fake_quant and not cfg.rhs.multiply_scale_to_other_input:
       out.scale.extend(rhs_qt.scale_t)
 
     out = out.dequant()

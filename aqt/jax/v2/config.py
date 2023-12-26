@@ -64,6 +64,10 @@ class Tensor:
   set_qtensor: Optional[Callable[[QTensor], None]]
   context: Context
 
+  # If the flag is true, during dequantization the scale is multiplied to the
+  # other input, instead of multiplying it to the output.
+  multiply_scale_to_other_input: bool
+
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
     return tensor_make(*args, **kwargs)
@@ -216,6 +220,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       get_qtensor=None,
       set_qtensor=None,
       context=Context(key=None, train_step=None),
+      multiply_scale_to_other_input=False
   )
 
 
