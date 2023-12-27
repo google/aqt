@@ -69,12 +69,8 @@ However if there is any other use, we will drop that assumption."""
     assert cfg.lhs.calib_shared_axes == list(range(1, rank))
     assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
 
-    lhs_q, lhs_inv_scale, _ = aqt._scale_quant(
-        lhs, cfg=cfg.lhs, ca=None, context=None
-    )
-    rhs_q, rhs_inv_scale, _ = aqt._scale_quant(
-        rhs, cfg=cfg.rhs, ca=None, context=None
-    )
+    lhs_q, lhs_inv_scale, _ = aqt._scale_quant(lhs, cfg=cfg.lhs, ca=None)
+    rhs_q, rhs_inv_scale, _ = aqt._scale_quant(rhs, cfg=cfg.rhs, ca=None)
 
     out = lax.conv_general_dilated(
         lhs=lhs_q,

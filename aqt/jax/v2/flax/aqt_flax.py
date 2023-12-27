@@ -15,7 +15,6 @@
 
 import copy
 import enum
-import functools
 from typing import Iterable
 from typing import Optional
 from aqt.jax.v2 import aqt_dot_general
@@ -170,9 +169,8 @@ class AqtDotGeneral(nn.Module):
           quant_collection=self.quant_collection,
       )
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
-    context = aqt_dot_general.init_context(key=key, train_step=None)
+    config.set_context(cfg, key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
-    aqt_dg = functools.partial(aqt_dg, context=context)
     return aqt_dg
 
   @nn.compact
@@ -322,6 +320,7 @@ def config_v4(
         # dtype_x=dtype,
         use_fwd_quant=None,
         preprocess=None,
+        context=config.Context(key=None, train_step=None),
     )
 
   def dg_raw_config(lhs_bits, rhs_bits, local_aqt=None) -> config.DotGeneralRaw:

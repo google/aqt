@@ -26,6 +26,9 @@
 import functools
 from typing import Callable, Optional, Union
 from aqt.jax.v2 import config
+# TODO(yichizh): The following import is temporary for not breaking dependencies
+# Fix imports in other packages and delete it.
+from aqt.jax.v2.config import Context  # pylint: disable=g-importing-member, unused-import
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
 import flax.struct
@@ -35,55 +38,7 @@ import jax.numpy as jnp
 import numpy as onp
 
 
-@flax.struct.dataclass
-class Context:
-  key: Optional[jax.Array]
-  train_step: Optional[int]
-
-
-@flax.struct.dataclass
-class ContextDotGeneralRaw:
-  lhs: Context
-  rhs: Context
-
-
-@flax.struct.dataclass
-class ContextDotGeneral:
-  fwd: ContextDotGeneralRaw
-  dlhs: ContextDotGeneralRaw
-  drhs: ContextDotGeneralRaw
-
-
-def _split_key(key: Optional[jax.Array], num_splits: int):
-  default = (None,) * num_splits
-  return default if key is None else jax.random.split(key, num_splits)
-
-
-# Initialization is supposed to provide a regular default context.
-# More customized context such as only one tensor has key should be done
-# through a setter function.
-def init_context_raw(
-    key: Optional[jax.Array], train_step: Optional[int]
-) -> ContextDotGeneralRaw:
-  key1, key2 = _split_key(key, num_splits=2)
-  return ContextDotGeneralRaw(
-      lhs=Context(key=key1, train_step=train_step),
-      rhs=Context(key=key2, train_step=train_step),
-  )
-
-
-def init_context(
-    key: Optional[jax.Array], train_step: Optional[int]
-) -> ContextDotGeneral:
-  key1, key2, key3 = _split_key(key, num_splits=3)
-  return ContextDotGeneral(
-      fwd=init_context_raw(key1, train_step),
-      dlhs=init_context_raw(key2, train_step),
-      drhs=init_context_raw(key3, train_step),
-  )
-
-
-def _scale_quant(x, *, cfg, ca, context):
+def _scale_quant(x, *, cfg: config.Tensor, ca):
   """The core quantizing function."""
   msg = (
       'use_fake_quant mode is used in tests and it is exactly equal when'
@@ -115,7 +70,7 @@ def _scale_quant(x, *, cfg, ca, context):
 
   quant = jax.custom_vjp(cfg.numerics.fwd)
   quant.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
-  quant = functools.partial(quant, context=context)
+  quant = functools.partial(quant, context=cfg.context)
 
   x_q, quant_grad = jax.vjp(quant, x_s)
   # We are passing quant_grad (and not more) ot the backward pass.
@@ -135,8 +90,8 @@ def _scale_quant(x, *, cfg, ca, context):
 
 
 def make_fake_quant(cfg: config.Tensor, ca=None):
-  def fake_quant(x, context):
-    x_q, inv_scale, _ = _scale_quant(x, cfg=cfg, ca=ca, context=context)
+  def fake_quant(x):
+    x_q, inv_scale, _ = _scale_quant(x, cfg=cfg, ca=ca)
     return _maybe_mul(x_q, inv_scale)
 
   return fake_quant
@@ -164,8 +119,6 @@ class TensorRes:
 
 @flax.struct.dataclass
 class DotGeneralRes:
-  context_dlhs: Optional[ContextDotGeneralRaw]
-  context_drhs: Optional[ContextDotGeneralRaw]
   lhs: TensorRes
   rhs: TensorRes
 
@@ -244,7 +197,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       lhs_qt: Optional[QTensor],
       rhs_qt: Optional[QTensor],
       dimension_numbers: jax.lax.DotDimensionNumbers,
-      context: ContextDotGeneralRaw,
   ):
     """Creates a dot_general function without custom gradient."""
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
@@ -306,7 +258,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       lhs_qx = lhs_qt
     else:
       lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
-          lhs, cfg=cfg.lhs, ca=lhs_ca, context=context.lhs
+          lhs, cfg=cfg.lhs, ca=lhs_ca
       )
       lhs_inv_scale_t = _lhs_scale_transpose(
           lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
@@ -327,7 +279,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       rhs_qx = rhs_qt
     else:
       rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
-          rhs, cfg=cfg.rhs, ca=rhs_ca, context=context.rhs
+          rhs, cfg=cfg.rhs, ca=rhs_ca
       )
       rhs_inv_scale_t = _rhs_scale_transpose(
           rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
@@ -387,8 +339,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       out = _maybe_mul(out, rhs_inv_scale_t)
 
     res = DotGeneralRes(
-        context_dlhs=None,
-        context_drhs=None,
         lhs=lhs_res,
         rhs=rhs_res,
     )
@@ -418,7 +368,6 @@ def _dot_general_raw_attach_gradient(
         lhs_qt,
         rhs_qt,
         dimension_numbers,
-        context: ContextDotGeneral,
     ):
       assert lhs.dtype == rhs.dtype
       with jax.named_scope('aqt_fwd'):
@@ -428,16 +377,11 @@ def _dot_general_raw_attach_gradient(
             lhs_qt,
             rhs_qt,
             dimension_numbers,
-            context.fwd,
         )
         ret = ret.astype(lhs.dtype)
       # We return these values to allow for materialization.
       qret = (res.lhs.mt.qx, res.rhs.mt.qx)
       if return_residual:
-        # fwd_dot_general_raw is not responsible for setting context_dxhs
-        assert res.context_dlhs is None
-        assert res.context_drhs is None
-        res = res.replace(context_dlhs=context.dlhs, context_drhs=context.drhs)
         return ((ret, qret), res)
       else:
         return (ret, qret)
@@ -462,7 +406,6 @@ def _dot_general_raw_attach_gradient(
         quant_grad,
         dot_general,
         y_is_lhs,
-        context: ContextDotGeneralRaw,
     ):
       y_ndim = y_res.mt.x.ndim
 
@@ -479,7 +422,7 @@ def _dot_general_raw_attach_gradient(
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
-      out, _ = dot_general(g, y_res.mt, None, None, dims, context)
+      out, _ = dot_general(g, y_res.mt, None, None, dims)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
@@ -494,7 +437,6 @@ def _dot_general_raw_attach_gradient(
           res.lhs.quant_grad,
           dlhs_dot_general_raw,
           False,
-          res.context_dlhs,
       )
     with jax.named_scope('aqt_drhs'):
       drhs = grad_dot_general(
@@ -502,12 +444,11 @@ def _dot_general_raw_attach_gradient(
           res.rhs.quant_grad,
           drhs_dot_general_raw,
           True,
-          res.context_drhs,
       )
     # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
     # None as grad to it. This is because it is a tuple of Python integers
     # that cannot be traced by Jax.
-    return (dlhs, drhs, None, None, None)
+    return (dlhs, drhs, None, None)
 
   vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(4,))
   vjp.defvjp(make_fwd(True), vjp_bwd)
@@ -518,22 +459,7 @@ def _dot_general_raw_attach_gradient(
 def make_dot_general(cfg: Optional[config.DotGeneral]):
   """Makes quantized lax.dot_general replacement with attached gradients."""
   if cfg is None:
-
-    def ret_lax_dg(
-        lhs,
-        rhs,
-        dimension_numbers,
-        precision=None,
-        preferred_element_type=None,
-        *,
-        context=init_context(None, None),
-    ):
-      del context
-      return jax.lax.dot_general(
-          lhs, rhs, dimension_numbers, precision, preferred_element_type
-      )
-
-    return ret_lax_dg
+    return jax.lax.dot_general
 
   dg = _dot_general_raw_attach_gradient(
       fwd_dot_general_raw=_make_dot_general_raw(cfg.fwd),
@@ -547,8 +473,6 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
       dimension_numbers,
       precision=None,
       preferred_element_type=None,
-      *,
-      context=init_context(None, None),
   ):
     del preferred_element_type
     assert (
@@ -579,7 +503,6 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         lhs_qt=lhs_qt,
         rhs_qt=rhs_qt,
         dimension_numbers=dimension_numbers,
-        context=context,
     )
     set_qt(cfg.fwd.lhs, out_lhs_qt)
     set_qt(cfg.fwd.rhs, out_rhs_qt)

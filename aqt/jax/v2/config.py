@@ -20,11 +20,18 @@ from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
+import flax
 import jax
 import jax.numpy as jnp
 
 DType = Any
-Context = Any  # TODO(lew): We could put Context in a separate file.
+
+
+@flax.struct.dataclass
+class Context:
+  key: Optional[jax.Array]
+  train_step: Optional[int]
+
 
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
@@ -50,6 +57,7 @@ class Tensor:
   # The following dtype Any should be aqt_dot_general.QTensor but that triggers
   # recursive importing
   preprocess: Optional[Callable[[Optional[Any]], Optional[Any]]]
+  context: Context
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
@@ -94,6 +102,25 @@ class DotGeneral:
 
 ################################################################################
 # Functions below are auxiliary helpers.
+
+
+def _split_key(key: Optional[jax.Array], num_splits: int):
+  default = (None,) * num_splits
+  return default if key is None else jax.random.split(key, num_splits)
+
+
+def set_context(
+    cfg: DotGeneral, key: Optional[jax.Array], train_step: Optional[int]
+):
+  def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
+    key1, key2 = _split_key(key, num_splits=2)
+    cfg_raw.lhs.context = Context(key=key1, train_step=train_step)
+    cfg_raw.rhs.context = Context(key=key2, train_step=train_step)
+
+  key_fwd, key_dlhs, key_drhs = _split_key(key, num_splits=3)
+  set_dg_raw_context(cfg.fwd, key_fwd)
+  set_dg_raw_context(cfg.dlhs, key_dlhs)
+  set_dg_raw_context(cfg.drhs, key_drhs)
 
 
 def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
@@ -182,6 +209,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       # dtype_x=dtype,
       use_fwd_quant=None,
       preprocess=None,
+      context=Context(key=None, train_step=None),
   )
 
 
