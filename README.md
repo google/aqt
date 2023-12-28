@@ -1,6 +1,6 @@
 # AQT : Accurate Quantized Training
 
-AQT is a software library designed for easy tensor opeartion quantization in JAX.
+AQT is a software library designed for easy tensor operation quantization in JAX.
 
 ## Features
 
