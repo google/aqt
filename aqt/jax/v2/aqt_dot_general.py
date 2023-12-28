@@ -369,7 +369,9 @@ def _dot_general_raw_attach_gradient(
         rhs_qt,
         dimension_numbers,
     ):
-      assert lhs.dtype == rhs.dtype
+      assert (
+          lhs.dtype == rhs.dtype
+      ), f'Unmatched lhs and rhs dtype: {lhs.dtype} vs {rhs.dtype}'
       with jax.named_scope('aqt_fwd'):
         ret, res = fwd_dot_general_raw(
             lhs,

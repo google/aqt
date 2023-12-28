@@ -47,6 +47,7 @@ class Freezer(nn.Module):
   quant_collection: str
   quant_mode: QuantMode
   q_shape: Iterable[int]
+  q_dtype: jnp.dtype
   q_init: nn.initializers.Initializer
   s_shape: Iterable[int]
   s_init: nn.initializers.Initializer
@@ -61,7 +62,9 @@ class Freezer(nn.Module):
       # We could have created one self.variable whose value is a QTensor,
       # but this would complicate the init function, which could potentially
       # be used by adding metadata such as sharding axises, etc.
-      qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
+      qvalue = self.variable(
+          collection, 'value', self.q_init, self.q_shape, self.q_dtype
+      )
       scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
       return aqt_dot_general.QTensor(qvalue.value, scale.value)
     else:
@@ -72,7 +75,9 @@ class Freezer(nn.Module):
       pass
     elif self.quant_mode == QuantMode.CONVERT:
       collection = self.quant_collection
-      qvalue = self.variable(collection, 'value', self.q_init, self.q_shape)
+      qvalue = self.variable(
+          collection, 'value', self.q_init, self.q_shape, self.q_dtype
+      )
       scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
       qvalue.value = inputs.qvalue
       scale.value = inputs.qvalue_scale_t
@@ -154,6 +159,7 @@ class AqtDotGeneral(nn.Module):
           name=self.lhs_var_name,
           quant_mode=lhs_qm,
           q_shape=lhs_shape,
+          q_dtype=cfg.fwd.lhs.numerics.get_dtype(),
           q_init=self.lhs_init,
           s_shape=lhs_scale_shape,
           s_init=self.lhs_scale_init,
@@ -163,6 +169,7 @@ class AqtDotGeneral(nn.Module):
           name=self.rhs_var_name,
           quant_mode=rhs_qm,
           q_shape=rhs_shape,
+          q_dtype=cfg.fwd.rhs.numerics.get_dtype(),
           q_init=self.rhs_init,
           s_shape=rhs_scale_shape,
           s_init=self.rhs_scale_init,
