@@ -18,8 +18,6 @@ Pax implements vanilla op wrappers in praxis/layers/base_ops.py
 This file contains AQT variants of these.
 """
 
-import functools
-
 import aqt.jax.v2.aqt_dot_general as aqt
 import aqt.jax.v2.config as aqt_config
 import jax.numpy as jnp
@@ -45,7 +43,6 @@ class AqtEinsum(base_layer.BaseLayer):
       )
 
   def __call__(self, eqn, lhs, rhs):
-    dg = aqt.make_dot_general(self.cfg)
     key = self.next_prng_key()
     if self.track_train_step:
       if not self.do_eval:
@@ -55,6 +52,6 @@ class AqtEinsum(base_layer.BaseLayer):
       train_step = self.get_var('train_step')
     else:
       train_step = None
-    context = aqt.Context(key=key, train_step=train_step)
-    dg = functools.partial(dg, context=context)
+    aqt_config.set_context(self.cfg, key, train_step)
+    dg = aqt.make_dot_general(self.cfg)
     return jnp.einsum(eqn, lhs, rhs, _dot_general=dg)
