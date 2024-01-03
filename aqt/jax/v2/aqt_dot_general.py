@@ -475,6 +475,8 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
       dimension_numbers,
       precision=None,
       preferred_element_type=None,
+      lhs_qt=None,
+      rhs_qt=None,
   ):
     del preferred_element_type
     assert (
@@ -497,8 +499,8 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         qt_cast = QTensor(qt.qvalue.astype(dtype), qt.qvalue_scale_t)
         fwd_tensor_cfg.preprocess(qt_cast)
 
-    lhs_qt = get_qt(cfg.fwd.lhs)
-    rhs_qt = get_qt(cfg.fwd.rhs)
+    lhs_qt = get_qt(cfg.fwd.lhs) or lhs_qt
+    rhs_qt = get_qt(cfg.fwd.rhs) or rhs_qt
     out, (out_lhs_qt, out_rhs_qt) = dg(
         lhs=lhs,
         rhs=rhs,

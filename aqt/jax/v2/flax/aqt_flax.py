@@ -15,6 +15,7 @@
 
 import copy
 import enum
+import functools
 from typing import Iterable
 from typing import Optional
 from aqt.jax.v2 import aqt_dot_general
@@ -188,6 +189,8 @@ class AqtDotGeneral(nn.Module):
       dimension_numbers,
       precision,
       preferred_element_type=None,
+      lhs_qt=None,
+      rhs_qt=None,
   ):
     aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
     return aqt_dg(
@@ -196,6 +199,8 @@ class AqtDotGeneral(nn.Module):
         dimension_numbers,
         precision,
         preferred_element_type=preferred_element_type,
+        lhs_qt=lhs_qt,
+        rhs_qt=rhs_qt,
     )
 
 
@@ -222,7 +227,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
 
   name: Optional[str] = None
 
-  def __call__(self, eqn, lhs_g, rhs_g):
+  def __call__(self, eqn, lhs_g, rhs_g, *, lhs_qt=None, rhs_qt=None):
     def einsum(lhs_l, rhs_l, dg=jax.lax.dot_general):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
           eqn, lhs_l, rhs_l, einsum_call=True, use_blas=True, optimize='optimal'
@@ -282,6 +287,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
         quant_collection=quant_collection,
         name=self.name,
     )
+    aqt_dg = functools.partial(aqt_dg, lhs_qt=lhs_qt, rhs_qt=rhs_qt)
     return einsum(lhs_g, rhs_g, aqt_dg)
 
 
