@@ -22,9 +22,8 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
-
 import functools
-from typing import Union
+from typing import Any, Callable, Union
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -34,7 +33,48 @@ from jax import lax
 import jax.numpy as jnp
 
 
-def quant(x, *, cfg: config.Tensor, calibration_axes, transpose_fn=None):
+@flax.struct.dataclass
+class QTensor:
+  """Quantized tensor."""
+
+  # Quantized (compressed) representation of tensor.
+  # Use dequant() method to "decompress" to the original tensor.
+  qvalue: jnp.ndarray
+
+  # (scale == None) can be thought as (scale == 1.0)
+  # (scale == None) means that qvalue is not quantized and can be used directly.
+  # (scale: str) means that for some reason scale is unknown.
+  scale: Union[jnp.ndarray, None, str]
+
+  # Used in dot_general, transposed scales used in post dot_general scaling.
+  # The same comments apply as to scale.
+  # We currently keep it here because:
+  # - we store scale_t in the checkpoint to avoid transposition per inference.
+  # - scale_t is used both in backprop of dot_general and in post-scaling.
+  #   We avoid transposing scale twice.
+  # Invariant: we never should have a situation where out of scale, scale_t,
+  # one is set and one is None.
+  # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
+  scale_t: Union[jnp.ndarray, None, str]
+
+  def dequant(self) -> jnp.ndarray:
+    msg = f'scale is not available: {self.scale}'
+    if self.scale is None:
+      return self.qvalue
+    else:
+      assert not isinstance(self.scale, str), msg
+      return self.qvalue * self.scale
+
+GradientFn = Callable[..., Any]
+
+
+def quant(
+    x,
+    *,
+    cfg: config.Tensor,
+    calibration_axes,
+    transpose_fn=None,
+) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
   msg = (
       'use_fake_quant mode is used in tests and it is exactly equal when'
@@ -97,37 +137,3 @@ def make_fake_quant(cfg: config.Tensor, calibration_axes=None):
     return x_q.dequant()
 
   return fake_quant
-
-
-# TODO(lew): move to aqt_tensor.py
-@flax.struct.dataclass
-class QTensor:
-  """Quantized tensor."""
-
-  # Quantized (compressed) representation of tensor.
-  # Use dequant() method to "decompress" to the original tensor.
-  qvalue: jnp.ndarray
-
-  # (scale == None) can be thought as (scale == 1.0)
-  # (scale == None) means that qvalue is not quantized and can be used directly.
-  # (scale: str) means that for some reason scale is unknown.
-  scale: Union[jnp.ndarray, None, str]
-
-  # Used in dot_general, transposed scales used in post dot_general scaling.
-  # The same comments apply as to scale.
-  # We currently keep it here because:
-  # - we store scale_t in the checkpoint to avoid transposition per inference.
-  # - scale_t is used both in backprop of dot_general and in post-scaling.
-  #   We avoid transposing scale twice.
-  # Invariant: we never should have a situation where out of scale, scale_t,
-  # one is set and one is None.
-  # TODO(lew): Remove scale_t from QTensor.
-  scale_t: Union[jnp.ndarray, None, str]
-
-  def dequant(self) -> jnp.ndarray:
-    msg = f'scale is not available: {self.scale}'
-    if self.scale is None:
-      return self.qvalue
-    else:
-      assert not isinstance(self.scale, str), msg
-      return self.qvalue * self.scale
