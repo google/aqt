@@ -18,6 +18,7 @@ import enum
 from typing import Iterable
 from typing import Optional
 from aqt.jax.v2 import aqt_dot_general
+from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import int_numerics
@@ -52,7 +53,7 @@ class Freezer(nn.Module):
   s_shape: Iterable[int]
   s_init: nn.initializers.Initializer
 
-  def get(self) -> Optional[aqt_dot_general.QTensor]:
+  def get(self) -> Optional[aqt_tensor.QTensor]:
     if self.quant_mode == QuantMode.TRAIN:
       return None
     elif self.quant_mode == QuantMode.CONVERT:
@@ -65,12 +66,19 @@ class Freezer(nn.Module):
       qvalue = self.variable(
           collection, 'value', self.q_init, self.q_shape, self.q_dtype
       )
-      scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
-      return aqt_dot_general.QTensor(qvalue.value, scale.value)
+      # TODO(lew): Store whole QTensor?
+      scale_t = self.variable(collection, 'scale', self.s_init, self.s_shape)
+      # TODO(lew): scale is small, store it instead of using this silly poison.
+      poison = jnp.zeros(
+          (1, 1, 1, 1, 1, 1, 2, 1, 1, 1)
+      )  # hopefully no one uses such shapes
+      return aqt_tensor.QTensor(
+          qvalue.value, scale=poison, scale_t=scale_t.value
+      )
     else:
       assert False, 'Unknown quant mode.'
 
-  def set(self, inputs: aqt_dot_general.QTensor) -> None:
+  def set(self, inputs: aqt_tensor.QTensor) -> None:
     if self.quant_mode == QuantMode.TRAIN:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
@@ -78,9 +86,9 @@ class Freezer(nn.Module):
       qvalue = self.variable(
           collection, 'value', self.q_init, self.q_shape, self.q_dtype
       )
-      scale = self.variable(collection, 'scale', self.s_init, self.s_shape)
+      scale_t = self.variable(collection, 'scale', self.s_init, self.s_shape)
       qvalue.value = inputs.qvalue
-      scale.value = inputs.qvalue_scale_t
+      scale_t.value = inputs.scale_t
     elif self.quant_mode == QuantMode.SERVE:
       # TODO(lew): Optionally compare stored and served value.
       pass
@@ -90,8 +98,8 @@ class Freezer(nn.Module):
 
   @nn.compact
   def __call__(
-      self, inputs: Optional[aqt_dot_general.QTensor]
-  ) -> Optional[aqt_dot_general.QTensor]:
+      self, inputs: Optional[aqt_tensor.QTensor]
+  ) -> Optional[aqt_tensor.QTensor]:
     # TODO(yichizh): Two constraints on Module make the call function necessary:
     # (1) Variables must be created either in setup() or with nn.compact.
     #     We don't want variables in training mode, so nn.compact is better.
