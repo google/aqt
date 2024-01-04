@@ -407,21 +407,9 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
     assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
 
-    def get_qt(fwd_tensor_cfg: config.Tensor):
-      if fwd_tensor_cfg.preprocess is not None:
-        return fwd_tensor_cfg.preprocess(None)
-      return None
+    lhs_qt = cfg.fwd.lhs.get_qtensor() if cfg.fwd.lhs.get_qtensor else None
+    rhs_qt = cfg.fwd.rhs.get_qtensor() if cfg.fwd.rhs.get_qtensor else None
 
-    def set_qt(fwd_tensor_cfg: config.Tensor, qt: aqt_tensor.QTensor) -> None:
-      if fwd_tensor_cfg.preprocess is not None:
-        dtype = fwd_tensor_cfg.numerics.get_dtype()
-        qt_cast = aqt_tensor.QTensor(
-            qt.qvalue.astype(dtype), scale=qt.scale, scale_t=qt.scale_t
-        )
-        fwd_tensor_cfg.preprocess(qt_cast)
-
-    lhs_qt = get_qt(cfg.fwd.lhs)
-    rhs_qt = get_qt(cfg.fwd.rhs)
     out, (out_lhs_qt, out_rhs_qt) = dg(
         lhs=lhs,
         rhs=rhs,
@@ -429,8 +417,20 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         rhs_qt=rhs_qt,
         dimension_numbers=dimension_numbers,
     )
-    set_qt(cfg.fwd.lhs, out_lhs_qt)
-    set_qt(cfg.fwd.rhs, out_rhs_qt)
+
+    # TODO(lew): Ideally all QTensors would be always quantized.
+    #   Move cast as early as possible.
+    def cast(qt: aqt_tensor.QTensor, dtype) -> aqt_tensor.QTensor:
+      return qt.replace(qvalue=qt.qvalue.astype(dtype))
+
+    if cfg.fwd.lhs.set_qtensor:
+      cfg.fwd.lhs.set_qtensor(
+          cast(out_lhs_qt, cfg.fwd.lhs.numerics.get_dtype())
+      )
+    if cfg.fwd.rhs.set_qtensor:
+      cfg.fwd.rhs.set_qtensor(
+          cast(out_rhs_qt, cfg.fwd.rhs.numerics.get_dtype())
+      )
 
     return out
 

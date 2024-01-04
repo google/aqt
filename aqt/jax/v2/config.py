@@ -35,6 +35,9 @@ class Context:
 
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
+# TODO(lew): move config to aqt_tensor.py and use aqt_tensor.QTensor
+QTensor = Any
+
 
 @dataclasses.dataclass(slots=True)
 class Tensor:
@@ -52,11 +55,13 @@ class Tensor:
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
-  # Operations for retrieving or storing quantized tensors and their scales
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
-  # The following dtype Any should be aqt_dot_general.QTensor but that triggers
-  # recursive importing
-  preprocess: Optional[Callable[[Optional[Any]], Optional[Any]]]
+  # If get_qtensor is set, the value it returns will
+  # overwrite the QTensor computed based on actual inputs.
+  get_qtensor: Optional[Callable[[], QTensor]]
+  # "side return"; if set, it is called with computed QTensor.
+  # Implement auxiliary return in presence of fixed signature of dot_general.
+  set_qtensor: Optional[Callable[[QTensor], None]]
   context: Context
 
   @classmethod
@@ -208,7 +213,8 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       use_fake_quant=False,
       # dtype_x=dtype,
       use_fwd_quant=None,
-      preprocess=None,
+      get_qtensor=None,
+      set_qtensor=None,
       context=Context(key=None, train_step=None),
   )
 

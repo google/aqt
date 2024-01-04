@@ -13,6 +13,8 @@
 # limitations under the License.
 """Flax layer for AQT injection."""
 
+# pylint: disable=unnecessary-lambda
+
 import copy
 import enum
 from typing import Iterable
@@ -160,10 +162,7 @@ class AqtDotGeneral(nn.Module):
       rhs_qm = self.rhs_quant_mode
       lhs_qm = self.lhs_quant_mode
 
-      msg = 'The only function that is setting preprocess can be AqtQuantized.'
-      assert cfg.fwd.rhs.preprocess is None, msg
-      assert cfg.fwd.lhs.preprocess is None, msg
-      cfg.fwd.lhs.preprocess = Freezer(
+      lhs_freezer = Freezer(
           name=self.lhs_var_name,
           quant_mode=lhs_qm,
           q_shape=lhs_shape,
@@ -173,7 +172,8 @@ class AqtDotGeneral(nn.Module):
           s_init=self.lhs_scale_init,
           quant_collection=self.quant_collection,
       )
-      cfg.fwd.rhs.preprocess = Freezer(
+
+      rhs_freezer = Freezer(
           name=self.rhs_var_name,
           quant_mode=rhs_qm,
           q_shape=rhs_shape,
@@ -183,6 +183,16 @@ class AqtDotGeneral(nn.Module):
           s_init=self.rhs_scale_init,
           quant_collection=self.quant_collection,
       )
+      msg = 'The only function that is setting get/set_qtensor should be here.'
+      assert cfg.fwd.lhs.get_qtensor is None, msg
+      assert cfg.fwd.lhs.set_qtensor is None, msg
+      assert cfg.fwd.rhs.get_qtensor is None, msg
+      assert cfg.fwd.rhs.set_qtensor is None, msg
+      cfg.fwd.lhs.get_qtensor = lambda: lhs_freezer(None)
+      cfg.fwd.lhs.set_qtensor = lambda qt: lhs_freezer(qt)
+      cfg.fwd.rhs.get_qtensor = lambda: rhs_freezer(None)
+      cfg.fwd.rhs.set_qtensor = lambda qt: rhs_freezer(qt)
+
     key = self.make_rng(self.prng_name) if self.prng_name is not None else None
     config.set_context(cfg, key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
@@ -334,7 +344,8 @@ def config_v4(
         use_fake_quant=False,
         # dtype_x=dtype,
         use_fwd_quant=None,
-        preprocess=None,
+        get_qtensor=None,
+        set_qtensor=None,
         context=config.Context(key=None, train_step=None),
     )
 
