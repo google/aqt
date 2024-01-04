@@ -69,12 +69,12 @@ However if there is any other use, we will drop that assumption."""
     assert cfg.lhs.calib_shared_axes == list(range(1, rank))
     assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
 
-    lhs_q, lhs_inv_scale, _ = aqt._scale_quant(lhs, cfg=cfg.lhs, ca=None)
-    rhs_q, rhs_inv_scale, _ = aqt._scale_quant(rhs, cfg=cfg.rhs, ca=None)
+    lhs_qt, _ = aqt.quant(lhs, cfg=cfg.lhs, scale_shared_axes=None)
+    rhs_qt, _ = aqt.quant(rhs, cfg=cfg.rhs, scale_shared_axes=None)
 
     out = lax.conv_general_dilated(
-        lhs=lhs_q,
-        rhs=rhs_q,
+        lhs=lhs_qt.qvalue,
+        rhs=rhs_qt.qvalue,
         window_strides=window_strides,
         padding=padding,
         lhs_dilation=lhs_dilation,
@@ -86,8 +86,8 @@ However if there is any other use, we will drop that assumption."""
         preferred_element_type=preferred_element_type,
     )
 
-    out = aqt._maybe_mul(out, lhs_inv_scale)
-    out = aqt._maybe_mul(out, rhs_inv_scale)
+    out = aqt._maybe_mul(out, lhs_qt.scale)
+    out = aqt._maybe_mul(out, rhs_qt.scale)
 
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales

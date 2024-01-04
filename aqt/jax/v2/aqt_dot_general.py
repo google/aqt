@@ -38,7 +38,8 @@ import jax.numpy as jnp
 import numpy as onp
 
 
-def _scale_quant(x, *, cfg: config.Tensor, ca):
+# TODO(lew): move to aqt_tensor.py
+def quant(x, *, cfg: config.Tensor, scale_shared_axes, transpose=None):
   """The core quantizing function."""
   msg = (
       'use_fake_quant mode is used in tests and it is exactly equal when'
@@ -51,8 +52,9 @@ def _scale_quant(x, *, cfg: config.Tensor, ca):
   #   what would happen if we pass fq value (xhs_q2) in residual?
 
   if isinstance(cfg.numerics, no_numerics.NoNumerics):
-    return x, None, None
-  shared_axes = cfg.calib_shared_axes or ca
+    qt = QTensor(qvalue=x, scale=None, scale_t=None)
+    return qt, None
+  shared_axes = cfg.calib_shared_axes or scale_shared_axes
   bound = cfg.calibration.get_bound(x, shared_axes)
   abs_max_mapped_to = cfg.numerics.abs_val_mapped_to()
   scale = abs_max_mapped_to / bound
@@ -66,13 +68,13 @@ def _scale_quant(x, *, cfg: config.Tensor, ca):
     #   We should take that into account somehow.
     scale = lax.stop_gradient(scale)
 
-  x_s = _maybe_mul(x, scale)
+  x_s = x * scale
 
-  quant = jax.custom_vjp(cfg.numerics.fwd)
-  quant.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
-  quant = functools.partial(quant, context=cfg.context)
+  numerics_fwd = jax.custom_vjp(cfg.numerics.fwd)
+  numerics_fwd.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
+  numerics_fwd = functools.partial(numerics_fwd, context=cfg.context)
 
-  x_q, quant_grad = jax.vjp(quant, x_s)
+  x_q, quant_grad = jax.vjp(numerics_fwd, x_s)
   # We are passing quant_grad (and not more) ot the backward pass.
   # That is equivalent to having:
   # scale = stop_gradient(scale)
@@ -84,30 +86,46 @@ def _scale_quant(x, *, cfg: config.Tensor, ca):
   # of a larger piece of code like the whole _scale_quant.
   #
   # TODO(lew): Implement configuration of stop-gradient.
-  inv_scale = _maybe_inv(scale)
+  scale = jax.lax.reciprocal(scale)
+  scale_t = 'no transpose given'
+  if transpose is not None:
+    scale_t = transpose(scale)
 
-  return x_q, inv_scale, quant_grad
+  qt = QTensor(qvalue=x_q, scale=scale, scale_t=scale_t)
+  return qt, quant_grad
 
 
-def make_fake_quant(cfg: config.Tensor, ca=None):
+# TODO(lew): move to aqt_tensor.py
+def make_fake_quant(cfg: config.Tensor, scale_shared_axes=None):
   def fake_quant(x):
-    x_q, inv_scale, _ = _scale_quant(x, cfg=cfg, ca=ca)
-    return _maybe_mul(x_q, inv_scale)
+    x_q, _ = quant(x, cfg=cfg, scale_shared_axes=scale_shared_axes)
+    return x_q.dequant()
 
   return fake_quant
 
 
+# TODO(lew): move to aqt_tensor.py
 @flax.struct.dataclass
-# It is used only when use_fwd_quant = True
 class QTensor:
+  """Quantized tensor."""
   qvalue: jnp.ndarray
-  qvalue_scale_t: jnp.ndarray
+  scale: Union[jnp.ndarray, None, str]
+  # Used in DotGeneral, transposed to output shape.
+  scale_t: Union[jnp.ndarray, None, str]
+
+  def dequant(self) -> jnp.ndarray:
+    msg = f'scale is not available: {self.scale}'
+    if self.scale is None:
+      return self.qvalue
+    else:
+      assert not isinstance(self.scale, str), msg
+      return self.qvalue * self.scale
 
 
 @flax.struct.dataclass
 class MultiTensor:
   x: jnp.ndarray
-  qx: Optional[QTensor]
+  qx: QTensor
 
 
 @flax.struct.dataclass
@@ -177,12 +195,6 @@ def _maybe_mul(x, scale):
   return x * scale
 
 
-def _maybe_inv(x):
-  if x is None:
-    return None
-  return 1.0 / x
-
-
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
@@ -209,7 +221,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     #  - Can we carry untransposed scale and transpose here?
     if isinstance(rhs, MultiTensor):
       # We are in gradient code.
-      fwd_quantized = rhs.qx is not None
+      fwd_quantized = rhs.qx.scale_t is not None
       expect_fwd_quantized = cfg.rhs.use_fwd_quant is not None
       msg = (
           'Misconfiguration: use_fwd_quant=True, but there is no fwd'
@@ -217,8 +229,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       )
       assert fwd_quantized == expect_fwd_quantized, msg
       if cfg.rhs.use_fwd_quant:
-        assert rhs.qx is not None, msg
-        lhs = _maybe_mul(lhs, rhs.qx.qvalue_scale_t)
+        assert rhs.qx.scale_t is not None, msg
+        lhs = lhs * rhs.qx.scale_t
         rhs = rhs.qx.qvalue
       else:
         rhs = rhs.x
@@ -252,42 +264,49 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     if lhs_qt is not None:
-      lhs_q, lhs_inv_scale_t = (lhs_qt.qvalue, lhs_qt.qvalue_scale_t)
+      lhs_inv_scale_t = lhs_qt.scale_t
       lhs_quant_grad = 'Poison. Not needed in serving'
       lhs_inv_scale = 'Poison. Fake quant not used in serving.'
       lhs_qx = lhs_qt
     else:
-      lhs_q, lhs_inv_scale, lhs_quant_grad = _scale_quant(
-          lhs, cfg=cfg.lhs, ca=lhs_ca
+      transpose = functools.partial(
+          _lhs_scale_transpose,
+          dimension_numbers=dimension_numbers,
+          lhs_shape=lhs.shape,
+          rhs_shape=rhs.shape,
       )
-      lhs_inv_scale_t = _lhs_scale_transpose(
-          lhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+
+      lhs_qx, lhs_quant_grad = quant(
+          lhs, cfg=cfg.lhs, scale_shared_axes=lhs_ca, transpose=transpose
       )
-      lhs_qx = (
-          None
-          if lhs_inv_scale_t is None
-          else QTensor(qvalue=lhs_q, qvalue_scale_t=lhs_inv_scale_t)
+      # TODO(lew): delete these
+      lhs_inv_scale, lhs_inv_scale_t = (
+          lhs_qx.scale,
+          lhs_qx.scale_t,
       )
 
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qx)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
     if rhs_qt is not None:
-      rhs_q, rhs_inv_scale_t = (rhs_qt.qvalue, rhs_qt.qvalue_scale_t)
+      rhs_inv_scale_t = rhs_qt.scale_t
       rhs_quant_grad = 'Poison. Not needed in serving'
       rhs_inv_scale = 'Poison. Fake quant not used in serving.'
       rhs_qx = rhs_qt
     else:
-      rhs_q, rhs_inv_scale, rhs_quant_grad = _scale_quant(
-          rhs, cfg=cfg.rhs, ca=rhs_ca
+      transpose = functools.partial(
+          _rhs_scale_transpose,
+          dimension_numbers=dimension_numbers,
+          lhs_shape=lhs.shape,
+          rhs_shape=rhs.shape,
       )
-      rhs_inv_scale_t = _rhs_scale_transpose(
-          rhs_inv_scale, dimension_numbers, lhs.shape, rhs.shape
+      rhs_qx, rhs_quant_grad = quant(
+          rhs, cfg=cfg.rhs, scale_shared_axes=rhs_ca, transpose=transpose
       )
-      rhs_qx = (
-          None
-          if rhs_inv_scale_t is None
-          else QTensor(qvalue=rhs_q, qvalue_scale_t=rhs_inv_scale_t)
+      # TODO(lew): delete these
+      rhs_inv_scale, rhs_inv_scale_t = (
+          rhs_qx.scale,
+          rhs_qx.scale_t,
       )
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qx)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
@@ -304,16 +323,20 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       # So fake quant becomes casting to dtype first, then casting to bfloat.
       # This is because FP8 numerics relies on this cast to do the rounding.
       assert lhs_cast_dtype is None, msg
-      lhs_q = _maybe_mul(lhs_q, lhs_inv_scale)
+      # TODO(lew): dequant
+      lhs_qin = _maybe_mul(lhs_qx.qvalue, lhs_inv_scale)
     else:
+      lhs_qin = lhs_qx.qvalue
       if lhs_cast_dtype is not None:
-        lhs_q = lhs_q.astype(lhs_cast_dtype)
+        lhs_qin = lhs_qin.astype(lhs_cast_dtype)
     if cfg.rhs.use_fake_quant:
       assert rhs_cast_dtype is None, msg
-      rhs_q = _maybe_mul(rhs_q, rhs_inv_scale)
+      # TODO(lew): dequant
+      rhs_qin = _maybe_mul(rhs_qx.qvalue, rhs_inv_scale)
     else:
+      rhs_qin = rhs_qx.qvalue
       if rhs_cast_dtype is not None:
-        rhs_q = rhs_q.astype(rhs_cast_dtype)
+        rhs_qin = rhs_qin.astype(rhs_cast_dtype)
 
     dtype_ms = (
         f'Found {cfg.dg_accumulator_dtype=}, {lhs_cast_dtype=} and'
@@ -324,8 +347,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     if cfg.dg_accumulator_dtype == jnp.int32:
       assert lhs_cast_dtype == jnp.int8 and rhs_cast_dtype == jnp.int8, dtype_ms
     out = lax.dot_general(
-        lhs_q,
-        rhs_q,
+        lhs_qin,
+        rhs_qin,
         dimension_numbers=dimension_numbers,
         preferred_element_type=cfg.dg_accumulator_dtype,
         precision=lax.Precision.DEFAULT,
@@ -494,7 +517,10 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     def set_qt(fwd_tensor_cfg: config.Tensor, qt: QTensor) -> None:
       if fwd_tensor_cfg.preprocess is not None:
         dtype = fwd_tensor_cfg.numerics.get_dtype()
-        qt_cast = QTensor(qt.qvalue.astype(dtype), qt.qvalue_scale_t)
+        # TODO(lew): Add QTensor astype method.
+        qt_cast = QTensor(
+            qt.qvalue.astype(dtype), scale=qt.scale, scale_t=qt.scale_t
+        )
         fwd_tensor_cfg.preprocess(qt_cast)
 
     lhs_qt = get_qt(cfg.fwd.lhs)
