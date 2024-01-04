@@ -70,8 +70,8 @@ However if there is any other use, we will drop that assumption."""
     assert cfg.lhs.calib_shared_axes == list(range(1, rank))
     assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
 
-    lhs_qt, _ = aqt_tensor.quant(lhs, cfg=cfg.lhs, scale_shared_axes=None)
-    rhs_qt, _ = aqt_tensor.quant(rhs, cfg=cfg.rhs, scale_shared_axes=None)
+    lhs_qt, _ = aqt_tensor.quant(lhs, cfg=cfg.lhs, calibration_axes=None)
+    rhs_qt, _ = aqt_tensor.quant(rhs, cfg=cfg.rhs, calibration_axes=None)
 
     out = lax.conv_general_dilated(
         lhs=lhs_qt.qvalue,
@@ -87,6 +87,8 @@ However if there is any other use, we will drop that assumption."""
         preferred_element_type=preferred_element_type,
     )
 
+    # It seems lucky that original scale has shape suitable for output
+    # scaling without any transposition.
     out = aqt._maybe_mul(out, lhs_qt.scale)
     out = aqt._maybe_mul(out, rhs_qt.scale)
 

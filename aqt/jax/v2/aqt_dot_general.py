@@ -180,10 +180,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     if lhs_qt is not None:
-      lhs_inv_scale_t = lhs_qt.scale_t
       lhs_quant_grad = 'Poison. Not needed in serving'
-      lhs_inv_scale = 'Poison. Fake quant not used in serving.'
-      lhs_qx = lhs_qt
     else:
       transpose = functools.partial(
           _lhs_scale_transpose,
@@ -192,23 +189,15 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           rhs_shape=rhs.shape,
       )
 
-      lhs_qx, lhs_quant_grad = aqt_tensor.quant(
-          lhs, cfg=cfg.lhs, scale_shared_axes=lhs_ca, transpose=transpose
-      )
-      # TODO(lew): delete these
-      lhs_inv_scale, lhs_inv_scale_t = (
-          lhs_qx.scale,
-          lhs_qx.scale_t,
+      lhs_qt, lhs_quant_grad = aqt_tensor.quant(
+          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca, transpose_fn=transpose
       )
 
-    lhs_mt = MultiTensor(x=lhs, qx=lhs_qx)
+    lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
     if rhs_qt is not None:
-      rhs_inv_scale_t = rhs_qt.scale_t
       rhs_quant_grad = 'Poison. Not needed in serving'
-      rhs_inv_scale = 'Poison. Fake quant not used in serving.'
-      rhs_qx = rhs_qt
     else:
       transpose = functools.partial(
           _rhs_scale_transpose,
@@ -216,15 +205,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           lhs_shape=lhs.shape,
           rhs_shape=rhs.shape,
       )
-      rhs_qx, rhs_quant_grad = aqt_tensor.quant(
-          rhs, cfg=cfg.rhs, scale_shared_axes=rhs_ca, transpose=transpose
+      rhs_qt, rhs_quant_grad = aqt_tensor.quant(
+          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca, transpose_fn=transpose
       )
-      # TODO(lew): delete these
-      rhs_inv_scale, rhs_inv_scale_t = (
-          rhs_qx.scale,
-          rhs_qx.scale_t,
-      )
-    rhs_mt = MultiTensor(x=rhs, qx=rhs_qx)
+    rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
     # TODO(lew): mt.x above should be clipped for clipping calibrations
@@ -239,18 +223,16 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       # So fake quant becomes casting to dtype first, then casting to bfloat.
       # This is because FP8 numerics relies on this cast to do the rounding.
       assert lhs_cast_dtype is None, msg
-      # TODO(lew): dequant
-      lhs_qin = _maybe_mul(lhs_qx.qvalue, lhs_inv_scale)
+      lhs_qin = lhs_qt.dequant()
     else:
-      lhs_qin = lhs_qx.qvalue
+      lhs_qin = lhs_qt.qvalue
       if lhs_cast_dtype is not None:
         lhs_qin = lhs_qin.astype(lhs_cast_dtype)
     if cfg.rhs.use_fake_quant:
       assert rhs_cast_dtype is None, msg
-      # TODO(lew): dequant
-      rhs_qin = _maybe_mul(rhs_qx.qvalue, rhs_inv_scale)
+      rhs_qin = rhs_qt.dequant()
     else:
-      rhs_qin = rhs_qx.qvalue
+      rhs_qin = rhs_qt.qvalue
       if rhs_cast_dtype is not None:
         rhs_qin = rhs_qin.astype(rhs_cast_dtype)
 
@@ -273,9 +255,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     #   Relevant: https://github.com/google/jax/issues/14022
 
     if not cfg.lhs.use_fake_quant:
-      out = _maybe_mul(out, lhs_inv_scale_t)
+      out = _maybe_mul(out, lhs_qt.scale_t)
     if not cfg.rhs.use_fake_quant:
-      out = _maybe_mul(out, rhs_inv_scale_t)
+      out = _maybe_mul(out, rhs_qt.scale_t)
 
     res = DotGeneralRes(
         lhs=lhs_res,
@@ -433,7 +415,6 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     def set_qt(fwd_tensor_cfg: config.Tensor, qt: aqt_tensor.QTensor) -> None:
       if fwd_tensor_cfg.preprocess is not None:
         dtype = fwd_tensor_cfg.numerics.get_dtype()
-        # TODO(lew): Add QTensor astype method.
         qt_cast = aqt_tensor.QTensor(
             qt.qvalue.astype(dtype), scale=qt.scale, scale_t=qt.scale_t
         )
