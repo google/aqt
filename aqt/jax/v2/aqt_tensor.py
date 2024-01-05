@@ -123,7 +123,7 @@ def quant(
   #
   # TODO(lew): Implement configuration of stop-gradient.
   scale = jax.lax.reciprocal(scale)
-  scale_t = 'no transpose given'
+  scale_t = None
   if transpose_fn is not None:
     scale_t = transpose_fn(scale)
 

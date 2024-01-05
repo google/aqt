@@ -181,6 +181,11 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
+      if lhs_qt.scale_t is None and lhs_qt.scale is not None:
+        lhs_scale_t = _lhs_scale_transpose(
+            lhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+        )
+        lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
     else:
       transpose = functools.partial(
           _lhs_scale_transpose,
@@ -198,6 +203,11 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     if rhs_qt is not None:
       rhs_quant_grad = 'Poison. Not needed in serving'
+      if rhs_qt.scale_t is None and rhs_qt.scale is not None:
+        rhs_scale_t = _rhs_scale_transpose(
+            rhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+        )
+        rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     else:
       transpose = functools.partial(
           _rhs_scale_transpose,
