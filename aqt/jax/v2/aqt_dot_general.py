@@ -23,7 +23,6 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
-import functools
 from typing import Callable, Optional, Union
 
 from aqt.jax.v2 import aqt_tensor
@@ -181,33 +180,39 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
+      if lhs_qt.scale_t is None and lhs_qt.scale is not None:
+        lhs_scale_t = _lhs_scale_transpose(
+            lhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+        )
+        lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
     else:
-      transpose = functools.partial(
-          _lhs_scale_transpose,
-          dimension_numbers=dimension_numbers,
-          lhs_shape=lhs.shape,
-          rhs_shape=rhs.shape,
-      )
-
       lhs_qt, lhs_quant_grad = aqt_tensor.quant(
-          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca, transpose_fn=transpose
+          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca
       )
+      lhs_scale_t = _lhs_scale_transpose(
+          lhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+      )
+      lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
 
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
     if rhs_qt is not None:
       rhs_quant_grad = 'Poison. Not needed in serving'
+      if rhs_qt.scale_t is None and rhs_qt.scale is not None:
+        rhs_scale_t = _rhs_scale_transpose(
+            rhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+        )
+        rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     else:
-      transpose = functools.partial(
-          _rhs_scale_transpose,
-          dimension_numbers=dimension_numbers,
-          lhs_shape=lhs.shape,
-          rhs_shape=rhs.shape,
-      )
       rhs_qt, rhs_quant_grad = aqt_tensor.quant(
-          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca, transpose_fn=transpose
+          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca
       )
+      rhs_scale_t = _rhs_scale_transpose(
+          rhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+      )
+      rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
+
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
