@@ -23,7 +23,7 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 import functools
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -43,8 +43,7 @@ class QTensor:
 
   # (scale == None) can be thought as (scale == 1.0)
   # (scale == None) means that qvalue is not quantized and can be used directly.
-  # (scale: str) means that for some reason scale is unknown.
-  scale: Union[jnp.ndarray, None, str]
+  scale: Optional[jnp.ndarray]
 
   # Used in dot_general, transposed scales used in post dot_general scaling.
   # The same comments apply as to scale.
@@ -55,15 +54,10 @@ class QTensor:
   # Invariant: we never should have a situation where out of scale, scale_t,
   # one is set and one is None.
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
-  scale_t: Union[jnp.ndarray, None, str]
+  scale_t: Optional[jnp.ndarray]
 
   def dequant(self) -> jnp.ndarray:
-    msg = f'scale is not available: {self.scale}'
-    if self.scale is None:
-      return self.qvalue
-    else:
-      assert not isinstance(self.scale, str), msg
-      return self.qvalue * self.scale
+    return self.qvalue if self.scale is None else self.qvalue * self.scale
 
 GradientFn = Callable[..., Any]
 
@@ -73,7 +67,6 @@ def quant(
     *,
     cfg: config.Tensor,
     calibration_axes,
-    transpose_fn=None,
 ) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
   msg = (
@@ -123,11 +116,7 @@ def quant(
   #
   # TODO(lew): Implement configuration of stop-gradient.
   scale = jax.lax.reciprocal(scale)
-  scale_t = 'no transpose given'
-  if transpose_fn is not None:
-    scale_t = transpose_fn(scale)
-
-  qt = QTensor(qvalue=x_q, scale=scale, scale_t=scale_t)
+  qt = QTensor(qvalue=x_q, scale=scale, scale_t=None)
   return qt, quant_grad
 
 

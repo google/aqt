@@ -124,11 +124,13 @@ class AqtDotGeneral(nn.Module):
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
+  lhs_qt: Optional[aqt_tensor.QTensor] = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
+  rhs_qt: Optional[aqt_tensor.QTensor] = None
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -188,13 +190,14 @@ class AqtDotGeneral(nn.Module):
       assert cfg.fwd.lhs.set_qtensor is None, msg
       assert cfg.fwd.rhs.get_qtensor is None, msg
       assert cfg.fwd.rhs.set_qtensor is None, msg
-      cfg.fwd.lhs.get_qtensor = lambda: lhs_freezer(None)
+      cfg.fwd.lhs.get_qtensor = lambda: self.lhs_qt or lhs_freezer(None)
       cfg.fwd.lhs.set_qtensor = lambda qt: lhs_freezer(qt)
-      cfg.fwd.rhs.get_qtensor = lambda: rhs_freezer(None)
+      cfg.fwd.rhs.get_qtensor = lambda: self.rhs_qt or rhs_freezer(None)
       cfg.fwd.rhs.set_qtensor = lambda qt: rhs_freezer(qt)
 
-    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
-    config.set_context(cfg, key, train_step=None)
+      prng_name = self.prng_name
+      key = self.make_rng(prng_name) if prng_name is not None else None
+      config.set_context(cfg, key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
     return aqt_dg
 
@@ -228,11 +231,13 @@ class AqtEinsum(flax.struct.PyTreeNode):
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
+  lhs_qt: Optional[aqt_tensor.QTensor] = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
+  rhs_qt: Optional[aqt_tensor.QTensor] = None
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -293,10 +298,12 @@ class AqtEinsum(flax.struct.PyTreeNode):
         lhs_init=lhs_init,
         lhs_scale_init=lhs_scale_init,
         lhs_var_name=lhs_var_name,
+        lhs_qt=self.lhs_qt,
         rhs_quant_mode=rhs_quant_mode,
         rhs_init=rhs_init,
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
+        rhs_qt=self.rhs_qt,
         quant_collection=quant_collection,
         name=self.name,
     )
@@ -377,8 +384,8 @@ def config_v4(
       drhs=dg_raw_config(drhs_bits, drhs_bits, local_aqt=drhs_local_aqt),
   )
 
-  cfg.dlhs.rhs.use_fwd_quant = False
-  cfg.drhs.rhs.use_fwd_quant = False
+  cfg.fwd.lhs.use_fwd_quant = False
+  cfg.fwd.rhs.use_fwd_quant = False
 
   # Typically we have (but I don't know if it is guraranteed):
   # - vjp_lhs_stochastic_rounding is referring to the gradient and
