@@ -358,9 +358,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         lhs_quant = not isinstance(cfg.fwd.lhs.numerics, no_numerics.NoNumerics)
         rhs_quant = not isinstance(cfg.fwd.rhs.numerics, no_numerics.NoNumerics)
         if lhs_quant:
-          cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+          cfg.fwd.lhs.use_fwd_quant = use_fwd_quant
         if rhs_quant:
-          cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+          cfg.fwd.rhs.use_fwd_quant = use_fwd_quant
       if local_aqt is not None:
         # Currently we are not supporting local_aqt in fwd pass
         # cfg.fwd.local_aqt = local_aqt
@@ -425,18 +425,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             dimension_numbers,
         ):
           del lhs_qt, rhs_qt
-          if isinstance(rhs, aqt.MultiTensor):
-            rhs = rhs.x
 
           ret = jax.lax.dot_general(lhs, rhs, dimension_numbers)
           ret *= delta
 
           def res(v):
             return aqt.TensorRes(
-                mt=aqt.MultiTensor(
-                    x=v,
-                    qx=aqt_tensor.QTensor(qvalue=v, scale=None, scale_t=None),
-                ),
+                qt=aqt_tensor.QTensor(qvalue=v, scale=None, scale_t=None),
                 quant_grad=None,
             )
 

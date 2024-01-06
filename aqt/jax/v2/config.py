@@ -276,12 +276,10 @@ def dot_general_make(
   drhs = dot_general_raw_make(bwd_bits, bwd_bits, local_aqt=drhs_local_aqt)
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
-  # Surprising: lhs quantization determines what drhs can do.
   if lhs_bits is not None:
-    # Only rhs is accepting MultiTensor.
-    cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+    cfg.fwd.lhs.use_fwd_quant = use_fwd_quant
   if rhs_bits is not None:
-    cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+    cfg.fwd.rhs.use_fwd_quant = use_fwd_quant
   return cfg
 
 
@@ -366,8 +364,8 @@ def config_v3(
   drhs = dot_general_raw_make(drhs_bits, drhs_bits, local_aqt=drhs_local_aqt)
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
-  cfg.dlhs.rhs.use_fwd_quant = False
-  cfg.drhs.rhs.use_fwd_quant = False
+  cfg.fwd.lhs.use_fwd_quant = False
+  cfg.fwd.rhs.use_fwd_quant = False
 
   # Typically we have (but I don't know if it is guraranteed):
   # - vjp_lhs_stochastic_rounding is referring to the gradient and

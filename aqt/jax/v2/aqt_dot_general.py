@@ -23,7 +23,6 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
-import functools
 from typing import Callable, Optional, Union
 
 from aqt.jax.v2 import aqt_tensor
@@ -39,15 +38,9 @@ import numpy as onp
 
 
 @flax.struct.dataclass
-class MultiTensor:
-  x: jnp.ndarray
-  qx: aqt_tensor.QTensor
-
-
-@flax.struct.dataclass
 class TensorRes:
   """All the things we pass from the forward pass to the backward pass."""
-  mt: MultiTensor
+  qt: aqt_tensor.QTensor
   quant_grad: Union[Callable[[jnp.ndarray], tuple[jnp.ndarray]], None]
 
 
@@ -120,7 +113,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
   def dot_general_raw(
       lhs: jnp.ndarray,
-      rhs: Union[jnp.ndarray, MultiTensor],
+      rhs: jnp.ndarray,
       # xhs_qt are used in serving.
       lhs_qt: Optional[aqt_tensor.QTensor],
       rhs_qt: Optional[aqt_tensor.QTensor],
@@ -129,29 +122,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     """Creates a dot_general function without custom gradient."""
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
     # We need to copy because we modify cfg to populate some defaults.
-
-    # TODO(lew):
-    #  - Use qx.value with the int type.
-    #  - Handle qx.value with the int type in an optimized way.
-    #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
-    #  - Can we carry untransposed scale and transpose here?
-    if isinstance(rhs, MultiTensor):
-      # We are in gradient code.
-      fwd_quantized = rhs.qx.scale_t is not None
-      expect_fwd_quantized = cfg.rhs.use_fwd_quant is not None
-      msg = (
-          'Misconfiguration: use_fwd_quant=True, but there is no fwd'
-          ' quantization (but rhs.qx is None).'
-      )
-      assert fwd_quantized == expect_fwd_quantized, msg
-      if cfg.rhs.use_fwd_quant:
-        assert rhs.qx.scale_t is not None, msg
-        lhs = lhs * rhs.qx.scale_t
-        rhs = rhs.qx.qvalue
-      else:
-        rhs = rhs.x
-    else:
-      assert cfg.rhs.use_fwd_quant is None, 'cannot set use_fwd_quant in fwd'
 
     if cfg.local_aqt is not None:
 
@@ -181,35 +151,35 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
+      if lhs_qt.scale_t is None and lhs_qt.scale is not None:
+        lhs_scale_t = _lhs_scale_transpose(
+            lhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+        )
+        lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
     else:
-      transpose = functools.partial(
-          _lhs_scale_transpose,
-          dimension_numbers=dimension_numbers,
-          lhs_shape=lhs.shape,
-          rhs_shape=rhs.shape,
-      )
-
       lhs_qt, lhs_quant_grad = aqt_tensor.quant(
-          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca, transpose_fn=transpose
+          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca
       )
-
-    lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
-    lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
+      lhs_scale_t = _lhs_scale_transpose(
+          lhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+      )
+      lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
 
     if rhs_qt is not None:
       rhs_quant_grad = 'Poison. Not needed in serving'
+      if rhs_qt.scale_t is None and rhs_qt.scale is not None:
+        rhs_scale_t = _rhs_scale_transpose(
+            rhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+        )
+        rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     else:
-      transpose = functools.partial(
-          _rhs_scale_transpose,
-          dimension_numbers=dimension_numbers,
-          lhs_shape=lhs.shape,
-          rhs_shape=rhs.shape,
-      )
       rhs_qt, rhs_quant_grad = aqt_tensor.quant(
-          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca, transpose_fn=transpose
+          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca
       )
-    rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
-    rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
+      rhs_scale_t = _rhs_scale_transpose(
+          rhs_qt.scale, dimension_numbers, lhs.shape, rhs.shape
+      )
+      rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
 
     # TODO(lew): mt.x above should be clipped for clipping calibrations
 
@@ -259,10 +229,38 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     if not cfg.rhs.use_fake_quant:
       out = _maybe_mul(out, rhs_qt.scale_t)
 
-    res = DotGeneralRes(
-        lhs=lhs_res,
-        rhs=rhs_res,
-    )
+    # TODO(lew):
+    #  - Use qx.value with the int type.
+    #  - Handle qx.value with the int type in an optimized way.
+    #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
+    #  - Can we carry untransposed scale and transpose here?
+    def _residual(
+        lhs, lhs_qt, lhs_quant_grad, rhs, rhs_qt, rhs_quant_grad
+    ) -> DotGeneralRes:
+      # This fn only has effect in fwd. We don't care about 2nd derivatives.
+      def transform_qt(x, qt, cfg_tensor):
+        fwd_not_quantized = qt.scale_t is None
+        # TODO(yichizh): rename cfg_tensor.use_fwd_quant to save_fwd_quant
+        # and it should be a bool
+        save_fwd_quant = cfg_tensor.use_fwd_quant
+        msg = (
+            'Misconfiguration: use_fwd_quant=True, but there is no fwd'
+            ' quantized tensor.'
+        )
+        assert not (fwd_not_quantized and save_fwd_quant), msg
+        if not save_fwd_quant:
+          qt = qt.replace(qvalue=x, scale=None, scale_t=None)
+        return qt
+
+      lhs_qt = transform_qt(lhs, lhs_qt, cfg.lhs)
+      rhs_qt = transform_qt(rhs, rhs_qt, cfg.rhs)
+      res = DotGeneralRes(
+          lhs=TensorRes(qt=lhs_qt, quant_grad=lhs_quant_grad),
+          rhs=TensorRes(qt=rhs_qt, quant_grad=rhs_quant_grad),
+      )
+      return res
+
+    res = _residual(lhs, lhs_qt, lhs_quant_grad, rhs, rhs_qt, rhs_quant_grad)
     if cfg.local_aqt is not None:
       assert len(lhs_ca) == len(rhs_ca)
       if len(lhs_ca) > 0:
@@ -303,7 +301,7 @@ def _dot_general_raw_attach_gradient(
         )
         ret = ret.astype(lhs.dtype)
       # We return these values to allow for materialization.
-      qret = (res.lhs.mt.qx, res.rhs.mt.qx)
+      qret = (res.lhs.qt, res.rhs.qt)
       if return_residual:
         return ((ret, qret), res)
       else:
@@ -330,7 +328,7 @@ def _dot_general_raw_attach_gradient(
         dot_general,
         y_is_lhs,
     ):
-      y_ndim = y_res.mt.x.ndim
+      y_ndim = y_res.qt.qvalue.ndim
 
       (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
       if y_is_lhs:
@@ -345,7 +343,9 @@ def _dot_general_raw_attach_gradient(
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
-      out, _ = dot_general(g, y_res.mt, None, None, dims)
+      g_in = g if y_res.qt.scale_t is None else g * y_res.qt.scale_t
+      # TODO(yichizh): to avoid double quant in bwd, we could pass y_res.qt
+      out, _ = dot_general(g_in, y_res.qt.qvalue, None, None, dims)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
