@@ -95,6 +95,8 @@ class IntNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
     if self.round:
       # TODO(lew): Have bucket centers at 2*k + 1, not at halves.
       round_to_halves = not self.preserve_zero
+      # TODO(yichizh): replace rounding in numerics with casting to dtype,
+      # then back to x.dtype.
       if round_to_halves:
         x = jnp.floor(x) + 0.5
       else:

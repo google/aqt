@@ -40,8 +40,8 @@ class MnistTest(parameterized.TestCase):
     )
     # below 3 lines are differences between config_v4/v3 and fully_quantized
     config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
-    aqt_cfg.dlhs.rhs.use_fwd_quant = True
-    aqt_cfg.drhs.rhs.use_fwd_quant = True
+    aqt_cfg.fwd.lhs.use_fwd_quant = True
+    aqt_cfg.fwd.rhs.use_fwd_quant = True
 
     def forward(model, apply_fn):
       return apply_fn(
