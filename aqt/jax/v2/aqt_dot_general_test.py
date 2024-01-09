@@ -667,6 +667,60 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
 
+  @parameterized.parameters(
+      # 'bmnts,bsnh->bmtnh'
+      (
+          (2, 3, 4, 5, 6),
+          (2, 6, 4, 1),
+          (((4,), (1,)), ((0, 2), (0, 2))),
+          (2, 1, 4, 1, 6),
+      ),
+      # 'bmkgts,bskh->bmtkgh'
+      (
+          (2, 3, 4, 5, 6, 7),
+          (2, 7, 4, 1),
+          (((5,), (1,)), ((0, 2), (0, 2))),
+          (2, 1, 4, 1, 1, 7),
+      ),
+  )
+  def test_rhs_scale_transpose_for_lhs_input(
+      self, lhs_shape, rhs_scale_shape, dimension_numbers, expected_shape
+  ):
+    lhs = jnp.zeros(lhs_shape)
+    rhs_scale = jnp.zeros(rhs_scale_shape)
+    result = aqt.rhs_scale_transpose_for_lhs_input(
+        rhs_scale, dimension_numbers, lhs.shape
+    )
+
+    self.assertEqual(result.shape, expected_shape)
+
+  @parameterized.parameters(
+      # 'bmnts,bsnh->bmtnh'
+      (
+          (2, 1, 4, 1, 3),
+          (2, 3, 4, 5),
+          (((4,), (1,)), ((0, 2), (0, 2))),
+          (2, 3, 4, 1),
+      ),
+      # 'bmkgts,bskh->bmtkgh'
+      (
+          (2, 1, 4, 1, 1, 3),
+          (2, 3, 4, 5),
+          (((5,), (1,)), ((0, 2), (0, 2))),
+          (2, 3, 4, 1),
+      ),
+  )
+  def test_lhs_scale_transpose_for_rhs_input(
+      self, lhs_scale_shape, rhs_shape, dimension_numbers, expected_shape
+  ):
+    lhs_scale = jnp.zeros(lhs_scale_shape)
+    rhs = jnp.zeros(rhs_shape)
+    result = aqt.lhs_scale_transpose_for_rhs_input(
+        lhs_scale, dimension_numbers, rhs.shape
+    )
+
+    self.assertEqual(result.shape, expected_shape)
+
 
 if __name__ == "__main__":
   absltest.main()

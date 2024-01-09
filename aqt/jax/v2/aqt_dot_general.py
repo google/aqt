@@ -105,6 +105,70 @@ def _rhs_scale_transpose(rhs_scale, dimension_numbers, lhs_shape, rhs_shape):
   return qrhs_scale_t
 
 
+def _scale_trans_for_other_input(
+    x, my_ca, my_ba, other_ca, other_ba, other_rank
+):
+  """Transposes x to other inputs' dimension order."""
+  my_ca = list(my_ca)
+  my_ba = list(my_ba)
+  other_ca = list(other_ca)
+  other_ba = list(other_ba)
+
+  # Match the rank.
+  if len(x.shape) < other_rank:
+    x = x.reshape(list(x.shape) + [1] * (other_rank - len(x.shape)))
+
+  transpose_dim = [-1] * len(x.shape)
+  my_axis_mapped = my_ca + my_ba
+  other_axis_mapped = other_ca + other_ba
+  my_ra = list(i for i in range(len(x.shape)) if i not in my_axis_mapped)
+  for axis in my_ra:
+    assert x.shape[axis] == 1
+  for my_axis, other_axis in zip(my_axis_mapped, other_axis_mapped):
+    transpose_dim[other_axis] = my_axis
+
+  # Fill unrelated axis with remaining axis.
+  ra_idx = 0
+  for transpose_dim_idx, transpose_dim_value in enumerate(transpose_dim):
+    if transpose_dim_value == -1:
+      transpose_dim[transpose_dim_idx] = my_ra[ra_idx]
+      ra_idx += 1
+  assert ra_idx == len(my_ra)
+
+  # Transpose.
+  x = jnp.transpose(x, transpose_dim)
+
+  # Remove redundant axis.
+  if len(x.shape) > other_rank:
+    for idx in range(len(x.shape), other_rank):
+      assert x.shape[idx] == 1
+    x = x.reshape(x.shape[:other_rank])
+
+  return x
+
+
+def lhs_scale_transpose_for_rhs_input(lhs_scale, dimension_numbers, rhs_shape):
+  """Transposes lhs_scale to rhs input dimension order."""
+  if lhs_scale is None:
+    return None
+
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  return _scale_trans_for_other_input(
+      lhs_scale, lhs_ca, lhs_ba, rhs_ca, rhs_ba, len(rhs_shape)
+  )
+
+
+def rhs_scale_transpose_for_lhs_input(rhs_scale, dimension_numbers, lhs_shape):
+  """Transposes lhs_scale to rhs input dimension order."""
+  if rhs_scale is None:
+    return None
+
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  return _scale_trans_for_other_input(
+      rhs_scale, rhs_ca, rhs_ba, lhs_ca, lhs_ba, len(lhs_shape)
+  )
+
+
 def _maybe_mul(x, scale):
   if scale is None:
     return x
@@ -146,6 +210,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       assert fwd_quantized == expect_fwd_quantized, msg
       if cfg.rhs.use_fwd_quant:
         assert rhs.qx.scale_t is not None, msg
+        # TODO(lew): Investigate why _rhs_scale_transpose_for_lhs_input is not
+        # needed here.
         lhs = lhs * rhs.qx.scale_t
         rhs = rhs.qx.qvalue
       else:
