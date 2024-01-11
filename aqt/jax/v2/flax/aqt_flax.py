@@ -18,7 +18,7 @@
 import copy
 import enum
 from typing import Iterable
-from typing import Optional
+from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
@@ -42,9 +42,14 @@ class Freezer(nn.Module):
   """Identity function that can freeze its input.
 
   On default it is an identity function that saves the input in a variable.
-  In 'use_frozen=True' mode, ignores the input and returns the frozen value. It
-  is usefult to implement 'constant folding' and put quantized weights and
-  scales in the checkpoint for serving.
+  In 'quant_mode=QuantMode.Serve' mode, ignores the input and returns the frozen
+  value. It is usefult to implement 'constant folding' and put quantized weights
+  and scales in the checkpoint for serving. Specifically:
+
+  self.get() returns None when quant_mode=TRAIN or CONVERT, returns variable
+  when quant_mode=SERVE.
+  self.set() does nothing when quant_mode=TRAIN or SERVE, creates and stores
+  quantized tensor when quant_mode=CONVERT.
   """
 
   quant_collection: str
@@ -118,12 +123,17 @@ class AqtDotGeneral(nn.Module):
   prng_name: Optional[str] = 'params'
 
   # TODO(lew): split out separate class for each side.
+  # Quant mode determines whether flax variables are created to store quantized
+  # inputs. Refer to the Freezer doc str to see variable creation in each mode.
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
+  # apply_quant_mode determines if using Freezer in cfg.get/set_tensor
+  lhs_apply_quant_mode: bool = True
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
+  rhs_apply_quant_mode: bool = True
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
@@ -181,18 +191,22 @@ class AqtDotGeneral(nn.Module):
           s_init=self.rhs_scale_init,
           quant_collection=self.quant_collection,
       )
-      msg = 'The only function that is setting get/set_qtensor should be here.'
-      assert cfg.fwd.lhs.get_qtensor is None, msg
-      assert cfg.fwd.lhs.set_qtensor is None, msg
-      assert cfg.fwd.rhs.get_qtensor is None, msg
-      assert cfg.fwd.rhs.set_qtensor is None, msg
-      cfg.fwd.lhs.get_qtensor = lambda: lhs_freezer(None)
-      cfg.fwd.lhs.set_qtensor = lambda qt: lhs_freezer(qt)
-      cfg.fwd.rhs.get_qtensor = lambda: rhs_freezer(None)
-      cfg.fwd.rhs.set_qtensor = lambda qt: rhs_freezer(qt)
 
-    key = self.make_rng(self.prng_name) if self.prng_name is not None else None
-    config.set_context(cfg, key, train_step=None)
+      msg = 'get/set_qtensor should only be auto-set by AqtEinsum or AqtDotGen.'
+      if self.lhs_apply_quant_mode:
+        assert cfg.fwd.lhs.get_qtensor is None, msg
+        assert cfg.fwd.lhs.set_qtensor is None, msg
+        cfg.fwd.lhs.get_qtensor = lambda: lhs_freezer(None)
+        cfg.fwd.lhs.set_qtensor = lambda qt: lhs_freezer(qt)
+      if self.rhs_apply_quant_mode:
+        assert cfg.fwd.rhs.get_qtensor is None, msg
+        assert cfg.fwd.rhs.set_qtensor is None, msg
+        cfg.fwd.rhs.get_qtensor = lambda: rhs_freezer(None)
+        cfg.fwd.rhs.set_qtensor = lambda qt: rhs_freezer(qt)
+
+      prng_name = self.prng_name
+      key = self.make_rng(prng_name) if prng_name is not None else None
+      config.set_context(cfg, key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
     return aqt_dg
 
@@ -238,8 +252,13 @@ class AqtEinsum(flax.struct.PyTreeNode):
 
   name: Optional[str] = None
 
-  def __call__(self, eqn, lhs_g, rhs_g):
-    def einsum(lhs_l, rhs_l, dg=jax.lax.dot_general):
+  def __call__(
+      self,
+      eqn,
+      lhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
+      rhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
+  ):
+    def einsum(lhs_l: jnp.ndarray, rhs_l: jnp.ndarray, dg=jax.lax.dot_general):
       operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
           eqn, lhs_l, rhs_l, einsum_call=True, use_blas=True, optimize='optimal'
       )
@@ -252,8 +271,19 @@ class AqtEinsum(flax.struct.PyTreeNode):
           _dot_general=dg,
       )
 
+    lhs_is_qt = isinstance(lhs_g, aqt_tensor.QTensor)
+    rhs_is_qt = isinstance(rhs_g, aqt_tensor.QTensor)
+    msg = 'Aqt config is None but inputs to AqtEinsum are QTensor.'
+    assert not ((lhs_is_qt or rhs_is_qt) and self.cfg is None), msg
+    # when inputs are qtensor, xhs_in is a dummy input that will be consumed by
+    # lax einsum API, but it is not used for computation in aqt_dg because it
+    # will be overwritten by get_tensor()
+    # TODO(lew): We can pass QTensor to lax_numpy._einsum if we add some
+    # specific methods to QTensor.
+    lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g
+    rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
-    a = jax.make_jaxpr(einsum)(lhs_g, rhs_g)
+    a = jax.make_jaxpr(einsum)(lhs_in, rhs_in)
     [lhs_g_id, rhs_g_id] = a.eqns[0].invars
     [lhs_l_id, rhs_l_id] = a.jaxpr.invars
     not_swap = lhs_g_id == lhs_l_id and rhs_g_id == rhs_l_id
@@ -261,6 +291,15 @@ class AqtEinsum(flax.struct.PyTreeNode):
     assert not_swap != yes_swap
 
     cfg = copy.deepcopy(self.cfg)
+    if cfg is not None:
+      # when xhs_g is a qtensor, let get_tensor() always return it.
+      # This is an alternative to Freezer variable creation for providing
+      # qtensor to aqt dg.
+      if lhs_is_qt:
+        cfg.fwd.lhs.get_qtensor = lambda: lhs_g
+      if rhs_is_qt:
+        cfg.fwd.rhs.get_qtensor = lambda: rhs_g
+
     prng_name = self.prng_name
 
     lhs_quant_mode = self.lhs_quant_mode
@@ -288,17 +327,22 @@ class AqtEinsum(flax.struct.PyTreeNode):
         cfg=cfg,
         prng_name=prng_name,
         lhs_quant_mode=lhs_quant_mode,
+        # when passing pre-computed qtensor as inputs, apply_quant_mode flag
+        # should be set to False so that Freezer will not be set to overwrite
+        # the qtensor passed to dg.
+        lhs_apply_quant_mode=not lhs_is_qt,  # Freezer not used if lhs is qt
         lhs_init=lhs_init,
         lhs_scale_init=lhs_scale_init,
         lhs_var_name=lhs_var_name,
         rhs_quant_mode=rhs_quant_mode,
+        rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
         rhs_init=rhs_init,
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
         quant_collection=quant_collection,
         name=self.name,
     )
-    return einsum(lhs_g, rhs_g, aqt_dg)
+    return einsum(lhs_in, rhs_in, aqt_dg)
 
 
 def config_v4(
