@@ -71,11 +71,8 @@ class Freezer(nn.Module):
       # TODO(lew): Store whole QTensor?
       scale_t = self.variable(collection, 'scale', self.s_init, self.s_shape)
       # TODO(lew): scale is small, store it instead of using this silly poison.
-      poison = jnp.zeros(
-          (1, 1, 1, 1, 1, 1, 2, 1, 1, 1)
-      )  # hopefully no one uses such shapes
       return aqt_tensor.QTensor(
-          qvalue.value, scale=poison, scale_t=scale_t.value
+          qvalue.value, scale=None, scale_t=[scale_t.value]
       )
     else:
       assert False, 'Unknown quant mode.'
@@ -90,7 +87,8 @@ class Freezer(nn.Module):
       )
       scale_t = self.variable(collection, 'scale', self.s_init, self.s_shape)
       qvalue.value = inputs.qvalue
-      scale_t.value = inputs.scale_t
+      assert inputs.scale_t is not None and len(inputs.scale_t) == 1
+      scale_t.value = inputs.scale_t[0]
     elif self.quant_mode == QuantMode.SERVE:
       # TODO(lew): Optionally compare stored and served value.
       pass

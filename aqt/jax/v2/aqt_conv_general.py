@@ -24,7 +24,6 @@
 
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
-import aqt.jax.v2.aqt_dot_general as aqt
 import jax
 from jax import lax
 
@@ -89,8 +88,11 @@ However if there is any other use, we will drop that assumption."""
 
     # It seems lucky that original scale has shape suitable for output
     # scaling without any transposition.
-    out = aqt._maybe_mul(out, lhs_qt.scale)
-    out = aqt._maybe_mul(out, rhs_qt.scale)
+    out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
+    assert out.scale is not None  # pytype help
+    out.scale.extend(lhs_qt.scale)
+    out.scale.extend(rhs_qt.scale)
+    out = out.dequant()
 
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales

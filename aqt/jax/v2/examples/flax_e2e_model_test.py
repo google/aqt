@@ -155,7 +155,11 @@ class MnistTest(parameterized.TestCase):
     serving_pytree = jax.tree_util.tree_map(
         lambda x: (x.dtype, x.shape), model_serving
     )
-    assert serving_pytree == expected_aqt_pytree, serving_pytree
+    if serving_pytree != expected_aqt_pytree:
+      print()
+      print("serving_pytree:      ", serving_pytree)
+      print("expected_aqt_pytree: ", expected_aqt_pytree)
+      assert False, "serving_pytree != expected_aqt_pytree"
 
     def zero_out_params(model, layer: str):
       updated_model = copy.deepcopy(model)

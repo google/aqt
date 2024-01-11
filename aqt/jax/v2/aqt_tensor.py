@@ -23,7 +23,7 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 import functools
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -41,10 +41,9 @@ class QTensor:
   # Use dequant() method to "decompress" to the original tensor.
   qvalue: jnp.ndarray
 
-  # (scale == None) can be thought as (scale == 1.0)
-  # (scale == None) means that qvalue is not quantized and can be used directly.
-  # (scale: str) means that for some reason scale is unknown.
-  scale: Union[jnp.ndarray, None, str]
+  # (scale == None) means that scale is unknown/invalid;
+  # Otherwise, check dequant(self) for semantics.
+  scale: Optional[list[jnp.ndarray]]
 
   # Used in dot_general, transposed scales used in post dot_general scaling.
   # The same comments apply as to scale.
@@ -52,18 +51,16 @@ class QTensor:
   # - we store scale_t in the checkpoint to avoid transposition per inference.
   # - scale_t is used both in backprop of dot_general and in post-scaling.
   #   We avoid transposing scale twice.
-  # Invariant: we never should have a situation where out of scale, scale_t,
-  # one is set and one is None.
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
-  scale_t: Union[jnp.ndarray, None, str]
+  scale_t: Optional[list[jnp.ndarray]]
 
   def dequant(self) -> jnp.ndarray:
-    msg = f'scale is not available: {self.scale}'
-    if self.scale is None:
-      return self.qvalue
-    else:
-      assert not isinstance(self.scale, str), msg
-      return self.qvalue * self.scale
+    assert self.scale is not None
+    ret = self.qvalue
+    for scale in self.scale:
+      ret = ret * scale
+    return ret
+
 
 GradientFn = Callable[..., Any]
 
@@ -86,7 +83,7 @@ def quant(
   #   what would happen if we pass fq value (xhs_q2) in residual?
 
   if isinstance(cfg.numerics, no_numerics.NoNumerics):
-    qt = QTensor(qvalue=x, scale=None, scale_t=None)
+    qt = QTensor(qvalue=x, scale=[], scale_t=[])
     return qt, None
   shared_axes = cfg.calib_shared_axes or calibration_axes
   bound = cfg.calibration.get_bound(x, shared_axes)
@@ -123,11 +120,11 @@ def quant(
   #
   # TODO(lew): Implement configuration of stop-gradient.
   scale = jax.lax.reciprocal(scale)
-  scale_t = 'no transpose given'
+  scale_t = None
   if transpose_fn is not None:
-    scale_t = transpose_fn(scale)
+    scale_t = [transpose_fn(scale)]
 
-  qt = QTensor(qvalue=x_q, scale=scale, scale_t=scale_t)
+  qt = QTensor(qvalue=x_q, scale=[scale], scale_t=scale_t)
   return qt, quant_grad
 
 

@@ -169,12 +169,6 @@ def rhs_scale_transpose_for_lhs_input(rhs_scale, dimension_numbers, lhs_shape):
   )
 
 
-def _maybe_mul(x, scale):
-  if scale is None:
-    return x
-  return x * scale
-
-
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
@@ -201,7 +195,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     #  - Can we carry untransposed scale and transpose here?
     if isinstance(rhs, MultiTensor):
       # We are in gradient code.
-      fwd_quantized = rhs.qx.scale_t is not None
+      fwd_quantized = rhs.qx.scale_t is not None and len(rhs.qx.scale_t) == 1
       expect_fwd_quantized = cfg.rhs.use_fwd_quant is not None
       msg = (
           'Misconfiguration: use_fwd_quant=True, but there is no fwd'
@@ -209,10 +203,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       )
       assert fwd_quantized == expect_fwd_quantized, msg
       if cfg.rhs.use_fwd_quant:
-        assert rhs.qx.scale_t is not None, msg
+        assert fwd_quantized, msg
         # TODO(lew): Investigate why _rhs_scale_transpose_for_lhs_input is not
         # needed here.
-        lhs = lhs * rhs.qx.scale_t
+        lhs = lhs * rhs.qx.scale_t[0]
         rhs = rhs.qx.qvalue
       else:
         rhs = rhs.x
@@ -320,10 +314,15 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # TODO(lew): Do we have a correct precision above?
     #   Relevant: https://github.com/google/jax/issues/14022
 
+    out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
+    assert out.scale is not None  # pytype help
+
     if not cfg.lhs.use_fake_quant:
-      out = _maybe_mul(out, lhs_qt.scale_t)
+      out.scale.extend(lhs_qt.scale_t)
     if not cfg.rhs.use_fake_quant:
-      out = _maybe_mul(out, rhs_qt.scale_t)
+      out.scale.extend(rhs_qt.scale_t)
+
+    out = out.dequant()
 
     res = DotGeneralRes(
         lhs=lhs_res,

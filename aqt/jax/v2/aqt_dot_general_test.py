@@ -435,7 +435,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             return aqt.TensorRes(
                 mt=aqt.MultiTensor(
                     x=v,
-                    qx=aqt_tensor.QTensor(qvalue=v, scale=None, scale_t=None),
+                    qx=aqt_tensor.QTensor(qvalue=v, scale=[], scale_t=[]),
                 ),
                 quant_grad=None,
             )
