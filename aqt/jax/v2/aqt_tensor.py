@@ -23,7 +23,7 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 import functools
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -60,6 +60,18 @@ class QTensor:
     for scale in self.scale:
       ret = ret * scale
     return ret
+
+  @property
+  def ndim(self) -> int:
+    return self.qvalue.ndim
+
+  @property
+  def shape(self) -> Sequence[int]:
+    return self.qvalue.shape
+
+  @property
+  def dtype(self) -> jnp.dtype:
+    return self.qvalue.dtype
 
 
 GradientFn = Callable[..., Any]
