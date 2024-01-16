@@ -17,6 +17,7 @@
 
 import copy
 import enum
+import functools
 from typing import Iterable
 from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
@@ -28,7 +29,6 @@ from aqt.jax.v2.numerics import no_numerics
 import flax
 import flax.linen as nn
 import jax
-from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 
 
@@ -258,19 +258,6 @@ class AqtEinsum(flax.struct.PyTreeNode):
       lhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
       rhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
   ):
-    def einsum(lhs_l: jnp.ndarray, rhs_l: jnp.ndarray, dg=jax.lax.dot_general):
-      operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
-          eqn, lhs_l, rhs_l, einsum_call=True, use_blas=True, optimize='optimal'
-      )
-      contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
-      return jax.named_call(lax_numpy._einsum, name=eqn)(  # pylint: disable=protected-access
-          operands,
-          contractions,
-          precision=None,
-          preferred_element_type=None,
-          _dot_general=dg,
-      )
-
     lhs_is_qt = isinstance(lhs_g, aqt_tensor.QTensor)
     rhs_is_qt = isinstance(rhs_g, aqt_tensor.QTensor)
     msg = 'Aqt config is None but inputs to AqtEinsum are QTensor.'
@@ -283,7 +270,8 @@ class AqtEinsum(flax.struct.PyTreeNode):
     lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g
     rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
-    a = jax.make_jaxpr(einsum)(lhs_in, rhs_in)
+    einsum = functools.partial(aqt_dot_general.einsum, eqn=eqn)
+    a = jax.make_jaxpr(einsum)(lhs=lhs_in, rhs=rhs_in)
     [lhs_g_id, rhs_g_id] = a.eqns[0].invars
     [lhs_l_id, rhs_l_id] = a.jaxpr.invars
     not_swap = lhs_g_id == lhs_l_id and rhs_g_id == rhs_l_id
@@ -342,7 +330,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
         quant_collection=quant_collection,
         name=self.name,
     )
-    return einsum(lhs_in, rhs_in, aqt_dg)
+    return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)
 
 
 def config_v4(

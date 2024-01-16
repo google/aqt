@@ -34,6 +34,7 @@ from aqt.jax.v2.config import Context  # pylint: disable=g-importing-member, unu
 import flax.struct
 import jax
 from jax import lax
+from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 import numpy as onp
 
@@ -55,6 +56,21 @@ class TensorRes:
 class DotGeneralRes:
   lhs: TensorRes
   rhs: TensorRes
+
+
+def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
+  """A copy of jnp.einsum but without the default jit so as to be injectable."""
+  operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
+      eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
+  )
+  contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
+  return jax.named_call(lax_numpy._einsum, name=eqn)(  # pylint: disable=protected-access
+      operands,
+      contractions,
+      precision=None,
+      preferred_element_type=None,
+      _dot_general=dg,
+  )
 
 
 def _scale_trans(x, ca, ba):
