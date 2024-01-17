@@ -397,13 +397,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           local_aqt=local_aqt,
           clip_gradient=clip_gradient,
       )
-      config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
+      cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
       dg = aqt.make_dot_general(cfg)
       return lambda lhs, rhs: dg(lhs, rhs, dims)
 
     def aqt_dg_raw(use_fake_quant):
       cfg = modify_cfg(use_fake_quant=use_fake_quant)
-      config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
+      cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
       dg_raw = aqt._make_dot_general_raw(cfg.fwd)
       return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims)[0]
 
@@ -560,7 +560,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     @jax.jit
     def f(lhs, rhs):
       cfg = config.dot_general_make()
-      config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
+      cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
       dg = aqt.make_dot_general(cfg)
       return dg(lhs, rhs, (((0,), (0,)), ((), ())))
 

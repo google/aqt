@@ -206,7 +206,7 @@ class AqtDotGeneral(nn.Module):
 
       prng_name = self.prng_name
       key = self.make_rng(prng_name) if prng_name is not None else None
-      config.set_context(cfg, key, train_step=None)
+      cfg = config.set_context(cfg, key, train_step=None)
     aqt_dg = aqt_dot_general.make_dot_general(cfg)
     return aqt_dg
 

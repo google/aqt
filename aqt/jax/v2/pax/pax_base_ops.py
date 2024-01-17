@@ -52,8 +52,8 @@ class AqtEinsum(base_layer.BaseLayer):
       train_step = self.get_var('train_step')
     else:
       train_step = None
-    aqt_config.set_context(self.cfg, key, train_step)
-    dg = aqt.make_dot_general(self.cfg)
+    cfg = aqt_config.set_context(self.cfg, key, train_step)
+    dg = aqt.make_dot_general(cfg)
     # jnp.einsum is by default jitted, which makes the key storing in cfg
     # cross the jit boundary. We need to call a non-jitted jnp.einsum below
     return aqt.einsum(eqn, lhs, rhs, dg)

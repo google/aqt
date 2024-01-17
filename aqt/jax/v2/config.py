@@ -13,6 +13,7 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
+import copy
 import dataclasses
 from typing import Any, Callable, Optional
 from aqt.jax.v2 import calibration
@@ -117,15 +118,18 @@ def _split_key(key: Optional[jax.Array], num_splits: int):
 def set_context(
     cfg: DotGeneral, key: Optional[jax.Array], train_step: Optional[int]
 ):
+  """Set context with prng keys and train_steps for dot_general config."""
   def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
     key1, key2 = _split_key(key, num_splits=2)
     cfg_raw.lhs.context = Context(key=key1, train_step=train_step)
     cfg_raw.rhs.context = Context(key=key2, train_step=train_step)
 
   key_fwd, key_dlhs, key_drhs = _split_key(key, num_splits=3)
-  set_dg_raw_context(cfg.fwd, key_fwd)
-  set_dg_raw_context(cfg.dlhs, key_dlhs)
-  set_dg_raw_context(cfg.drhs, key_drhs)
+  ret_cfg = copy.deepcopy(cfg)
+  set_dg_raw_context(ret_cfg.fwd, key_fwd)
+  set_dg_raw_context(ret_cfg.dlhs, key_dlhs)
+  set_dg_raw_context(ret_cfg.drhs, key_drhs)
+  return ret_cfg
 
 
 def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
