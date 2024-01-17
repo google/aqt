@@ -23,7 +23,7 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 import functools
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -31,6 +31,9 @@ import flax.struct
 import jax
 from jax import lax
 import jax.numpy as jnp
+
+
+GradientFn = Callable[..., Any]
 
 
 @flax.struct.dataclass
@@ -54,15 +57,19 @@ class QTensor:
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
   scale_t: Optional[list[jnp.ndarray]]
 
-  def dequant(self) -> jnp.ndarray:
+  def dequant(self, dtype: Optional[jnp.dtype] = None) -> jnp.ndarray:
     assert self.scale is not None
     ret = self.qvalue
     for scale in self.scale:
-      ret = ret * scale
+      if dtype is None:
+        ret = ret * scale
+      else:
+        ret = ret.astype(dtype) * scale.astype(dtype)
     return ret
 
 
-GradientFn = Callable[..., Any]
+def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
+  return QTensor(qvalue=jnp.zeros(shape, dtype=qdtype), scale=[], scale_t=[])
 
 
 def quant(
