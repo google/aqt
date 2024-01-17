@@ -67,6 +67,14 @@ class QTensor:
         ret = ret.astype(dtype) * scale.astype(dtype)
     return ret
 
+  @property
+  def ndim(self) -> int:
+    return self.qvalue.ndim
+
+  @property
+  def shape(self) -> Sequence[int]:
+    return self.qvalue.shape
+
 
 def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
   return QTensor(qvalue=jnp.zeros(shape, dtype=qdtype), scale=[], scale_t=[])
