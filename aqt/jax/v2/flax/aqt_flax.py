@@ -250,6 +250,10 @@ class AqtEinsum(flax.struct.PyTreeNode):
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
+  # if using the AqtEinsum as a pure function. This will not allow the creation
+  # of Freezer or any sub-nn.modules.
+  pure_fn: bool = False
+
   name: Optional[str] = None
 
   def __call__(
@@ -311,25 +315,28 @@ class AqtEinsum(flax.struct.PyTreeNode):
       lhs_scale_init, rhs_scale_init = rhs_scale_init, lhs_scale_init
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
 
-    aqt_dg = AqtDotGeneral(
-        cfg=cfg,
-        prng_name=prng_name,
-        lhs_quant_mode=lhs_quant_mode,
-        # when passing pre-computed qtensor as inputs, apply_quant_mode flag
-        # should be set to False so that Freezer will not be set to overwrite
-        # the qtensor passed to dg.
-        lhs_apply_quant_mode=not lhs_is_qt,  # Freezer not used if lhs is qt
-        lhs_init=lhs_init,
-        lhs_scale_init=lhs_scale_init,
-        lhs_var_name=lhs_var_name,
-        rhs_quant_mode=rhs_quant_mode,
-        rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
-        rhs_init=rhs_init,
-        rhs_scale_init=rhs_scale_init,
-        rhs_var_name=rhs_var_name,
-        quant_collection=quant_collection,
-        name=self.name,
-    )
+    if self.pure_fn:  # it has a smell
+      aqt_dg = aqt_dot_general.make_dot_general(cfg)
+    else:
+      aqt_dg = AqtDotGeneral(
+          cfg=cfg,
+          prng_name=prng_name,
+          lhs_quant_mode=lhs_quant_mode,
+          # when passing pre-computed qtensor as inputs, apply_quant_mode flag
+          # should be set to False so that Freezer will not be set to overwrite
+          # the qtensor passed to dg.
+          lhs_apply_quant_mode=not lhs_is_qt,  # Freezer not used if lhs is qt
+          lhs_init=lhs_init,
+          lhs_scale_init=lhs_scale_init,
+          lhs_var_name=lhs_var_name,
+          rhs_quant_mode=rhs_quant_mode,
+          rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
+          rhs_init=rhs_init,
+          rhs_scale_init=rhs_scale_init,
+          rhs_var_name=rhs_var_name,
+          quant_collection=quant_collection,
+          name=self.name,
+      )
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)
 
 
