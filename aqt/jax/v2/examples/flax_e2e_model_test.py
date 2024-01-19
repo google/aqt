@@ -27,11 +27,14 @@ class MnistTest(parameterized.TestCase):
 
   def test_mnist_training(self):
     target_loss = {
-        "cpu": [3.930593252182006835937500000000],
-        "TPU v2": [3.943897247314453125000000000000],
-        "TPU v3": [3.943897247314453125000000000000],
-        "TPU v4": [3.944636344909667968750000000000],
-        "TPU v5 lite": [3.940552949905395507812500000000],
+        "cpu": [
+            3.931983232498168945312500000000,
+            3.932066917419433593750000000000,
+        ],
+        "TPU v2": [3.950709819793701171875000000000],
+        "TPU v3": [3.950709819793701171875000000000],
+        "TPU v4": [3.950191974639892578125000000000],
+        "TPU v5 lite": [3.949246168136596679687500000000],
     }
 
     aqt_cfg = aqt_flax.config_v4(
@@ -91,10 +94,12 @@ class MnistTest(parameterized.TestCase):
     dtype = jnp.dtype
     expected_aqt_pytree = {
         "aqt": {
-            "AqtDotGeneral_0": {
-                "qlhs": {
-                    "scale": (dtype("float32"), (1, 10)),
-                    "value": (dtype("int8"), (10, 10)),
+            "AqtEinsum_0": {
+                "AqtDotGeneral_0": {
+                    "qlhs": {
+                        "scale": (dtype("float32"), (1, 10)),
+                        "value": (dtype("int8"), (10, 10)),
+                    }
                 }
             },
             "Dense_0": {

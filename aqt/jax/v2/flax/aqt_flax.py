@@ -26,7 +26,6 @@ from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
-import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -229,7 +228,7 @@ class AqtDotGeneral(nn.Module):
     )
 
 
-class AqtEinsum(flax.struct.PyTreeNode):
+class AqtEinsum(nn.Module):
   """Quantized Einsum class for model injection."""
 
   cfg: Optional[config.DotGeneral] = None
@@ -250,8 +249,7 @@ class AqtEinsum(flax.struct.PyTreeNode):
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
-  name: Optional[str] = None
-
+  @nn.compact
   def __call__(
       self,
       eqn,
@@ -328,7 +326,6 @@ class AqtEinsum(flax.struct.PyTreeNode):
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
         quant_collection=quant_collection,
-        name=self.name,
     )
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)
 
