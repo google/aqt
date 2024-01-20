@@ -83,6 +83,7 @@ class DotGeneralRaw:
   rhs: Tensor
   dg_accumulator_dtype: Optional[DType]
   local_aqt: Optional[LocalAqt]
+  jax_scope_name: str
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'DotGeneralRaw':
@@ -227,6 +228,7 @@ def dot_general_raw_make(
     lhs_bits=None,
     rhs_bits=None,
     local_aqt=None,
+    jax_scope_name='aqt',
 ) -> 'DotGeneralRaw':
   """Create quantization configs for input matrices to a matmul."""
   lhs_cfg = tensor_make(lhs_bits)
@@ -248,6 +250,7 @@ def dot_general_raw_make(
       rhs=rhs_cfg,
       dg_accumulator_dtype=dg_accumulator_dtype,
       local_aqt=local_aqt,
+      jax_scope_name=jax_scope_name,
   )
 
 
@@ -275,9 +278,13 @@ def dot_general_make(
     drhs_local_aqt=None,
 ) -> 'DotGeneral':
   """Create quantization configs for input matrices to a matmul."""
-  fwd = dot_general_raw_make(lhs_bits, rhs_bits)
-  dlhs = dot_general_raw_make(bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt)
-  drhs = dot_general_raw_make(bwd_bits, bwd_bits, local_aqt=drhs_local_aqt)
+  fwd = dot_general_raw_make(lhs_bits, rhs_bits, jax_scope_name='aqt_fwd')
+  dlhs = dot_general_raw_make(
+      bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt, jax_scope_name='aqt_dlhs'
+  )
+  drhs = dot_general_raw_make(
+      bwd_bits, bwd_bits, local_aqt=drhs_local_aqt, jax_scope_name='aqt_drhs'
+  )
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
   # Surprising: lhs quantization determines what drhs can do.
@@ -365,9 +372,19 @@ def config_v3(
     drhs_accumulator_dtype: ... = None,
 ) -> DotGeneral:
   """Fully Quantized Training."""
-  fwd = dot_general_raw_make(fwd_bits, fwd_bits)
-  dlhs = dot_general_raw_make(dlhs_bits, dlhs_bits, local_aqt=dlhs_local_aqt)
-  drhs = dot_general_raw_make(drhs_bits, drhs_bits, local_aqt=drhs_local_aqt)
+  fwd = dot_general_raw_make(fwd_bits, fwd_bits, jax_scope_name='aqt_fwd')
+  dlhs = dot_general_raw_make(
+      dlhs_bits,
+      dlhs_bits,
+      local_aqt=dlhs_local_aqt,
+      jax_scope_name='aqt_dlhs',
+  )
+  drhs = dot_general_raw_make(
+      drhs_bits,
+      drhs_bits,
+      local_aqt=drhs_local_aqt,
+      jax_scope_name='aqt_drhs',
+  )
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
   cfg.dlhs.rhs.use_fwd_quant = False

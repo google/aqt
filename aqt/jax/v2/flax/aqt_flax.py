@@ -376,7 +376,9 @@ def config_v4(
         context=config.Context(key=None, train_step=None),
     )
 
-  def dg_raw_config(lhs_bits, rhs_bits, local_aqt=None) -> config.DotGeneralRaw:
+  def dg_raw_config(
+      lhs_bits, rhs_bits, jax_scope_name, local_aqt=None
+  ) -> config.DotGeneralRaw:
     lhs_cfg = tensor_config(lhs_bits)
     rhs_cfg = tensor_config(rhs_bits)
     if (
@@ -396,12 +398,23 @@ def config_v4(
         rhs=rhs_cfg,
         dg_accumulator_dtype=dg_accumulator_dtype,
         local_aqt=local_aqt,
+        jax_scope_name=jax_scope_name,
     )
 
   cfg = config.DotGeneral(
-      fwd=dg_raw_config(fwd_bits, fwd_bits),
-      dlhs=dg_raw_config(dlhs_bits, dlhs_bits, local_aqt=dlhs_local_aqt),
-      drhs=dg_raw_config(drhs_bits, drhs_bits, local_aqt=drhs_local_aqt),
+      fwd=dg_raw_config(fwd_bits, fwd_bits, jax_scope_name='aqt_fwd'),
+      dlhs=dg_raw_config(
+          dlhs_bits,
+          dlhs_bits,
+          jax_scope_name='aqt_dlhs',
+          local_aqt=dlhs_local_aqt,
+      ),
+      drhs=dg_raw_config(
+          drhs_bits,
+          drhs_bits,
+          jax_scope_name='aqt_drhs',
+          local_aqt=drhs_local_aqt,
+      ),
   )
 
   cfg.dlhs.rhs.use_fwd_quant = False
