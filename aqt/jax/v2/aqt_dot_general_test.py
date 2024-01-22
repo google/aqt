@@ -405,7 +405,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg = modify_cfg(dequant_mode=dequant_mode)
       cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
       dg_raw = aqt._make_dot_general_raw(cfg.fwd)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims)[0]
+      dot_general_context = cfg.fwd.extract_context()
+      cfg.fwd.nullify_context()
+      return lambda lhs, rhs: dg_raw(
+          lhs, rhs, None, None, dot_general_context, dims
+      )[0]
 
     # Test that with backprop correctly composes 3 functions.
     # We need to test shape calculations and the returned values.
@@ -422,9 +426,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             rhs,
             lhs_qt,
             rhs_qt,
+            context,
             dimension_numbers,
         ):
-          del lhs_qt, rhs_qt
+          del lhs_qt, rhs_qt, context
           if isinstance(rhs, aqt.MultiTensor):
             rhs = rhs.x
 
@@ -458,6 +463,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           rhs,
           None,
           None,
+          config.DotGeneralContext.create_empty(),
           dims,
       )
       # TODO(lew): Test values instead of del.
@@ -591,6 +597,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   def test_hardware_int8(self, seed=0):
     cfg = config.dot_general_raw_make(8, 8)
+    dot_general_context = cfg.extract_context()
+    cfg.nullify_context()
 
     def dg(lhs, rhs):
       ret, _ = aqt._make_dot_general_raw(cfg)(
@@ -598,6 +606,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           rhs,
           None,
           None,
+          dot_general_context,
           (((1,), (0,)), ((), ())),
       )
       return ret

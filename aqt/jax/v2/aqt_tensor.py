@@ -86,6 +86,7 @@ def quant(
     cfg: config.Tensor,
     calibration_axes,
     transpose_fn=None,
+    context: config.Context | None = None
 ) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
   msg = (
@@ -99,6 +100,10 @@ def quant(
   # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
   # TODO(lew): After we implement optimization to not double-quantize,
   #   what would happen if we pass fq value (xhs_q2) in residual?
+
+  if context is None:
+    # Try to recover from cfg.context.
+    context = cfg.context
 
   if isinstance(cfg.numerics, no_numerics.NoNumerics):
     qt = QTensor(qvalue=x, scale=[], scale_t=[])
@@ -123,7 +128,7 @@ def quant(
   #   a helper function there to call jax.custom_vjp.
   numerics_fwd = jax.custom_vjp(cfg.numerics.fwd)
   numerics_fwd.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
-  numerics_fwd = functools.partial(numerics_fwd, context=cfg.context)
+  numerics_fwd = functools.partial(numerics_fwd, context=context)
 
   x_q, quant_grad = jax.vjp(numerics_fwd, x_s)
   # We are passing quant_grad (and not more) ot the backward pass.
@@ -148,7 +153,9 @@ def quant(
 
 def make_fake_quant(cfg: config.Tensor, calibration_axes=None):
   def fake_quant(x):
-    x_q, _ = quant(x, cfg=cfg, calibration_axes=calibration_axes)
+    x_q, _ = quant(
+        x, cfg=cfg, calibration_axes=calibration_axes, context=cfg.context
+    )
     return x_q.dequant()
 
   return fake_quant

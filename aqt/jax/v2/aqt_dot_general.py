@@ -199,6 +199,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       # xhs_qt are used in serving.
       lhs_qt: Optional[aqt_tensor.QTensor],
       rhs_qt: Optional[aqt_tensor.QTensor],
+      context: config.DotGeneralRawContext,
       dimension_numbers: jax.lax.DotDimensionNumbers,
   ):
     """Creates a dot_general function without custom gradient."""
@@ -276,7 +277,11 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       )
 
       lhs_qt, lhs_quant_grad = aqt_tensor.quant(
-          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca, transpose_fn=transpose
+          lhs,
+          cfg=cfg.lhs,
+          calibration_axes=lhs_ca,
+          transpose_fn=transpose,
+          context=context.lhs,
       )
 
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
@@ -301,7 +306,11 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           rhs_shape=rhs.shape,
       )
       rhs_qt, rhs_quant_grad = aqt_tensor.quant(
-          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca, transpose_fn=transpose
+          rhs,
+          cfg=cfg.rhs,
+          calibration_axes=rhs_ca,
+          transpose_fn=transpose,
+          context=context.rhs,
       )
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
@@ -359,10 +368,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     out = out.dequant()
 
-    res = DotGeneralRes(
-        lhs=lhs_res,
-        rhs=rhs_res,
-    )
+    res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
     if cfg.local_aqt is not None:
       assert len(lhs_ca) == len(rhs_ca)
       if len(lhs_ca) > 0:
@@ -388,6 +394,7 @@ def _dot_general_raw_attach_gradient(
         rhs,
         lhs_qt,
         rhs_qt,
+        context: config.DotGeneralContext,
         dimension_numbers,
     ):
       assert (
@@ -398,13 +405,14 @@ def _dot_general_raw_attach_gradient(
           rhs,
           lhs_qt,
           rhs_qt,
+          context.fwd,
           dimension_numbers,
       )
       ret = ret.astype(lhs.dtype)
       # We return these values to allow for materialization.
       qret = (res.lhs.mt.qx, res.rhs.mt.qx)
       if return_residual:
-        return ((ret, qret), res)
+        return ((ret, qret), (res, context))
       else:
         return (ret, qret)
 
@@ -412,11 +420,12 @@ def _dot_general_raw_attach_gradient(
 
   def vjp_bwd(
       fwd_dimension_numbers,
-      res: DotGeneralRes,
+      res: tuple[DotGeneralRes, config.DotGeneralContext],
       g,
   ):
     # g[1] is gradient with respect to qret which we are ignoring.
     g = g[0]
+    res, dot_general_context = res
     def ranges_like(*xs):
       start = 0
       for x in xs:
@@ -427,6 +436,7 @@ def _dot_general_raw_attach_gradient(
         y_res: TensorRes,
         quant_grad,
         dot_general,
+        context: config.DotGeneralRawContext,
         y_is_lhs,
     ):
       y_ndim = y_res.mt.x.ndim
@@ -444,7 +454,7 @@ def _dot_general_raw_attach_gradient(
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
-      out, _ = dot_general(g, y_res.mt, None, None, dims)
+      out, _ = dot_general(g, y_res.mt, None, None, context, dims)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
@@ -457,20 +467,22 @@ def _dot_general_raw_attach_gradient(
         res.rhs,
         res.lhs.quant_grad,
         dlhs_dot_general_raw,
+        dot_general_context.dlhs,
         False,
     )
     drhs = grad_dot_general(
         res.lhs,
         res.rhs.quant_grad,
         drhs_dot_general_raw,
+        dot_general_context.drhs,
         True,
     )
     # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
     # None as grad to it. This is because it is a tuple of Python integers
     # that cannot be traced by Jax.
-    return (dlhs, drhs, None, None)
+    return (dlhs, drhs, None, None, None)
 
-  vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(4,))
+  vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(5,))
   vjp.defvjp(make_fwd(True), vjp_bwd)
 
   return vjp
@@ -480,6 +492,16 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
   """Makes quantized lax.dot_general replacement with attached gradients."""
   if cfg is None:
     return jax.lax.dot_general
+
+  # cfg contains traceable JAX variables as context inside it. Inside
+  # _dot_general_raw_attach_gradient, custom_vjp's functional arguments access
+  # the configuration from their outer scope; the config is not provided as a
+  # direct argument. It will trigger leak during tracing.
+  # As a solution, we filter out the traceable parts from cfg, provide it as an
+  # argument to the fwd / bwd functions of custom_vjp, and remove those parts
+  # from the cfg.
+  dot_general_context = cfg.extract_context()
+  cfg.nullify_context()
 
   dg = _dot_general_raw_attach_gradient(
       fwd_dot_general_raw=_make_dot_general_raw(cfg.fwd),
@@ -512,6 +534,7 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         rhs=rhs,
         lhs_qt=lhs_qt,
         rhs_qt=rhs_qt,
+        context=dot_general_context,
         dimension_numbers=dimension_numbers,
     )
 

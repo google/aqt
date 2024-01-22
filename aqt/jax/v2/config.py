@@ -37,6 +37,34 @@ class Context:
   train_step: Optional[int]
 
 
+@flax.struct.dataclass
+class DotGeneralRawContext:
+  lhs: Context
+  rhs: Context
+
+  @classmethod
+  def create_empty(cls) -> 'DotGeneralRawContext':
+    return DotGeneralRawContext(
+        lhs=Context(key=None, train_step=None),
+        rhs=Context(key=None, train_step=None),
+    )
+
+
+@flax.struct.dataclass
+class DotGeneralContext:
+  fwd: DotGeneralRawContext
+  dlhs: DotGeneralRawContext
+  drhs: DotGeneralRawContext
+
+  @classmethod
+  def create_empty(cls) -> 'DotGeneralContext':
+    return DotGeneralContext(
+        fwd=DotGeneralRawContext.create_empty(),
+        dlhs=DotGeneralRawContext.create_empty(),
+        drhs=DotGeneralRawContext.create_empty(),
+    )
+
+
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 
 # TODO(lew): move config to aqt_tensor.py and use aqt_tensor.QTensor
@@ -108,6 +136,13 @@ class DotGeneralRaw:
   def make_conv_general_dilated(cls, *args, **kwargs) -> 'DotGeneralRaw':
     return conv_general_dilated_make(*args, **kwargs)
 
+  def extract_context(self) -> DotGeneralRawContext:
+    return DotGeneralRawContext(lhs=self.lhs.context, rhs=self.rhs.context)
+
+  def nullify_context(self):
+    self.lhs.context = Context(None, None)
+    self.rhs.context = Context(None, None)
+
 
 @dataclasses.dataclass(slots=True)
 class DotGeneral:
@@ -120,6 +155,23 @@ class DotGeneral:
   @classmethod
   def make(cls, *args, **kwargs) -> 'DotGeneral':
     return dot_general_make(*args, **kwargs)
+
+  def extract_context(self) -> DotGeneralContext:
+    return DotGeneralContext(
+        fwd=self.fwd.extract_context(),
+        dlhs=self.dlhs.extract_context(),
+        drhs=self.drhs.extract_context(),
+    )
+
+  def nullify_context(self):
+    """The context is tracable, and it should not be passed implicitly.
+
+    Since the configs are passed to fwd / bwd functions implicitly, its context
+    should be removed before getting passed.
+    """
+    self.fwd.nullify_context()
+    self.dlhs.nullify_context()
+    self.drhs.nullify_context()
 
 
 ################################################################################

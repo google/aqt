@@ -112,10 +112,8 @@ class AqtFlaxTest(parameterized.TestCase):
 
     try:
       train_step(jnp.ones(shape=(1, 10)))
-    except jax.errors.UnexpectedTracerError as e:
-      print(e)
-    else:
-      assert False, 'This test case should fail with unexpected trace error.'
+    except jax.errors.UnexpectedTracerError:
+      assert False, 'This test case should not fail.'
 
 
 if __name__ == '__main__':
