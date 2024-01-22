@@ -89,10 +89,13 @@ def quant(
 ) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
   msg = (
-      'use_fake_quant mode is used in tests and it is exactly equal when'
+      'Multiply QTensor.qvalue by untransposed QTensor.scale before dot_general'
+      '(a.k.a. FakeQuant) is used in tests and it is exactly equal when'
       ' po2_scale == True; Did you forget to set it?'
   )
-  assert (not cfg.use_fake_quant) or cfg.po2_scale, msg
+  assert (
+      cfg.dequant_mode != config.DequantMode.THIS_INPUT
+  ) or cfg.po2_scale, msg
   # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
   # TODO(lew): After we implement optimization to not double-quantize,
   #   what would happen if we pass fq value (xhs_q2) in residual?

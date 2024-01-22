@@ -271,7 +271,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     def modify_cfg(
         *,
-        use_fake_quant=False,
+        dequant_mode=config.DequantMode.OUTPUT,
         use_fwd_quant=None,
         fwd_lhs_tricky_clip_and_round=False,
         local_aqt=None,
@@ -320,21 +320,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       cfg.drhs.lhs.po2_scale = True
       cfg.drhs.rhs.po2_scale = True
 
-      cfg.fwd.lhs.use_fake_quant = use_fake_quant
-      cfg.fwd.rhs.use_fake_quant = use_fake_quant
+      cfg.fwd.lhs.dequant_mode = dequant_mode
+      cfg.fwd.rhs.dequant_mode = dequant_mode
 
-      cfg.dlhs.lhs.use_fake_quant = use_fake_quant
-      cfg.dlhs.rhs.use_fake_quant = use_fake_quant
+      cfg.dlhs.lhs.dequant_mode = dequant_mode
+      cfg.dlhs.rhs.dequant_mode = dequant_mode
 
-      cfg.drhs.lhs.use_fake_quant = use_fake_quant
-      cfg.drhs.rhs.use_fake_quant = use_fake_quant
+      cfg.drhs.lhs.dequant_mode = dequant_mode
+      cfg.drhs.rhs.dequant_mode = dequant_mode
 
       def disable_quant_types(c):
         c.lhs.numerics = c.lhs.numerics.replace(dtype=None)
         c.rhs.numerics = c.rhs.numerics.replace(dtype=None)
         c.dg_accumulator_dtype = None
 
-      if use_fake_quant:
+      if dequant_mode == config.DequantMode.THIS_INPUT:
         disable_quant_types(cfg.fwd)
         disable_quant_types(cfg.dlhs)
         disable_quant_types(cfg.drhs)
@@ -385,13 +385,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
 
     def aqt_dg_full(
-        use_fake_quant,
+        dequant_mode,
         use_fwd_quant=None,
         fwd_lhs_tricky_clip_and_round=False,
         local_aqt=None,
     ):
       cfg = modify_cfg(
-          use_fake_quant=use_fake_quant,
+          dequant_mode=dequant_mode,
           use_fwd_quant=use_fwd_quant,
           fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
           local_aqt=local_aqt,
@@ -401,8 +401,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dg = aqt.make_dot_general(cfg)
       return lambda lhs, rhs: dg(lhs, rhs, dims)
 
-    def aqt_dg_raw(use_fake_quant):
-      cfg = modify_cfg(use_fake_quant=use_fake_quant)
+    def aqt_dg_raw(dequant_mode):
+      cfg = modify_cfg(dequant_mode=dequant_mode)
       cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
       dg_raw = aqt._make_dot_general_raw(cfg.fwd)
       return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims)[0]
@@ -465,16 +465,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       return out
 
     test_jaxpr_dtype(
-        lambda: aqt_dg_full(False)(lhs, rhs),
+        lambda: aqt_dg_full(config.DequantMode.OUTPUT)(lhs, rhs),
         [modify_cfg().fwd],
         lhs.dtype,
     )
     test_jaxpr_dtype(
-        lambda: jax.vjp(aqt_dg_full(False), lhs, rhs),
+        lambda: jax.vjp(aqt_dg_full(config.DequantMode.OUTPUT), lhs, rhs),
         [modify_cfg().fwd],
         lhs.dtype,
     )
-    _, backprop = jax.vjp(aqt_dg_full(False), lhs, rhs)
+    _, backprop = jax.vjp(aqt_dg_full(config.DequantMode.OUTPUT), lhs, rhs)
     test_jaxpr_dtype(
         lambda: backprop(gra),
         [modify_cfg().dlhs, modify_cfg().drhs],
@@ -518,26 +518,46 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           test_eq(f"{name}: gr", good_gr, gr / gr_mult)  # backward pass  # pytype: disable=unsupported-operands
 
     check([
-        ("default    ", aqt_dg_full(False), dict()),
-        ("FQ         ", aqt_dg_full(True), dict()),
-        ("raw fwd    ", aqt_dg_raw(False), dict(test_gradient=False)),
-        ("raw fwd FQ ", aqt_dg_raw(True), dict(test_gradient=False)),
+        ("default    ", aqt_dg_full(config.DequantMode.OUTPUT), dict()),
+        ("FQ         ", aqt_dg_full(config.DequantMode.THIS_INPUT), dict()),
+        (
+            "raw fwd    ",
+            aqt_dg_raw(config.DequantMode.OUTPUT),
+            dict(test_gradient=False),
+        ),
+        (
+            "raw fwd FQ ",
+            aqt_dg_raw(config.DequantMode.THIS_INPUT),
+            dict(test_gradient=False),
+        ),
     ])
 
     check([
-        ("fwd_quant=T", aqt_dg_full(False, use_fwd_quant=False), dict()),
-        ("fwd_quant=F", aqt_dg_full(False, use_fwd_quant=True), dict()),
+        (
+            "fwd_quant=T",
+            aqt_dg_full(config.DequantMode.OUTPUT, use_fwd_quant=False),
+            dict(),
+        ),
+        (
+            "fwd_quant=F",
+            aqt_dg_full(config.DequantMode.OUTPUT, use_fwd_quant=True),
+            dict(),
+        ),
     ])
 
     check([
         (
             "default    ",
-            aqt_dg_full(False, local_aqt=config.LocalAqt(2)),
+            aqt_dg_full(
+                config.DequantMode.OUTPUT, local_aqt=config.LocalAqt(2)
+            ),
             dict(),
         ),
         (
             "default    ",
-            aqt_dg_full(True, local_aqt=config.LocalAqt(2)),
+            aqt_dg_full(
+                config.DequantMode.THIS_INPUT, local_aqt=config.LocalAqt(2)
+            ),
             dict(),
         ),
     ])
@@ -551,7 +571,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       check([
           (
               "check_fwd_lhs_tricky_clip_and_round",
-              aqt_dg_full(False, fwd_lhs_tricky_clip_and_round=True),
+              aqt_dg_full(
+                  config.DequantMode.OUTPUT, fwd_lhs_tricky_clip_and_round=True
+              ),
               dict(check_fwd_lhs_tricky_clip_and_round=True),
           ),
       ])

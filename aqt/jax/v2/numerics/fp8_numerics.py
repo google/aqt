@@ -97,11 +97,11 @@ def tensor_make_fp8(
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
       po2_scale=False,
-      use_fake_quant=False,
       use_fwd_quant=None,
       get_qtensor=None,
       set_qtensor=None,
       context=config.Context(key=None, train_step=None),
+      dequant_mode=config.DequantMode.OUTPUT,
   )
 
 

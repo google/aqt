@@ -313,7 +313,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     lhs_cast_dtype = cfg.lhs.numerics.get_dtype()
     rhs_cast_dtype = cfg.rhs.numerics.get_dtype()
     msg = "Can't cast dtype in fake_quant mode."
-    if cfg.lhs.use_fake_quant:
+    if cfg.lhs.dequant_mode == config.DequantMode.THIS_INPUT:
       # TODO(yichizh): replace rounding in numerics with casting to dtype.
       # So fake quant becomes casting to dtype first, then casting to bfloat.
       # This is because FP8 numerics relies on this cast to do the rounding.
@@ -323,7 +323,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       lhs_qin = lhs_qt.qvalue
       if lhs_cast_dtype is not None:
         lhs_qin = lhs_qin.astype(lhs_cast_dtype)
-    if cfg.rhs.use_fake_quant:
+    if cfg.rhs.dequant_mode == config.DequantMode.THIS_INPUT:
       assert rhs_cast_dtype is None, msg
       rhs_qin = rhs_qt.dequant()
     else:
@@ -352,9 +352,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
     assert out.scale is not None  # pytype help
 
-    if not cfg.lhs.use_fake_quant:
+    if cfg.lhs.dequant_mode == config.DequantMode.OUTPUT:
       out.scale.extend(lhs_qt.scale_t)
-    if not cfg.rhs.use_fake_quant:
+    if cfg.rhs.dequant_mode == config.DequantMode.OUTPUT:
       out.scale.extend(rhs_qt.scale_t)
 
     out = out.dequant()

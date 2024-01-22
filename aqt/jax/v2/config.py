@@ -15,7 +15,9 @@
 
 import copy
 import dataclasses
+import enum
 from typing import Any, Callable, Optional
+
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.numerics import int_numerics
@@ -24,6 +26,7 @@ from aqt.jax.v2.numerics import numerics
 import flax
 import jax
 import jax.numpy as jnp
+
 
 DType = Any
 
@@ -40,6 +43,16 @@ ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
 QTensor = Any
 
 
+class DequantMode(enum.Enum):
+  """Dequant modes."""
+
+  # Multiply output of dot_general by the transposed scale
+  OUTPUT = 1
+  # Multiply QTensor.qvalue by untransposed QTensor.scale before
+  # dot_general (a.k.a. FakeQuant )
+  THIS_INPUT = 2
+
+
 @dataclasses.dataclass(slots=True)
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
@@ -52,7 +65,6 @@ class Tensor:
   calibration: calibration.Calibration
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool
-  use_fake_quant: bool
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool]
@@ -64,6 +76,9 @@ class Tensor:
   # Implement auxiliary return in presence of fixed signature of dot_general.
   set_qtensor: Optional[Callable[[QTensor], None]]
   context: Context
+
+  # Dequantization mode.
+  dequant_mode: DequantMode
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
@@ -215,12 +230,12 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
       po2_scale=False,
-      use_fake_quant=False,
       # dtype_x=dtype,
       use_fwd_quant=None,
       get_qtensor=None,
       set_qtensor=None,
       context=Context(key=None, train_step=None),
+      dequant_mode=DequantMode.OUTPUT,
   )
 
 
