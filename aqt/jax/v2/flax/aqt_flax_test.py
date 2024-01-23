@@ -86,6 +86,37 @@ class AqtFlaxTest(parameterized.TestCase):
     mse = jnp.mean(jnp.square(out_int8_qt - out_float))
     assert mse > 0, 'Mean square error is 0. Einsum is not quantized.'
 
+  def test_einsum_grad_leak(self):
+    class CNN(nn.Module):
+      aqt_cfg: config.DotGeneral
+
+      @nn.compact
+      def __call__(self, x):
+        einsum = aqt_flax.AqtEinsum(self.aqt_cfg)
+        x = einsum('bc,ab->ac', jnp.identity(10, dtype=x.dtype), x)
+        return x
+
+    model = CNN(aqt_cfg=config.fully_quantized())
+    var = model.init({'params': jax.random.PRNGKey(0)}, jnp.ones(shape=(1, 10)))
+
+    @jax.jit
+    def apply_fn(inputs):
+      return model.apply(
+          var, inputs, rngs={'params': jax.random.PRNGKey(0)}, mutable=True
+      )
+
+    @jax.jit
+    @jax.value_and_grad
+    def train_step(inputs):
+      return jnp.sum(apply_fn(inputs)[0])
+
+    try:
+      train_step(jnp.ones(shape=(1, 10)))
+    except jax.errors.UnexpectedTracerError as e:
+      print(e)
+    else:
+      assert False, 'This test case should fail with unexpected trace error.'
+
 
 if __name__ == '__main__':
   absltest.main()
