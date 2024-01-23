@@ -598,6 +598,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           expected_product=1281280.0,
       ),
       dict(
+          shard_count=(2, 2),
+          lhs=[[1270.0, 10.0, 10.0, 10.0],
+               [1270000.0, 10000.0, 10000.0, 10000.0]],
+          expected_product=1301300.0,
+      ),
+      dict(
           shard_count=1,
           lhs=[1270.0, 10.0, 1270000.0, 10000.0],
           expected_product=1280000.0,
@@ -625,7 +631,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = jnp.array([1.0])
     output, bprop = jax.vjp(dg, lhs, rhs)
     _, drhs = bprop(jnp.ones_like(output))
-    assert drhs == expected_product
+    self.assertEqual(drhs, expected_product)
 
   @parameterized.parameters(
       # 'bmnts,bsnh->bmtnh'

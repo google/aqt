@@ -94,7 +94,7 @@ class Tensor:
 
 @flax_slots_dataclass
 class LocalAqt:
-  contraction_axis_shard_count: int = static_field()
+  contraction_axis_shard_count: int | tuple[int, ...] = static_field()
 
 
 @flax_slots_dataclass
