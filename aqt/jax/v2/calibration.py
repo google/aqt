@@ -43,7 +43,10 @@ class AbsMaxCalibration(Calibration):
 
   def get_bound(self, x, shared_axes) -> jnp.ndarray:
     """Calibration."""
-    msg = 'Perhaps you are using fake_quant and forgot to set them.'
+    msg = (
+        'Perhaps you are using DequantMode.THIS_INPUT (fake_quant) and forgot'
+        ' to set them.'
+    )
     assert shared_axes is not None, msg
 
     # NOTE: If you want to clip, consider using clip and clip_gradient in

@@ -317,7 +317,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # Should make a function of it that includes preprocess as well.
     lhs_cast_dtype = cfg.lhs.numerics.get_dtype()
     rhs_cast_dtype = cfg.rhs.numerics.get_dtype()
-    msg = "Can't cast dtype in fake_quant mode."
+    msg = "Can't cast dtype in DequantMode.THIS_INPUT (fake quant) mode."
     if cfg.lhs.dequant_mode == config.DequantMode.THIS_INPUT:
       # TODO(yichizh): replace rounding in numerics with casting to dtype.
       # So fake quant becomes casting to dtype first, then casting to bfloat.
