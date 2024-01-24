@@ -51,6 +51,8 @@ class DequantMode(enum.Enum):
   # Multiply QTensor.qvalue by untransposed QTensor.scale before
   # dot_general (a.k.a. FakeQuant )
   THIS_INPUT = 2
+  # Multiply other argument of dot general by appropriately transposed scale.
+  OTHER_INPUT = 3
 
 
 @dataclasses.dataclass(slots=True)

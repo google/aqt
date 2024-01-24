@@ -153,12 +153,12 @@ class AqtDotGeneral(nn.Module):
     for li, ri in zip(*contr):
       lhs_scale_shape[li] = 1
       rhs_scale_shape[ri] = 1
-    lhs_scale = aqt_dot_general._lhs_scale_transpose(  # pylint: disable=protected-access
+    lhs_scale = aqt_dot_general._lhs_scale_transpose_to_output(  # pylint: disable=protected-access
         jnp.zeros(lhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
     )
     assert lhs_scale is not None
     lhs_scale_shape = lhs_scale.shape
-    rhs_scale = aqt_dot_general._rhs_scale_transpose(  # pylint: disable=protected-access
+    rhs_scale = aqt_dot_general._rhs_scale_transpose_to_output(  # pylint: disable=protected-access
         jnp.zeros(rhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
     )
     assert rhs_scale is not None
@@ -308,6 +308,7 @@ class AqtEinsum(nn.Module):
       lhs_init, rhs_init = rhs_init, lhs_init
       lhs_scale_init, rhs_scale_init = rhs_scale_init, lhs_scale_init
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
+      lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
 
     aqt_dg = AqtDotGeneral(
         cfg=cfg,
