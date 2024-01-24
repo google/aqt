@@ -33,7 +33,7 @@ from jax import lax
 import jax.numpy as jnp
 
 
-GradientFn = Callable[..., Any]
+GradientFn = Callable[..., Any] | None  # None when there is no numerics
 
 
 @flax.struct.dataclass

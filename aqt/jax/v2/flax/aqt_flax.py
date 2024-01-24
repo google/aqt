@@ -440,5 +440,6 @@ def config_v4(
       dlhs_dtype=dlhs_accumulator_dtype,
       drhs_dtype=drhs_accumulator_dtype,
   )
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
 
   return cfg

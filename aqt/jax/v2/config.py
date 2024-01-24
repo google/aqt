@@ -14,10 +14,9 @@
 """Configuration dataclasses."""
 
 import copy
-import dataclasses
 import enum
+import functools
 from typing import Any, Callable, Optional
-
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.numerics import int_numerics
@@ -29,12 +28,25 @@ import jax.numpy as jnp
 
 
 DType = Any
+AbstractAqtNumerics = numerics.AqtNumerics
+AbstractAqtCalibration = calibration.Calibration
+flax_slots_dataclass = functools.partial(
+    flax.struct.dataclass, frozen=False, slots=True
+)
 
 
-@flax.struct.dataclass
+def static_field():
+  return flax.struct.field(pytree_node=False)
+
+
+def dynamic_field():
+  return flax.struct.field(pytree_node=True)
+
+
+@flax_slots_dataclass
 class Context:
-  key: Optional[jax.Array]
-  train_step: Optional[int]
+  key: Optional[jax.Array] = dynamic_field()
+  train_step: Optional[int] = dynamic_field()
 
 
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
@@ -55,52 +67,52 @@ class DequantMode(enum.Enum):
   OTHER_INPUT = 3
 
 
-@dataclasses.dataclass(slots=True)
+@flax_slots_dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
-  numerics: numerics.AqtNumerics
-  calib_shared_axes: Optional[list[int]]
-  scale_stop_grad: bool
+  numerics: AbstractAqtNumerics = static_field()
+  calib_shared_axes: Optional[list[int]] = static_field()
+  scale_stop_grad: bool = static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
-  calibration: calibration.Calibration
+  calibration: AbstractAqtCalibration = static_field()
   # Round up the calibration to power of 2 (po2).
-  po2_scale: bool
+  po2_scale: bool = static_field()
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
-  use_fwd_quant: Optional[bool]
+  use_fwd_quant: Optional[bool] = static_field()
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   # If get_qtensor is set, the value it returns will
   # overwrite the QTensor computed based on actual inputs.
-  get_qtensor: Optional[Callable[[], QTensor]]
+  get_qtensor: Optional[Callable[[], QTensor]] = static_field()
   # "side return"; if set, it is called with computed QTensor.
   # Implement auxiliary return in presence of fixed signature of dot_general.
-  set_qtensor: Optional[Callable[[QTensor], None]]
+  set_qtensor: Optional[Callable[[QTensor], None]] = static_field()
   context: Context
 
   # Dequantization mode.
-  dequant_mode: DequantMode
+  dequant_mode: DequantMode = static_field()
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
     return tensor_make(*args, **kwargs)
 
 
-@dataclasses.dataclass(slots=True)
+@flax_slots_dataclass
 class LocalAqt:
-  contraction_axis_shard_count: int
+  contraction_axis_shard_count: int = static_field()
 
 
-@dataclasses.dataclass(slots=True)
+@flax_slots_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
 
   lhs: Tensor
   rhs: Tensor
-  dg_accumulator_dtype: Optional[DType]
-  local_aqt: Optional[LocalAqt]
-  jax_scope_name: str
+  dg_accumulator_dtype: Optional[DType] = static_field()
+  local_aqt: Optional[LocalAqt] = static_field()
+  jax_scope_name: str = static_field()
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'DotGeneralRaw':
@@ -111,7 +123,7 @@ class DotGeneralRaw:
     return conv_general_dilated_make(*args, **kwargs)
 
 
-@dataclasses.dataclass(slots=True)
+@flax_slots_dataclass
 class DotGeneral:
   """Configuration of quantization of dot_general and its gradients."""
 
@@ -310,6 +322,7 @@ def dot_general_make(
     cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
   if rhs_bits is not None:
     cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg
 
 
@@ -371,6 +384,8 @@ def fully_quantized(
   if use_dummy_static_bound:
     set_static_bound(cfg, 1.0)
 
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
+
   return cfg
 
 
@@ -426,4 +441,5 @@ def config_v3(
       dlhs_dtype=dlhs_accumulator_dtype,
       drhs_dtype=drhs_accumulator_dtype,
   )
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg

@@ -13,10 +13,9 @@
 # limitations under the License.
 """Base abstract class for all numerics."""
 import abc
-import flax.struct
 
 
-class AqtNumerics(flax.struct.PyTreeNode, abc.ABC):
+class AqtNumerics(abc.ABC):
   """Numerics for int8, int4, binary, etc."""
 
   # TODO(lew): Currently this is a part of API, only because it is used to set

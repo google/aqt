@@ -24,7 +24,7 @@
 # pylint: disable=g-explicit-length-test
 
 import functools
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
@@ -49,7 +49,7 @@ class MultiTensor:
 class TensorRes:
   """All the things we pass from the forward pass to the backward pass."""
   mt: MultiTensor
-  quant_grad: Union[Callable[[jnp.ndarray], tuple[jnp.ndarray]], None]
+  quant_grad: aqt_tensor.GradientFn
 
 
 @flax.struct.dataclass
@@ -394,25 +394,29 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   return dot_general_raw
 
 
-def _dot_general_raw_attach_gradient(
-    fwd_dot_general_raw,
-    dlhs_dot_general_raw,
-    drhs_dot_general_raw,
-):
+# TODO(yichizh): inline this function. Make all child functions top-level.
+def _dot_general_raw_attach_gradient():
   """Makes quantized lax.dot_general replacement with attached gradients."""
 
   def make_fwd(return_residual):
 
+    # When defining a vjp, all traceable variables must be input arguments of
+    # both the fwd and bwd function.
+    # The cfg (DotGeneral) contains the key used for stochastic rounding,
+    # which are traceable dynamic variables. It needs to be an input argument
+    # to prevent the jax side effect.
     def fwd(
-        lhs,
-        rhs,
-        lhs_qt,
-        rhs_qt,
-        dimension_numbers,
+        lhs: jnp.ndarray,
+        rhs: jnp.ndarray,
+        lhs_qt: Optional[aqt_tensor.QTensor],
+        rhs_qt: Optional[aqt_tensor.QTensor],
+        dimension_numbers: lax.DotDimensionNumbers,
+        cfg: config.DotGeneral,
     ):
       assert (
           lhs.dtype == rhs.dtype
       ), f'Unmatched lhs and rhs dtype: {lhs.dtype} vs {rhs.dtype}'
+      fwd_dot_general_raw = _make_dot_general_raw(cfg.fwd)
       ret, res = fwd_dot_general_raw(
           lhs,
           rhs,
@@ -422,20 +426,24 @@ def _dot_general_raw_attach_gradient(
       )
       ret = ret.astype(lhs.dtype)
       # We return these values to allow for materialization.
+      assert res is not None, 'res cannot be None in fwd pass.'
       qret = (res.lhs.mt.qx, res.rhs.mt.qx)
       if return_residual:
-        return ((ret, qret), res)
+        return ((ret, qret), (res, cfg))
       else:
         return (ret, qret)
 
     return fwd
 
   def vjp_bwd(
-      fwd_dimension_numbers,
-      res: DotGeneralRes,
+      fwd_dimension_numbers: lax.DotDimensionNumbers,
+      res: tuple[Optional[DotGeneralRes], config.DotGeneral],
       g,
   ):
     # g[1] is gradient with respect to qret which we are ignoring.
+    dg_res, cfg = res
+    msg = 'dg_res can only be None in 2nd derivative. It is not yet supported.'
+    assert dg_res is not None, msg
     g = g[0]
     def ranges_like(*xs):
       start = 0
@@ -445,8 +453,8 @@ def _dot_general_raw_attach_gradient(
 
     def grad_dot_general(
         y_res: TensorRes,
-        quant_grad,
-        dot_general,
+        quant_grad: aqt_tensor.GradientFn,
+        cfg_raw: config.DotGeneralRaw,
         y_is_lhs,
     ):
       y_ndim = y_res.mt.x.ndim
@@ -464,6 +472,7 @@ def _dot_general_raw_attach_gradient(
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
+      dot_general = _make_dot_general_raw(cfg_raw)
       out, _ = dot_general(g, y_res.mt, None, None, dims)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
@@ -474,21 +483,21 @@ def _dot_general_raw_attach_gradient(
       return transposed_out
 
     dlhs = grad_dot_general(
-        res.rhs,
-        res.lhs.quant_grad,
-        dlhs_dot_general_raw,
+        dg_res.rhs,
+        dg_res.lhs.quant_grad,
+        cfg.dlhs,
         False,
     )
     drhs = grad_dot_general(
-        res.lhs,
-        res.rhs.quant_grad,
-        drhs_dot_general_raw,
+        dg_res.lhs,
+        dg_res.rhs.quant_grad,
+        cfg.drhs,
         True,
     )
     # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
     # None as grad to it. This is because it is a tuple of Python integers
     # that cannot be traced by Jax.
-    return (dlhs, drhs, None, None)
+    return (dlhs, drhs, None, None, None)
 
   vjp = jax.custom_vjp(make_fwd(False), nondiff_argnums=(4,))
   vjp.defvjp(make_fwd(True), vjp_bwd)
@@ -501,11 +510,7 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
   if cfg is None:
     return jax.lax.dot_general
 
-  dg = _dot_general_raw_attach_gradient(
-      fwd_dot_general_raw=_make_dot_general_raw(cfg.fwd),
-      dlhs_dot_general_raw=_make_dot_general_raw(cfg.dlhs),
-      drhs_dot_general_raw=_make_dot_general_raw(cfg.drhs),
-  )
+  dg = _dot_general_raw_attach_gradient()
 
   def ret_dg(
       lhs,
@@ -533,6 +538,7 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
         lhs_qt=lhs_qt,
         rhs_qt=rhs_qt,
         dimension_numbers=dimension_numbers,
+        cfg=cfg,
     )
 
     # TODO(lew): Ideally all QTensors would be always quantized.

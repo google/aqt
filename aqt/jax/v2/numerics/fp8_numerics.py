@@ -13,6 +13,7 @@
 # limitations under the License.
 """Numerics for fp8."""
 
+import functools
 from typing import Any, Optional
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
@@ -27,7 +28,8 @@ import jax.numpy as jnp
 FP8_DTYPE = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 
 
-class Fp8Numerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
+@functools.partial(flax.struct.dataclass, frozen=False, slots=True)
+class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 
   dtype: Any
@@ -128,4 +130,5 @@ def config_fwd_fp8(fwd_bits: str = 'e4m3') -> config.DotGeneral:
   config.set_fwd_numerics(cfg, fp8_numerics)
   config.set_accumulator_dtype(cfg, jnp.float32, None, None)
   config.set_stochastic_rounding(cfg, False, False, 'jax.uniform')
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg

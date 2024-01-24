@@ -407,63 +407,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dg_raw = aqt._make_dot_general_raw(cfg.fwd)
       return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims)[0]
 
-    # Test that with backprop correctly composes 3 functions.
-    # We need to test shape calculations and the returned values.
-    # For the former we have multiple shapes,
-    # for the latter we add some constant and test it on return.
-    def lax_dg(lhs, rhs):
-      return jax.lax.dot_general(lhs, rhs, dims)
-
-    def lax_dg_248(lhs, rhs):
-      def dg_mul(delta):
-
-        def dg(
-            lhs,
-            rhs,
-            lhs_qt,
-            rhs_qt,
-            dimension_numbers,
-        ):
-          del lhs_qt, rhs_qt
-          if isinstance(rhs, aqt.MultiTensor):
-            rhs = rhs.x
-
-          ret = jax.lax.dot_general(lhs, rhs, dimension_numbers)
-          ret *= delta
-
-          def res(v):
-            return aqt.TensorRes(
-                mt=aqt.MultiTensor(
-                    x=v,
-                    qx=aqt_tensor.QTensor(qvalue=v, scale=[], scale_t=[]),
-                ),
-                quant_grad=None,
-            )
-
-          res = aqt.DotGeneralRes(
-              lhs=res(lhs),
-              rhs=res(rhs),
-          )
-          return ret, res
-
-        return dg
-
-      m1 = dg_mul(2.0)
-      m2 = dg_mul(4.0)
-      m3 = dg_mul(8.0)
-      out, (out_lhs_qt, out_rhs_qt) = aqt._dot_general_raw_attach_gradient(
-          m1, m2, m3
-      )(
-          lhs,
-          rhs,
-          None,
-          None,
-          dims,
-      )
-      # TODO(lew): Test values instead of del.
-      del out_lhs_qt, out_rhs_qt
-      return out
-
     test_jaxpr_dtype(
         lambda: aqt_dg_full(config.DequantMode.OUTPUT)(lhs, rhs),
         [modify_cfg().fwd],
@@ -560,11 +503,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             ),
             dict(),
         ),
-    ])
-
-    check([
-        ("lax_dg    ", lax_dg, dict()),
-        ("lax_dg_248", lax_dg_248, dict(mult=(2.0, 4.0, 8.0))),
     ])
 
     if isinstance(readonly_cfg.fwd.lhs.numerics, int_numerics.IntNumerics):
