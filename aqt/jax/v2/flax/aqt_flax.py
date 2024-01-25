@@ -147,6 +147,10 @@ class AqtDotGeneral(nn.Module):
       rhs_shape,
       dimension_numbers: tuple[Iterable[int], Iterable[int]],
   ):
+    if self.cfg is None:
+      return jax.lax.dot_general
+
+    cfg = copy.deepcopy(self.cfg)
     lhs_scale_shape = list(lhs_shape)
     rhs_scale_shape = list(rhs_shape)
     (contr, _) = dimension_numbers
@@ -163,51 +167,91 @@ class AqtDotGeneral(nn.Module):
     )
     assert rhs_scale is not None
     rhs_scale_shape = rhs_scale.shape
+    rhs_qm = self.rhs_quant_mode
+    lhs_qm = self.lhs_quant_mode
 
-    cfg = copy.deepcopy(self.cfg)
-    if cfg is not None:
-      rhs_qm = self.rhs_quant_mode
-      lhs_qm = self.lhs_quant_mode
+    lhs_freezer = Freezer(
+        name=self.lhs_var_name,
+        quant_mode=lhs_qm,
+        q_shape=lhs_shape,
+        q_dtype=cfg.fwd.lhs.numerics.get_dtype(),
+        q_init=self.lhs_init,
+        s_shape=lhs_scale_shape,
+        s_init=self.lhs_scale_init,
+        quant_collection=self.quant_collection,
+    )
 
-      lhs_freezer = Freezer(
-          name=self.lhs_var_name,
-          quant_mode=lhs_qm,
-          q_shape=lhs_shape,
-          q_dtype=cfg.fwd.lhs.numerics.get_dtype(),
-          q_init=self.lhs_init,
-          s_shape=lhs_scale_shape,
-          s_init=self.lhs_scale_init,
-          quant_collection=self.quant_collection,
-      )
+    rhs_freezer = Freezer(
+        name=self.rhs_var_name,
+        quant_mode=rhs_qm,
+        q_shape=rhs_shape,
+        q_dtype=cfg.fwd.rhs.numerics.get_dtype(),
+        q_init=self.rhs_init,
+        s_shape=rhs_scale_shape,
+        s_init=self.rhs_scale_init,
+        quant_collection=self.quant_collection,
+    )
 
-      rhs_freezer = Freezer(
-          name=self.rhs_var_name,
-          quant_mode=rhs_qm,
-          q_shape=rhs_shape,
-          q_dtype=cfg.fwd.rhs.numerics.get_dtype(),
-          q_init=self.rhs_init,
-          s_shape=rhs_scale_shape,
-          s_init=self.rhs_scale_init,
-          quant_collection=self.quant_collection,
-      )
+    prng_name = self.prng_name
+    key = self.make_rng(prng_name) if prng_name is not None else None
+    cfg = config.set_context(cfg, key, train_step=None)
 
-      msg = 'get/set_qtensor should only be auto-set by AqtEinsum or AqtDotGen.'
+    dg = aqt_dot_general._dot_general_raw_attach_gradient()  # pylint: disable=protected-access
+
+    def ret_dg(
+        lhs,
+        rhs,
+        dimension_numbers,
+        precision=None,
+        preferred_element_type=None,
+    ):
+      del preferred_element_type
+      assert (
+          precision is None
+      ), f'Precision {precision} requested together with quantization.'
+
+      # TODO(yichizh): asserting xhs dtype only when apply_quant_mode=False
+      # and cfg.get_qtensor() is None
+      msg = 'AQT is not yet optimized to accept quantized types directly. '
+      msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
+      assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
+      assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
+
+      # Getter
+      # TODO(yichizh): remove cfg.get_qtensor() by makeing einsum input qtensor
+      # as class attributes to AqtDotGeneral.
       if self.lhs_apply_quant_mode:
-        assert cfg.fwd.lhs.get_qtensor is None, msg
-        assert cfg.fwd.lhs.set_qtensor is None, msg
-        cfg.fwd.lhs.get_qtensor = lambda: lhs_freezer(None)
-        cfg.fwd.lhs.set_qtensor = lambda qt: lhs_freezer(qt)
+        lhs_qt = lhs_freezer(None)
+      else:
+        lhs_qt = cfg.fwd.lhs.get_qtensor() if cfg.fwd.lhs.get_qtensor else None
       if self.rhs_apply_quant_mode:
-        assert cfg.fwd.rhs.get_qtensor is None, msg
-        assert cfg.fwd.rhs.set_qtensor is None, msg
-        cfg.fwd.rhs.get_qtensor = lambda: rhs_freezer(None)
-        cfg.fwd.rhs.set_qtensor = lambda qt: rhs_freezer(qt)
+        rhs_qt = rhs_freezer(None)
+      else:
+        rhs_qt = cfg.fwd.rhs.get_qtensor() if cfg.fwd.rhs.get_qtensor else None
 
-      prng_name = self.prng_name
-      key = self.make_rng(prng_name) if prng_name is not None else None
-      cfg = config.set_context(cfg, key, train_step=None)
-    aqt_dg = aqt_dot_general.make_dot_general(cfg)
-    return aqt_dg
+      out, (out_lhs_qt, out_rhs_qt) = dg(
+          lhs=lhs,
+          rhs=rhs,
+          lhs_qt=lhs_qt,
+          rhs_qt=rhs_qt,
+          dimension_numbers=dimension_numbers,
+          cfg=cfg,
+      )
+
+      # TODO(lew): Ideally all QTensors would be always quantized.
+      #   Move cast as early as possible.
+      def cast(qt: aqt_tensor.QTensor, dtype) -> aqt_tensor.QTensor:
+        return qt.replace(qvalue=qt.qvalue.astype(dtype))
+
+      # Setter
+      if self.lhs_apply_quant_mode:
+        lhs_freezer(cast(out_lhs_qt, cfg.fwd.lhs.numerics.get_dtype()))
+      if self.rhs_apply_quant_mode:
+        rhs_freezer(cast(out_rhs_qt, cfg.fwd.rhs.numerics.get_dtype()))
+
+      return out
+
+    return ret_dg
 
   @nn.compact
   def __call__(
@@ -379,7 +423,6 @@ def config_v4(
         # dtype_x=dtype,
         use_fwd_quant=None,
         get_qtensor=None,
-        set_qtensor=None,
         context=config.Context(key=None, train_step=None),
         dequant_mode=config.DequantMode.OUTPUT,
     )

@@ -86,9 +86,6 @@ class Tensor:
   # If get_qtensor is set, the value it returns will
   # overwrite the QTensor computed based on actual inputs.
   get_qtensor: Optional[Callable[[], QTensor]] = static_field()
-  # "side return"; if set, it is called with computed QTensor.
-  # Implement auxiliary return in presence of fixed signature of dot_general.
-  set_qtensor: Optional[Callable[[QTensor], None]] = static_field()
   context: Context
 
   # Dequantization mode.
@@ -247,7 +244,6 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       # dtype_x=dtype,
       use_fwd_quant=None,
       get_qtensor=None,
-      set_qtensor=None,
       context=Context(key=None, train_step=None),
       dequant_mode=DequantMode.OUTPUT,
   )
