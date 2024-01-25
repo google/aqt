@@ -267,6 +267,13 @@ class AqtEinsum(nn.Module):
     # specific methods to QTensor.
     lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g
     rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g
+
+    # Set the types of dummy input to the same as original input, to prevent it
+    # from being rejected by assertions in aqt_dot_general.py, line 522-526 and
+    # 414.
+    # TODO: b/322111904 - Handle this in more proper way.
+    lhs_in, rhs_in = nn.dtypes.promote_dtype(lhs_in, rhs_in)
+
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
     einsum = functools.partial(aqt_dot_general.einsum, eqn=eqn)
     a = jax.make_jaxpr(einsum)(lhs=lhs_in, rhs=rhs_in)
