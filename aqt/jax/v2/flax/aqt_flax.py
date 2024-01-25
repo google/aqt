@@ -130,12 +130,14 @@ class AqtDotGeneral(nn.Module):
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
+  lhs_qtensor: Optional[aqt_tensor.QTensor] = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
+  rhs_qtensor: Optional[aqt_tensor.QTensor] = None
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -218,16 +220,10 @@ class AqtDotGeneral(nn.Module):
       assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
 
       # Getter
-      # TODO(yichizh): remove cfg.get_qtensor() by makeing einsum input qtensor
-      # as class attributes to AqtDotGeneral.
-      if self.lhs_apply_quant_mode:
-        lhs_qt = lhs_freezer(None)
-      else:
-        lhs_qt = cfg.fwd.lhs.get_qtensor() if cfg.fwd.lhs.get_qtensor else None
-      if self.rhs_apply_quant_mode:
-        rhs_qt = rhs_freezer(None)
-      else:
-        rhs_qt = cfg.fwd.rhs.get_qtensor() if cfg.fwd.rhs.get_qtensor else None
+      lhs_apply_quant_mode = self.lhs_apply_quant_mode
+      rhs_apply_quant_mode = self.rhs_apply_quant_mode
+      lhs_qt = lhs_freezer(None) if lhs_apply_quant_mode else self.lhs_qtensor
+      rhs_qt = rhs_freezer(None) if rhs_apply_quant_mode else self.rhs_qtensor
 
       out, (out_lhs_qt, out_rhs_qt) = dg(
           lhs=lhs,
@@ -300,10 +296,11 @@ class AqtEinsum(nn.Module):
       lhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
       rhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
   ):
+    cfg = self.cfg
     lhs_is_qt = isinstance(lhs_g, aqt_tensor.QTensor)
     rhs_is_qt = isinstance(rhs_g, aqt_tensor.QTensor)
     msg = 'Aqt config is None but inputs to AqtEinsum are QTensor.'
-    assert not ((lhs_is_qt or rhs_is_qt) and self.cfg is None), msg
+    assert not ((lhs_is_qt or rhs_is_qt) and cfg is None), msg
     # when inputs are qtensor, xhs_in is a dummy input that will be consumed by
     # lax einsum API, but it is not used for computation in aqt_dg because it
     # will be overwritten by get_tensor()
@@ -327,32 +324,25 @@ class AqtEinsum(nn.Module):
     yes_swap = lhs_g_id == rhs_l_id and rhs_g_id == lhs_l_id
     assert not_swap != yes_swap
 
-    cfg = copy.deepcopy(self.cfg)
-    if cfg is not None:
-      # when xhs_g is a qtensor, let get_tensor() always return it.
-      # This is an alternative to Freezer variable creation for providing
-      # qtensor to aqt dg.
-      if lhs_is_qt:
-        cfg.fwd.lhs.get_qtensor = lambda: lhs_g
-      if rhs_is_qt:
-        cfg.fwd.rhs.get_qtensor = lambda: rhs_g
-
     prng_name = self.prng_name
 
     lhs_quant_mode = self.lhs_quant_mode
     lhs_init = self.lhs_init
     lhs_scale_init = self.lhs_scale_init
     lhs_var_name = self.lhs_var_name
+    lhs_qtensor = lhs_g if lhs_is_qt else None
 
     rhs_quant_mode = self.rhs_quant_mode
     rhs_init = self.rhs_init
     rhs_scale_init = self.rhs_scale_init
     rhs_var_name = self.rhs_var_name
+    rhs_qtensor = rhs_g if rhs_is_qt else None
 
     quant_collection = self.quant_collection
 
     if yes_swap:
       if cfg is not None:
+        cfg = copy.deepcopy(cfg)
         cfg.fwd.lhs, cfg.fwd.rhs = cfg.fwd.rhs, cfg.fwd.lhs
         cfg.dlhs, cfg.drhs = cfg.drhs, cfg.dlhs
       lhs_quant_mode, rhs_quant_mode = rhs_quant_mode, lhs_quant_mode
@@ -360,6 +350,7 @@ class AqtEinsum(nn.Module):
       lhs_scale_init, rhs_scale_init = rhs_scale_init, lhs_scale_init
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
       lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
+      lhs_qtensor, rhs_qtensor = rhs_qtensor, lhs_qtensor
 
     aqt_dg = AqtDotGeneral(
         cfg=cfg,
@@ -372,11 +363,13 @@ class AqtEinsum(nn.Module):
         lhs_init=lhs_init,
         lhs_scale_init=lhs_scale_init,
         lhs_var_name=lhs_var_name,
+        lhs_qtensor=lhs_qtensor,
         rhs_quant_mode=rhs_quant_mode,
         rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
         rhs_init=rhs_init,
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
+        rhs_qtensor=rhs_qtensor,
         quant_collection=quant_collection,
     )
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)
@@ -420,9 +413,7 @@ def config_v4(
         scale_stop_grad=True,
         calibration=calibration.AbsMaxCalibration(),
         po2_scale=False,
-        # dtype_x=dtype,
         use_fwd_quant=None,
-        get_qtensor=None,
         context=config.Context(key=None, train_step=None),
         dequant_mode=config.DequantMode.OUTPUT,
     )

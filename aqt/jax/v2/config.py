@@ -83,11 +83,7 @@ class Tensor:
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool] = static_field()
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
-  # If get_qtensor is set, the value it returns will
-  # overwrite the QTensor computed based on actual inputs.
-  get_qtensor: Optional[Callable[[], QTensor]] = static_field()
   context: Context
-
   # Dequantization mode.
   dequant_mode: DequantMode = static_field()
 
@@ -243,7 +239,6 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
       po2_scale=False,
       # dtype_x=dtype,
       use_fwd_quant=None,
-      get_qtensor=None,
       context=Context(key=None, train_step=None),
       dequant_mode=DequantMode.OUTPUT,
   )
