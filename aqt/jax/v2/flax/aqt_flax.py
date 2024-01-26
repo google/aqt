@@ -59,24 +59,31 @@ class Freezer(nn.Module):
   s_shape: Iterable[int]
   s_init: nn.initializers.Initializer
 
+  def setup(self):
+    mode = self.quant_mode
+    if mode == QuantMode.SERVE or mode == QuantMode.CONVERT:
+      collection = self.quant_collection
+      q_init = self.q_init
+      q_shape = self.q_shape
+      q_dtype = self.q_dtype
+      s_init = self.s_init
+      s_shape = self.s_shape
+      # TODO(lew): Store whole QTensor?
+      # We could have created one self.variable whose value is a QTensor,
+      # but we are unsure how this would complicate the init function,
+      # which could potentially be used by adding metadata such as
+      # sharding axises, etc.
+      self.qvalue = self.variable(collection, 'value', q_init, q_shape, q_dtype)
+      self.scale_t = self.variable(collection, 'scale', s_init, s_shape)
+
   def get(self) -> Optional[aqt_tensor.QTensor]:
     if self.quant_mode == QuantMode.TRAIN:
       return None
     elif self.quant_mode == QuantMode.CONVERT:
       return None
     elif self.quant_mode == QuantMode.SERVE:
-      collection = self.quant_collection
-      # We could have created one self.variable whose value is a QTensor,
-      # but this would complicate the init function, which could potentially
-      # be used by adding metadata such as sharding axises, etc.
-      qvalue = self.variable(
-          collection, 'value', self.q_init, self.q_shape, self.q_dtype
-      )
-      # TODO(lew): Store whole QTensor?
-      scale_t = self.variable(collection, 'scale', self.s_init, self.s_shape)
-      # TODO(lew): scale is small, store it instead of using this silly poison.
       return aqt_tensor.QTensor(
-          qvalue.value, scale=None, scale_t=[scale_t.value]
+          self.qvalue.value, scale=None, scale_t=[self.scale_t.value]
       )
     else:
       assert False, 'Unknown quant mode.'
@@ -85,34 +92,15 @@ class Freezer(nn.Module):
     if self.quant_mode == QuantMode.TRAIN:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
-      collection = self.quant_collection
-      qvalue = self.variable(
-          collection, 'value', self.q_init, self.q_shape, self.q_dtype
-      )
-      scale_t = self.variable(collection, 'scale', self.s_init, self.s_shape)
-      qvalue.value = inputs.qvalue
+      self.qvalue.value = inputs.qvalue
       assert inputs.scale_t is not None and len(inputs.scale_t) == 1
-      scale_t.value = inputs.scale_t[0]
+      self.scale_t.value = inputs.scale_t[0]
     elif self.quant_mode == QuantMode.SERVE:
       # TODO(lew): Optionally compare stored and served value.
       pass
     else:
       assert False, 'Unknown quant mode.'
     return None
-
-  @nn.compact
-  def __call__(
-      self, inputs: Optional[aqt_tensor.QTensor]
-  ) -> Optional[aqt_tensor.QTensor]:
-    # TODO(yichizh): Two constraints on Module make the call function necessary:
-    # (1) Variables must be created either in setup() or with nn.compact.
-    #     We don't want variables in training mode, so nn.compact is better.
-    # (2) At most one method in a Module can be wrapped with nn.compact.
-    #     so there has to be a fn with the decorator that calls get() and set().
-    if inputs is None:
-      return self.get()
-    else:
-      return self.set(inputs)
 
 
 class AqtDotGeneral(nn.Module):
@@ -222,8 +210,8 @@ class AqtDotGeneral(nn.Module):
       # Getter
       lhs_apply_quant_mode = self.lhs_apply_quant_mode
       rhs_apply_quant_mode = self.rhs_apply_quant_mode
-      lhs_qt = lhs_freezer(None) if lhs_apply_quant_mode else self.lhs_qtensor
-      rhs_qt = rhs_freezer(None) if rhs_apply_quant_mode else self.rhs_qtensor
+      lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
+      rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
 
       out, (out_lhs_qt, out_rhs_qt) = dg(
           lhs=lhs,
@@ -241,9 +229,9 @@ class AqtDotGeneral(nn.Module):
 
       # Setter
       if self.lhs_apply_quant_mode:
-        lhs_freezer(cast(out_lhs_qt, cfg.fwd.lhs.numerics.get_dtype()))
+        lhs_freezer.set(cast(out_lhs_qt, cfg.fwd.lhs.numerics.get_dtype()))
       if self.rhs_apply_quant_mode:
-        rhs_freezer(cast(out_rhs_qt, cfg.fwd.rhs.numerics.get_dtype()))
+        rhs_freezer.set(cast(out_rhs_qt, cfg.fwd.rhs.numerics.get_dtype()))
 
       return out
 
