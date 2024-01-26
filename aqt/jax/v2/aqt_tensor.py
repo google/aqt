@@ -67,6 +67,79 @@ class QTensor:
         ret = ret.astype(dtype) * scale.astype(dtype)
     return ret
 
+  def dynamic_slice(
+      self,
+      start_indices: Sequence[int],
+      slice_shape: Sequence[int],
+      quantization_axis: Sequence[int],
+  ) -> 'QTensor':
+    """Dynamically slices the value at start_indices using the given shape."""
+    assert self.scale_t is None, 'scale_t is not supported in dynamic_slice'
+    scale_slice_shape = list(slice_shape)
+    for dim in quantization_axis:
+      scale_slice_shape[dim] = 1
+
+    return QTensor(
+        jax.lax.dynamic_slice(self.qvalue, start_indices, slice_shape),
+        [
+            jax.lax.dynamic_slice(s, start_indices, scale_slice_shape)
+            for s in self.scale
+        ],
+        None,
+    )
+
+  def dynamic_update_slice(
+      self, update: 'QTensor', start_indices: Sequence[int]
+  ) -> 'QTensor':
+    """Updates the value at start_indices with the given QTensor value."""
+    assert (
+        self.scale_t is None
+    ), 'scale_t is not supported in dynamic_update_slice'
+    qvalues = jax.lax.dynamic_update_slice(
+        self.qvalue, update.qvalue, start_indices
+    )
+    scales = [
+        jax.lax.dynamic_update_slice(my_scale, update_scale, start_indices)
+        for my_scale, update_scale in zip(self.scale, update.scale)
+    ]
+
+    return QTensor(qvalues, scales, None)
+
+  def update_frame(self, frame: int, update: 'QTensor') -> 'QTensor':
+    """Updates the value at frame with the given QTensor value."""
+    assert self.ndim == update.ndim + 1
+
+    return QTensor(
+        self.qvalue.at[frame].set(update.qvalue),
+        [
+            target_scale.at[frame].set(update_scale)
+            for target_scale, update_scale in zip(self.scale, update.scale)
+        ],
+        None,
+    )
+
+  def __getitem__(self, idx: int):
+    assert self.scale_t is None, 'scale_t is not supported in __getitem__'
+    return QTensor(self.qvalue[idx], [s[idx] for s in self.scale], None)
+
+  def at(self, idx: int):
+    return self.__getitem__(idx)
+
+  @classmethod
+  def zero_init(
+      cls, shape: Sequence[int], quantization_axis: Sequence[int], dtype
+  ) -> 'QTensor':
+    """Initializes a QTensor with empty values."""
+    scale_shape = list(shape)
+    for dim in quantization_axis:
+      scale_shape[dim] = 1
+
+    return QTensor(
+        jnp.zeros(shape, dtype=jnp.int8),
+        [jnp.ones(scale_shape, dtype=dtype)],
+        None,
+    )
+
   @property
   def ndim(self) -> int:
     return self.qvalue.ndim
