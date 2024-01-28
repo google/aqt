@@ -263,7 +263,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
-      if lhs_qt.scale_t is None:
+      if (
+          lhs_qt.scale_t is None
+          and cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT
+      ):
         assert lhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
         lhs_scale_t = []
         for scale in lhs_qt.scale:
@@ -273,12 +276,14 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           lhs_scale_t.append(scale_t)
         lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
     else:
-      transpose = functools.partial(
-          _lhs_scale_transpose_to_output,
-          dimension_numbers=dimension_numbers,
-          lhs_shape=lhs.shape,
-          rhs_shape=rhs.shape,
-      )
+      transpose = None
+      if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
+        transpose = functools.partial(
+            _lhs_scale_transpose_to_output,
+            dimension_numbers=dimension_numbers,
+            lhs_shape=lhs.shape,
+            rhs_shape=rhs.shape,
+        )
 
       lhs_qt, lhs_quant_grad = aqt_tensor.quant(
           lhs, cfg=cfg.lhs, calibration_axes=lhs_ca, transpose_fn=transpose
@@ -289,7 +294,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     if rhs_qt is not None:
       rhs_quant_grad = 'Poison. Not needed in serving'
-      if rhs_qt.scale_t is None:
+      if (
+          rhs_qt.scale_t is None
+          and cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT
+      ):
         assert rhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
         rhs_scale_t = []
         for scale in rhs_qt.scale:
@@ -299,12 +307,14 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           rhs_scale_t.append(scale_t)
         rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     else:
-      transpose = functools.partial(
-          _rhs_scale_transpose_to_output,
-          dimension_numbers=dimension_numbers,
-          lhs_shape=lhs.shape,
-          rhs_shape=rhs.shape,
-      )
+      transpose = None
+      if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
+        transpose = functools.partial(
+            _rhs_scale_transpose_to_output,
+            dimension_numbers=dimension_numbers,
+            lhs_shape=lhs.shape,
+            rhs_shape=rhs.shape,
+        )
       rhs_qt, rhs_quant_grad = aqt_tensor.quant(
           rhs, cfg=cfg.rhs, calibration_axes=rhs_ca, transpose_fn=transpose
       )
