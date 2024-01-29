@@ -22,7 +22,6 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
-import functools
 from typing import Any, Callable, Optional, Sequence
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
@@ -119,13 +118,8 @@ def quant(
 
   x_s = x * scale
 
-  # TODO(lew): custom_vjp should be applied in numerics. We can have
-  #   a helper function there to call jax.custom_vjp.
-  numerics_fwd = jax.custom_vjp(cfg.numerics.fwd)
-  numerics_fwd.defvjp(cfg.numerics.vjp_fwd, cfg.numerics.vjp_bwd)
-  numerics_fwd = functools.partial(numerics_fwd, context=cfg.context)
-
-  x_q, quant_grad = jax.vjp(numerics_fwd, x_s)
+  x_q, res = cfg.numerics.vjp_fwd(x_s, cfg.context)
+  quant_grad = jax.tree_util.Partial(cfg.numerics.vjp_bwd, res)
   # We are passing quant_grad (and not more) ot the backward pass.
   # That is equivalent to having:
   # scale = stop_gradient(scale)
