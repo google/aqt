@@ -378,10 +378,9 @@ class QuantOps:
                  *,
                  quantized_type: primitives.jnp_dtype,
                  fake_dependency: Optional[jnp.ndarray] = None) -> jnp.ndarray:
+    del fake_dependency  # unused; this was a remnant of pre-omnistaging JAX.
     x_dtype = x.dtype
     quantized_x = self.to_quantized(x, dtype=quantized_type)
-    if fake_dependency is not None:
-      quantized_x = lax.tie_in(fake_dependency, quantized_x)
     return self.from_quantized(quantized_x, dtype=x_dtype)
 
   # Assumes weights are unsigned int of precision prec.
