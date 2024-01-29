@@ -35,7 +35,8 @@ dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.d
 
 
 def hardware_bernoulli(rng_key, p=np.float32(0.5), shape=None):
-  return lax.rng_uniform(lax.tie_in(rng_key, 0.0), 1.0, shape) < p
+  del rng_key  # unused
+  return lax.rng_uniform(0.0, 1.0, shape) < p
 
 
 def set_hardware_bernoulli():
