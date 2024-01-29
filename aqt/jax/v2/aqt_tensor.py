@@ -79,6 +79,43 @@ def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
   return QTensor(qvalue=jnp.zeros(shape, dtype=qdtype), scale=[], scale_t=[])
 
 
+def dynamic_slice(
+    operand: QTensor,
+    start_indices: Sequence[int],
+    slice_sizes: Sequence[int],
+) -> QTensor:
+  """Dynamically slices the value at start_indices using the given shape."""
+  msg = 'scale_t is not supported in the dynamic_slice of a QTensor.'
+  assert operand.scale_t is None, msg
+  def get_sliced_scales(scale):
+    msg = 'Slice sizes must have the same length as operand dims.'
+    assert scale.ndim == len(slice_sizes), msg
+    scale_start_indices = list(start_indices)
+    scale_slice_sizes = list(slice_sizes)
+    for axis in range(len(scale_slice_sizes)):
+      # slice size must be <= operand shape
+      # scale_slice_sizes[dim] = min(scale_slice_sizes[dim], scale.shape[dim])
+      if scale.shape[axis] == 1:
+        scale_start_indices[axis] = 0
+        scale_slice_sizes[axis] = 1
+      msg = (
+          'We do not support window overflow that is supported in'
+          ' jax.lax.dynamic_slices. Please email lew@google.com if you think'
+          ' this is wrong.'
+      )
+      assert (
+          scale_start_indices[axis] + scale_slice_sizes[axis]
+          <= scale.shape[axis]
+      ), msg
+    return jax.lax.dynamic_slice(scale, scale_start_indices, scale_slice_sizes)
+
+  return QTensor(
+      jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),
+      [get_sliced_scales(s) for s in operand.scale],
+      None,
+  )
+
+
 def quant(
     x,
     *,
