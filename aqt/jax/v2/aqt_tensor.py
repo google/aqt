@@ -94,6 +94,24 @@ def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
   return QTensor(qvalue=jnp.zeros(shape, dtype=qdtype), scale=[], scale_t=[])
 
 
+def zeros_with_scale(
+    shape: Sequence[int],
+    calibration_axis: Sequence[int],
+    qdtype: jnp.dtype,
+    sdtype: jnp.dtype,
+) -> QTensor:
+  """Initializes a QTensor with empty qvalue along with empty scale value."""
+  scale_shape = list(shape)
+  for axis in calibration_axis:
+    scale_shape[axis] = 1
+
+  return QTensor(
+      jnp.zeros(shape, dtype=qdtype),
+      [jnp.ones(scale_shape, dtype=sdtype)],
+      None,
+  )
+
+
 def dynamic_slice(
     operand: QTensor,
     start_indices: Sequence[int],
