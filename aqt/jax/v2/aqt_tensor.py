@@ -22,7 +22,7 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, cast
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -33,6 +33,9 @@ import jax.numpy as jnp
 
 
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
+ArrayOrSharding = (
+    jnp.ndarray | jax.sharding.NamedSharding | jax.sharding.PartitionSpec
+)
 
 
 @flax.struct.dataclass
@@ -41,11 +44,11 @@ class QTensor:
 
   # Quantized (compressed) representation of tensor.
   # Use dequant() method to "decompress" to the original tensor.
-  qvalue: jnp.ndarray
+  qvalue: ArrayOrSharding
 
   # (scale == None) means that scale is unknown/invalid;
   # Otherwise, check dequant(self) for semantics.
-  scale: Optional[list[jnp.ndarray]]
+  scale: Optional[list[ArrayOrSharding]]
 
   # Used in dot_general, transposed scales used in post dot_general scaling.
   # The same comments apply as to scale.
@@ -54,12 +57,13 @@ class QTensor:
   # - scale_t is used both in backprop of dot_general and in post-scaling.
   #   We avoid transposing scale twice.
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
-  scale_t: Optional[list[jnp.ndarray]]
+  scale_t: Optional[list[ArrayOrSharding]]
 
   def dequant(self, dtype: Optional[jnp.dtype] = None) -> jnp.ndarray:
     assert self.scale is not None
-    ret = self.qvalue
+    ret = cast(jnp.ndarray, self.qvalue)
     for scale in self.scale:
+      scale = cast(jnp.ndarray, scale)
       if dtype is None:
         ret = ret * scale
       else:
@@ -68,11 +72,11 @@ class QTensor:
 
   @property
   def ndim(self) -> int:
-    return self.qvalue.ndim
+    return cast(jnp.ndarray, self.qvalue).ndim
 
   @property
   def shape(self) -> Sequence[int]:
-    return self.qvalue.shape
+    return cast(jnp.ndarray, self.qvalue).shape
 
 
 def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
