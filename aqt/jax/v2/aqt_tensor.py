@@ -23,7 +23,8 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 import itertools
-from typing import Any, Callable, Optional, Sequence
+import typing
+from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -36,17 +37,27 @@ import jax.numpy as jnp
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
 
 
+if typing.TYPE_CHECKING:
+  # These are needed to avoid static typing complaints for sharding.
+  # Concatenating sharding types, e. g. jnp.ndarray | jax.sharding.NamedSharding
+  # | jax.sharding.PartitionSpec, will trigger an error to logics where the
+  # values are used as jax.array, since they could be sharding.
+  ArrayT: TypeAlias = Any
+else:
+  ArrayT: TypeAlias = jnp.ndarray
+
+
 @flax.struct.dataclass
 class QTensor:
   """Quantized tensor."""
 
   # Quantized (compressed) representation of tensor.
   # Use dequant() method to "decompress" to the original tensor.
-  qvalue: jnp.ndarray
+  qvalue: ArrayT
 
   # (scale == None) means that scale is unknown/invalid;
   # Otherwise, check dequant(self) for semantics.
-  scale: Optional[list[jnp.ndarray]]
+  scale: Optional[list[ArrayT]]
 
   # Used in dot_general, transposed scales used in post dot_general scaling.
   # The same comments apply as to scale.
@@ -55,7 +66,7 @@ class QTensor:
   # - scale_t is used both in backprop of dot_general and in post-scaling.
   #   We avoid transposing scale twice.
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
-  scale_t: Optional[list[jnp.ndarray]]
+  scale_t: Optional[list[ArrayT]]
 
   def dequant(self, dtype: Optional[jnp.dtype] = None) -> jnp.ndarray:
     assert self.scale is not None
