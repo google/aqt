@@ -379,7 +379,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     # TODO(lew): Do we have a correct precision above?
     #   Relevant: https://github.com/google/jax/issues/14022
 
-    out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
+    out = aqt_tensor.QTensor(
+        qvalue=out, scale=[], scale_t=None, dequant_dtype=out.dtype
+    )
     assert out.scale is not None  # pytype help
 
     if cfg.lhs.dequant_mode == config.DequantMode.OUTPUT:

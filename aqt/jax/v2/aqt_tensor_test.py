@@ -33,7 +33,9 @@ class AqtTensorTest(parameterized.TestCase):
     print(scale)
     print(x.shape, scale.shape)
 
-    q = aqt_tensor.QTensor(qvalue=x, scale=[scale], scale_t=None)
+    q = aqt_tensor.QTensor(
+        qvalue=x, scale=[scale], scale_t=None, dequant_dtype=scale.dtype
+    )
     y = aqt_tensor.dynamic_slice(q, start_indices=(1, 0), slice_sizes=[2, 1])
     print("======")
     print(y.qvalue)
@@ -50,7 +52,9 @@ class AqtTensorTest(parameterized.TestCase):
     print(scale)
     print(x.shape, scale.shape)
 
-    q = aqt_tensor.QTensor(qvalue=x, scale=[scale], scale_t=None)
+    q = aqt_tensor.QTensor(
+        qvalue=x, scale=[scale], scale_t=None, dequant_dtype=scale.dtype
+    )
     y = q.__getitem__(2)
     print("======")
     print(y.qvalue)
@@ -66,12 +70,17 @@ class AqtTensorTest(parameterized.TestCase):
     print(x)
     print(scale)
     print(x.shape, scale.shape)
-    q = aqt_tensor.QTensor(qvalue=x, scale=[scale], scale_t=None)
+    q = aqt_tensor.QTensor(
+        qvalue=x, scale=[scale], scale_t=None, dequant_dtype=scale.dtype
+    )
 
     update_qvalue = jnp.zeros((3, 1), dtype=x.dtype)
     update_scale = jnp.max(jnp.abs(update_qvalue), axis=0, keepdims=True)
     update = aqt_tensor.QTensor(
-        qvalue=update_qvalue, scale=[update_scale], scale_t=None
+        qvalue=update_qvalue,
+        scale=[update_scale],
+        scale_t=None,
+        dequant_dtype=update_scale.dtype,
     )
     y = aqt_tensor.dynamic_update_slice(q, update, (0, 1))
     print("======")

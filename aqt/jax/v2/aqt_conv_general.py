@@ -88,7 +88,9 @@ However if there is any other use, we will drop that assumption."""
 
     # It seems lucky that original scale has shape suitable for output
     # scaling without any transposition.
-    out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
+    out = aqt_tensor.QTensor(
+        qvalue=out, scale=[], scale_t=None, dequant_dtype=out.dtype
+    )
     assert out.scale is not None  # pytype help
     out.scale.extend(lhs_qt.scale)
     out.scale.extend(rhs_qt.scale)
