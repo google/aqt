@@ -26,11 +26,6 @@ class AqtNumerics(abc.ABC):
     pass
 
   @abc.abstractmethod
-  def fwd(self, x, context):
-    """Forward pass."""
-    pass
-
-  @abc.abstractmethod
   def abs_val_mapped_to(self):
     """The value returned is the end of quantization range.
 

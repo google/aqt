@@ -77,8 +77,9 @@ class IntNumerics(numerics.AqtNumerics):
   def get_dtype(self):
     return self.dtype
 
-  def fwd(self, x, context):
+  def vjp_fwd(self, x, context):
     """Forward pass."""
+    res = (x,)
     assert self.bits <= 22, 'Too many bits, float32 has less precision.'
 
     # Maybe noise
@@ -102,11 +103,7 @@ class IntNumerics(numerics.AqtNumerics):
       else:
         x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
 
-    return x
-
-  def vjp_fwd(self, x, context):
-    res = (x,)
-    return self.fwd(x, context), res
+    return x, res
 
   def vjp_bwd(self, res, grad):
     # Gradient of the clip function.

@@ -43,7 +43,11 @@ class Fp8Numerics(numerics.AqtNumerics):
   def get_dtype(self):
     return self.dtype
 
-  def fwd(self, x, context):
+  def abs_val_mapped_to(self):
+    return self._get_edge_of_last_fp8_bucket()
+
+  def vjp_fwd(self, x, context):
+    res = (x,)
     if not (
         (self.exponent_bits == 4 and self.mantissa_bits == 3)
         or (self.exponent_bits == 5 and self.mantissa_bits == 2)
@@ -63,14 +67,7 @@ class Fp8Numerics(numerics.AqtNumerics):
     # round
     x = round_to_nearest_even(x, self.dtype)
 
-    return x
-
-  def abs_val_mapped_to(self):
-    return self._get_edge_of_last_fp8_bucket()
-
-  def vjp_fwd(self, x, context):
-    res = (x,)
-    return self.fwd(x, context), res
+    return x, res
 
   def vjp_bwd(self, res, grad):
     # This is gradient of clip.

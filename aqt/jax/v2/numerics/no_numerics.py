@@ -34,9 +34,6 @@ class NoNumerics(numerics.AqtNumerics):
   def get_dtype(self):
     return None
 
-  def fwd(self, x, context):
-    pass
-
   def abs_val_mapped_to(self):
     pass
 
