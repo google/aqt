@@ -22,6 +22,7 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
+import itertools
 from typing import Any, Callable, Optional, Sequence
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
@@ -66,6 +67,20 @@ class QTensor:
         ret = ret.astype(dtype) * scale.astype(dtype)
     return ret
 
+  def at(self, idx: int):
+    return self.__getitem__(idx)
+
+  def __getitem__(self, idx: int):
+    """Returns the indexed subtensor on the first axis."""
+    assert self.scale_t is None, 'scale_t is not supported in __getitem__'
+    # start index is (idx, 0, 0, ...)
+    origin_point = (0,) * len(self.qvalue.shape)
+    start_idx = (idx,) + tuple(itertools.islice(origin_point, 1, None))
+    # slice size is (1, raw_shape, ...)
+    slice_sizes = (1,) + tuple(itertools.islice(self.qvalue.shape, 1, None))
+    qtensor = QTensor(self.qvalue, self.scale, None)
+    return dynamic_slice(qtensor, start_idx, slice_sizes)
+
   @property
   def ndim(self) -> int:
     return self.qvalue.ndim
@@ -77,6 +92,97 @@ class QTensor:
 
 def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
   return QTensor(qvalue=jnp.zeros(shape, dtype=qdtype), scale=[], scale_t=[])
+
+
+def dynamic_slice(
+    operand: QTensor,
+    start_indices: Sequence[int],
+    slice_sizes: Sequence[int],
+) -> QTensor:
+  """Dynamically slices the value at start_indices using the given shape."""
+  msg = 'scale_t is not supported in the dynamic_slice of a QTensor.'
+  assert operand.scale_t is None, msg
+  def get_sliced_scales(scale):
+    msg = 'Slice sizes must have the same length as operand dims.'
+    assert scale.ndim == len(slice_sizes), msg
+    scale_start_indices = list(start_indices)
+    scale_slice_sizes = list(slice_sizes)
+    for axis in range(len(scale_slice_sizes)):
+      # slice size must be <= operand shape
+      # scale_slice_sizes[dim] = min(scale_slice_sizes[dim], scale.shape[dim])
+      if scale.shape[axis] == 1:
+        scale_start_indices[axis] = 0
+        scale_slice_sizes[axis] = 1
+      msg = (
+          'We do not support window overflow that is supported in'
+          ' jax.lax.dynamic_slices. Please email lew@google.com if you think'
+          ' this is wrong.'
+      )
+      assert (
+          scale_start_indices[axis] + scale_slice_sizes[axis]
+          <= scale.shape[axis]
+      ), msg
+    return jax.lax.dynamic_slice(scale, scale_start_indices, scale_slice_sizes)
+
+  return QTensor(
+      jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),
+      [get_sliced_scales(s) for s in operand.scale],
+      None,
+  )
+
+
+def dynamic_update_slice(
+    operand: QTensor, update: QTensor, start_indices: Sequence[int]
+) -> QTensor:
+  """Updates the value at start_indices with the given QTensor value."""
+  # This function only works for a specific case, i.e., updating an entire slice
+  # along the calibration axis.
+  msg = 'scale_t is not supported in dynamic_update_slice'
+  assert operand.scale_t is None, msg
+  ndim = operand.qvalue.ndim
+  assert update.qvalue.ndim == ndim
+  for scale, update_scale in zip(operand.scale, update.scale):
+    assert scale.ndim == ndim
+    assert update_scale.ndim == ndim
+    for axis in range(ndim):
+      if scale.shape[axis] == 1:
+        calibration_axis_shape = operand.qvalue.shape[axis]
+        update_calibration_axis_shape = update.qvalue.shape[axis]
+        msg = (
+            'Only updating an entire slice along the calibration axis is'
+            f' valid. The calibration axis shape is {calibration_axis_shape}'
+            f' but the update slice shape is {update_calibration_axis_shape}.'
+        )
+        assert update.qvalue.shape[axis] == operand.qvalue.shape[axis], msg
+        msg = 'Update scale and scale should be calibrated along the same axis.'
+        assert update_scale.shape[axis] == 1, msg
+      else:
+        # individual scale per element always works
+        pass
+
+  qvalues = jax.lax.dynamic_update_slice(
+      operand.qvalue, update.qvalue, start_indices
+  )
+  scales = [
+      jax.lax.dynamic_update_slice(scale, update_scale, start_indices)
+      for scale, update_scale in zip(operand.scale, update.scale)
+  ]
+
+  return QTensor(qvalues, scales, None)
+
+
+def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
+  """Updates the value at frame with the given QTensor value."""
+  assert operand.ndim == update.ndim + 1
+
+  return QTensor(
+      operand.qvalue.at[frame].set(update.qvalue),
+      [
+          target_scale.at[frame].set(update_scale)
+          for target_scale, update_scale in zip(operand.scale, update.scale)
+      ],
+      None,
+  )
 
 
 def quant(
