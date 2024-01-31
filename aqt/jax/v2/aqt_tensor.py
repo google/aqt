@@ -72,10 +72,7 @@ class QTensor:
   # Default value is added to not to break the existing codebase.
   # TODO(dhchoi): Shall we remove the default dequant_dtype, or leave this?
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
-      pytree_node=False,
-      # TODO(yichizh): the default float32 is a temporaty workaround to
-      # not break other codebases. It should be changed to None.
-      default=jnp.float32,
+      pytree_node=False, default=None
   )
 
   def dequant(self) -> jnp.ndarray:
@@ -131,8 +128,7 @@ def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[int],
     qdtype: jnp.dtype,
-    # TODO(yichizh): change the argument name to dequant_dtype
-    sdtype: jnp.dtype,
+    dequant_dtype: jnp.dtype,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
   scale_shape = list(shape)
@@ -143,9 +139,9 @@ def zeros_with_scale(
   # other libraries to not break their functionality.
   return QTensor(
       jnp.zeros(shape, dtype=qdtype),
-      [jnp.ones(scale_shape, dtype=sdtype)],
+      [jnp.ones(scale_shape, dtype=dequant_dtype)],
       None,
-      dequant_dtype=sdtype,
+      dequant_dtype=dequant_dtype,
   )
 
 
