@@ -43,11 +43,15 @@ class AqtFlaxTest(parameterized.TestCase):
           lhs_in, _ = aqt_tensor.quant(
               lhs, cfg=self.aqt_cfg.fwd.lhs, calibration_axes=(2, 3)
           )
+          lhs_dtype = self.aqt_cfg.fwd.lhs.numerics.get_dtype()
+          lhs_in = lhs_in.qvalue_astype(lhs_dtype)
         rhs_in = rhs
         if self.rhs_qt_external:
           rhs_in, _ = aqt_tensor.quant(
               rhs, cfg=self.aqt_cfg.fwd.rhs, calibration_axes=(1, 2)
           )
+          rhs_dtype = self.aqt_cfg.fwd.rhs.numerics.get_dtype()
+          rhs_in = rhs_in.qvalue_astype(rhs_dtype)
         einsum = aqt_flax.AqtEinsum(cfg=self.aqt_cfg)
         # xhs_qt can be inputs to AqtEinsum
         # xhs->xhs_qt can happen outside of AqtEinsum, e.g., k/v cache quant
