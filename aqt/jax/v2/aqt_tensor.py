@@ -24,7 +24,7 @@
 # pylint: disable=g-explicit-length-test
 import itertools
 import typing
-from typing import Any, Callable, Optional, Sequence, TypeAlias
+from typing import Any, Callable, Optional, Self, Sequence, TypeAlias
 from aqt.jax.v2 import config
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -77,6 +77,9 @@ class QTensor:
       else:
         ret = ret.astype(dtype) * scale.astype(dtype)
     return ret
+
+  def qvalue_astype(self, dtype) -> Self:
+    return self.replace(qvalue=self.qvalue.astype(dtype))
 
   def at(self, idx: int):
     return self.__getitem__(idx)
