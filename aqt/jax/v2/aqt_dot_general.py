@@ -375,11 +375,16 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         dimension_numbers=dimension_numbers,
         preferred_element_type=cfg.dg_accumulator_dtype,
         precision=lax.Precision.DEFAULT,
-    ).astype(jnp.promote_types(lhs, rhs))
+    )
     # TODO(lew): Do we have a correct precision above?
     #   Relevant: https://github.com/google/jax/issues/14022
 
-    out = aqt_tensor.QTensor(qvalue=out, scale=[], scale_t=None)
+    out = aqt_tensor.QTensor(
+        qvalue=out,
+        scale=[],
+        scale_t=None,
+        dequant_dtype=jnp.promote_types(lhs, rhs),
+    )
     assert out.scale is not None  # pytype help
 
     if cfg.lhs.dequant_mode == config.DequantMode.OUTPUT:

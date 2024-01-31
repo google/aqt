@@ -68,14 +68,26 @@ class QTensor:
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
   scale_t: Optional[list[ArrayT]]
 
-  def dequant(self, dtype: Optional[jnp.dtype] = None) -> jnp.ndarray:
-    assert self.scale is not None
+  # DType of the tensor before quantized.
+  # Default value is added to not to break the existing codebase.
+  # TODO(dhchoi): Shall we remove the default dequant_dtype, or leave this?
+  dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
+      pytree_node=False,
+      # TODO(yichizh): the default float32 is a temporaty workaround to
+      # not break other codebases. It should be changed to None.
+      default=jnp.float32,
+  )
+
+  def dequant(self) -> jnp.ndarray:
+    assert self.scale is not None, 'Missing scales when dequantizing a QTensor.'
+    msg = (
+        'QTensor is manually created without setting a dequant_detype. It can'
+        ' be used in dot_general, but to dequantize you need to set its dtype.'
+    )
+    assert self.dequant_dtype is not None, msg
     ret = self.qvalue
     for scale in self.scale:
-      if dtype is None:
-        ret = ret * scale
-      else:
-        ret = ret.astype(dtype) * scale.astype(dtype)
+      ret = ret.astype(self.dequant_dtype) * scale.astype(self.dequant_dtype)
     return ret
 
   def qvalue_astype(self, dtype) -> Self:
@@ -92,7 +104,7 @@ class QTensor:
     start_idx = (idx,) + tuple(itertools.islice(origin_point, 1, None))
     # slice size is (1, raw_shape, ...)
     slice_sizes = (1,) + tuple(itertools.islice(self.qvalue.shape, 1, None))
-    qtensor = QTensor(self.qvalue, self.scale, None)
+    qtensor = QTensor(self.qvalue, self.scale, None, self.dequant_dtype)
     return dynamic_slice(qtensor, start_idx, slice_sizes)
 
   @property
@@ -104,14 +116,22 @@ class QTensor:
     return self.qvalue.shape
 
 
-def zeros(shape: Sequence[int], qdtype: jnp.dtype) -> QTensor:
-  return QTensor(qvalue=jnp.zeros(shape, dtype=qdtype), scale=[], scale_t=[])
+def zeros(
+    shape: Sequence[int], qdtype: jnp.dtype, dequant_dtype: jnp.dtype
+) -> QTensor:
+  return QTensor(
+      qvalue=jnp.zeros(shape, dtype=qdtype),
+      scale=[],
+      scale_t=[],
+      dequant_dtype=dequant_dtype,
+  )
 
 
 def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[int],
     qdtype: jnp.dtype,
+    # TODO(yichizh): change the argument name to dequant_dtype
     sdtype: jnp.dtype,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
@@ -119,10 +139,13 @@ def zeros_with_scale(
   for axis in calibration_axis:
     scale_shape[axis] = 1
 
+  # TODO(lew): hardcode dequant_dtype to bf16. This requires updating
+  # other libraries to not break their functionality.
   return QTensor(
       jnp.zeros(shape, dtype=qdtype),
       [jnp.ones(scale_shape, dtype=sdtype)],
       None,
+      dequant_dtype=sdtype,
   )
 
 
@@ -160,6 +183,7 @@ def dynamic_slice(
       jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),
       [get_sliced_scales(s) for s in operand.scale],
       None,
+      operand.dequant_dtype,
   )
 
 
@@ -171,6 +195,9 @@ def dynamic_update_slice(
   # along the calibration axis.
   msg = 'scale_t is not supported in dynamic_update_slice'
   assert operand.scale_t is None, msg
+  op_dd = operand.dequant_dtype
+  up_dd = update.dequant_dtype
+  assert op_dd == up_dd, f'Dequant dtype mismatch: {op_dd} != {up_dd}'
   ndim = operand.qvalue.ndim
   assert update.qvalue.ndim == ndim
   for scale, update_scale in zip(operand.scale, update.scale):
@@ -200,12 +227,13 @@ def dynamic_update_slice(
       for scale, update_scale in zip(operand.scale, update.scale)
   ]
 
-  return QTensor(qvalues, scales, None)
+  return QTensor(qvalues, scales, None, operand.dequant_dtype)
 
 
 def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
   """Updates the value at frame with the given QTensor value."""
   assert operand.ndim == update.ndim + 1
+  assert operand.dequant_dtype == update.dequant_dtype, 'Dequant dtype mismatch'
 
   return QTensor(
       operand.qvalue.at[frame].set(update.qvalue),
@@ -214,6 +242,7 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
           for target_scale, update_scale in zip(operand.scale, update.scale)
       ],
       None,
+      operand.dequant_dtype,
   )
 
 
@@ -225,6 +254,7 @@ def quant(
     transpose_fn=None,
 ) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
+  dequant_dtype = x.dtype
   msg = (
       'Multiply QTensor.qvalue by untransposed QTensor.scale before dot_general'
       '(a.k.a. FakeQuant) is used in tests and it is exactly equal when'
@@ -238,7 +268,7 @@ def quant(
   #   what would happen if we pass fq value (xhs_q2) in residual?
 
   if isinstance(cfg.numerics, no_numerics.NoNumerics):
-    qt = QTensor(qvalue=x, scale=[], scale_t=[])
+    qt = QTensor(qvalue=x, scale=[], scale_t=[], dequant_dtype=dequant_dtype)
     return qt, None
   shared_axes = cfg.calib_shared_axes or calibration_axes
   bound = cfg.calibration.get_bound(x, shared_axes)
@@ -274,7 +304,9 @@ def quant(
   if transpose_fn is not None:
     scale_t = [transpose_fn(scale)]
 
-  qt = QTensor(qvalue=x_q, scale=[scale], scale_t=scale_t)
+  qt = QTensor(
+      qvalue=x_q, scale=[scale], scale_t=scale_t, dequant_dtype=dequant_dtype
+  )
   return qt, quant_grad
 
 

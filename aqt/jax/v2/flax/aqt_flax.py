@@ -83,7 +83,10 @@ class Freezer(nn.Module):
       return None
     elif self.quant_mode == QuantMode.SERVE:
       return aqt_tensor.QTensor(
-          self.qvalue.value, scale=None, scale_t=[self.scale_t.value]
+          self.qvalue.value,
+          scale=None,
+          scale_t=[self.scale_t.value],
+          dequant_dtype=None,  # Rely on dg output dtype for dequant
       )
     else:
       assert False, 'Unknown quant mode.'
