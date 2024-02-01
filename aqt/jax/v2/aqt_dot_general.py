@@ -237,30 +237,38 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     if cfg.local_aqt is not None:
 
-      def factor_reshape(x, ca, ba):
-        factor = cfg.local_aqt.contraction_axis_shard_count
+      def factor_reshape(x, ca, ba, ca_idx, factor):
         assert factor is not None
         if len(ca) == 0:
           return x, ca, ba
         shape = list(x.shape)
-        ax = ca[0]
+        ax = ca[ca_idx]
         orig_size = shape[ax]
         assert orig_size % factor == 0
         shape[ax] = factor
         shape.insert(ax + 1, orig_size // factor)
         new_ca = [(b + int(b >= ax)) for b in ca]
-        assert new_ca[0] == ax + 1
+        assert new_ca[ca_idx] == ax + 1
         new_ba = [ax] + [(b + int(b > ax)) for b in ba]
         return x.reshape(shape), new_ca, new_ba
 
-      lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba)
-      rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba)
+      shard_counts = cfg.local_aqt.contraction_axis_shard_count
+      if isinstance(shard_counts, int):
+        shard_counts = [shard_counts]
+
+      for ca_idx, factor in enumerate(shard_counts):
+        lhs, lhs_ca, lhs_ba = factor_reshape(
+            lhs, lhs_ca, lhs_ba, ca_idx, factor)
+      for ca_idx, factor in enumerate(shard_counts):
+        rhs, rhs_ca, rhs_ba = factor_reshape(
+            rhs, rhs_ca, rhs_ba, ca_idx, factor)
 
       dimension_numbers = (lhs_ca, rhs_ca), (lhs_ba, rhs_ba)
 
     assert isinstance(rhs, jnp.ndarray)
 
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
+    # pytype: disable=attribute-error
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
       if (
@@ -391,6 +399,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       out.scale.extend(lhs_qt.scale_t)
     if cfg.rhs.dequant_mode == config.DequantMode.OUTPUT:
       out.scale.extend(rhs_qt.scale_t)
+    # pytype: enable=attribute-error
 
     out = out.dequant()
 
@@ -401,7 +410,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     if cfg.local_aqt is not None:
       assert len(lhs_ca) == len(rhs_ca)
       if len(lhs_ca) > 0:
-        out = jnp.sum(out, axis=0)
+        out = jnp.sum(out, axis=list(range(len(lhs_ca))))
       # We are not supporting local AQT in fwd pass, so no res needed.
       res = None
     return out, res
