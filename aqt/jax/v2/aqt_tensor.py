@@ -1,3 +1,4 @@
+# FIX ME
 # Copyright 2022 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -69,13 +70,9 @@ class QTensor:
   scale_t: Optional[list[ArrayT]]
 
   # DType of the tensor before quantized.
-  # Default value is added to not to break the existing codebase.
-  # TODO(dhchoi): Shall we remove the default dequant_dtype, or leave this?
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
       pytree_node=False,
-      # TODO(yichizh): the default float32 is a temporaty workaround to
-      # not break other codebases. It should be changed to None.
-      default=jnp.float32,
+      default=None,
   )
 
   def dequant(self) -> jnp.ndarray:
@@ -114,6 +111,17 @@ class QTensor:
   @property
   def shape(self) -> Sequence[int]:
     return self.qvalue.shape
+
+  @property
+  def original_dtype(self) -> jnp.dtype:
+    """Estimated original dtype of the tensor before quantization."""
+    if self.dequant_dtype is not None:
+      return self.dequant_dtype
+
+    if len(self.scale) > 0:
+      return self.scale[0].dtype
+
+    return self.qvalue.dtype
 
 
 def zeros(
