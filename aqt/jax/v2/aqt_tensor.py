@@ -69,13 +69,8 @@ class QTensor:
   scale_t: Optional[list[ArrayT]]
 
   # DType of the tensor before quantized.
-  # Default value is added to not to break the existing codebase.
-  # TODO(dhchoi): Shall we remove the default dequant_dtype, or leave this?
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
-      pytree_node=False,
-      # TODO(yichizh): the default float32 is a temporaty workaround to
-      # not break other codebases. It should be changed to None.
-      default=jnp.float32,
+      pytree_node=False, default=None
   )
 
   def dequant(self) -> jnp.ndarray:
