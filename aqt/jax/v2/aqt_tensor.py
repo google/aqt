@@ -26,13 +26,13 @@ import itertools
 import typing
 from typing import Any, Callable, Optional, Self, Sequence, TypeAlias
 from aqt.jax.v2 import config
+from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
 import flax.struct
 import jax
 from jax import lax
 import jax.numpy as jnp
-
 
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
 
@@ -47,7 +47,7 @@ else:
   ArrayT: TypeAlias = jnp.ndarray
 
 
-@flax.struct.dataclass
+@utils.flax_slots_dataclass
 class QTensor:
   """Quantized tensor."""
 
@@ -86,7 +86,7 @@ class QTensor:
     return ret
 
   def qvalue_astype(self, dtype) -> Self:
-    return self.replace(qvalue=self.qvalue.astype(dtype))
+    return self.replace(qvalue=self.qvalue.astype(dtype))  # pytype: disable=attribute-error
 
   def at(self, idx: int):
     return self.__getitem__(idx)
@@ -152,6 +152,7 @@ def dynamic_slice(
   """Dynamically slices the value at start_indices using the given shape."""
   msg = 'scale_t is not supported in the dynamic_slice of a QTensor.'
   assert operand.scale_t is None, msg
+
   def get_sliced_scales(scale):
     msg = 'Slice sizes must have the same length as operand dims.'
     assert scale.ndim == len(slice_sizes), msg

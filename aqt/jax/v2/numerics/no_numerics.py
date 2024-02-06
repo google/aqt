@@ -13,14 +13,13 @@
 # limitations under the License.
 """Identity numerics for passing through input as-is."""
 
-import functools
 from typing import Any, Optional
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
-import flax.struct
 
 
-@functools.partial(flax.struct.dataclass, frozen=False, slots=True)
+@utils.flax_slots_dataclass
 class NoNumerics(numerics.AqtNumerics):
   """No quantization, use a native type such as bf16."""
 

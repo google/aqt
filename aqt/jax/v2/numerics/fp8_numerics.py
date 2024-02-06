@@ -13,13 +13,12 @@
 # limitations under the License.
 """Numerics for fp8."""
 
-import functools
 from typing import Any, Optional
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
 from aqt.jax.v2.numerics import numerics
-import flax.struct
 import jax
 import jax.numpy as jnp
 
@@ -27,7 +26,7 @@ import jax.numpy as jnp
 FP8_DTYPE = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 
 
-@functools.partial(flax.struct.dataclass, frozen=False, slots=True)
+@utils.flax_slots_dataclass
 class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 

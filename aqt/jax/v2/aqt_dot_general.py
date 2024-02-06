@@ -28,10 +28,10 @@ from typing import Optional, Union
 
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2 import utils
 # TODO(yichizh): The following import is temporary for not breaking dependencies
 # Fix imports in other packages and delete it.
 from aqt.jax.v2.config import Context  # pylint: disable=g-importing-member, unused-import
-import flax.struct
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy
@@ -39,20 +39,20 @@ import jax.numpy as jnp
 import numpy as onp
 
 
-@flax.struct.dataclass
+@utils.flax_slots_dataclass
 class MultiTensor:
   x: jnp.ndarray
   qx: aqt_tensor.QTensor
 
 
-@flax.struct.dataclass
+@utils.flax_slots_dataclass
 class TensorRes:
   """All the things we pass from the forward pass to the backward pass."""
   mt: MultiTensor
   quant_grad: aqt_tensor.GradientFn
 
 
-@flax.struct.dataclass
+@utils.flax_slots_dataclass
 class DotGeneralRes:
   lhs: TensorRes
   rhs: TensorRes
@@ -217,7 +217,7 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     #  - Can we carry untransposed scale and transpose here?
     if isinstance(rhs, MultiTensor):
       # We are in gradient code.
-      fwd_quantized = rhs.qx.scale_t is not None and len(rhs.qx.scale_t) == 1
+      fwd_quantized = rhs.qx.scale_t is not None and len(rhs.qx.scale_t) == 1  # pytype: disable=attribute-error
       expect_fwd_quantized = cfg.rhs.use_fwd_quant is not None
       msg = (
           'Misconfiguration: use_fwd_quant=True, but there is no fwd'
@@ -228,10 +228,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         assert fwd_quantized, msg
         # TODO(lew): Investigate why _rhs_scale_transpose_for_lhs_input is not
         # needed here.
-        lhs = lhs * rhs.qx.scale_t[0]
-        rhs = rhs.qx.qvalue
+        lhs = lhs * rhs.qx.scale_t[0]  # pytype: disable=attribute-error
+        rhs = rhs.qx.qvalue  # pytype: disable=attribute-error
       else:
-        rhs = rhs.x
+        rhs = rhs.x  # pytype: disable=attribute-error
     else:
       assert cfg.rhs.use_fwd_quant is None, 'cannot set use_fwd_quant in fwd'
 

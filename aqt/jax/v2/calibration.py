@@ -15,7 +15,7 @@
 
 import abc
 from typing import Union
-import flax.struct
+from aqt.jax.v2 import utils
 import jax.numpy as jnp
 
 
@@ -26,7 +26,7 @@ class Calibration(abc.ABC):
     pass
 
 
-@flax.struct.dataclass
+@utils.flax_slots_dataclass
 class ConstantCalibration(Calibration):
   bound: Union[jnp.ndarray, float]
 
@@ -37,7 +37,7 @@ class ConstantCalibration(Calibration):
     return jnp.asarray(self.bound).reshape((1,) * len(x.shape))
 
 
-@flax.struct.dataclass
+@utils.flax_slots_dataclass
 class AbsMaxCalibration(Calibration):
   """Simple max(abs(x)) calibration."""
 

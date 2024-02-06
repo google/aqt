@@ -15,14 +15,13 @@
 
 import copy
 import enum
-import functools
 from typing import Any, Callable, Optional
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
-import flax
 import jax
 import jax.numpy as jnp
 
@@ -30,23 +29,12 @@ import jax.numpy as jnp
 DType = Any
 AbstractAqtNumerics = numerics.AqtNumerics
 AbstractAqtCalibration = calibration.Calibration
-flax_slots_dataclass = functools.partial(
-    flax.struct.dataclass, frozen=False, slots=True
-)
 
 
-def static_field():
-  return flax.struct.field(pytree_node=False)
-
-
-def dynamic_field():
-  return flax.struct.field(pytree_node=True)
-
-
-@flax_slots_dataclass
+@utils.flax_slots_dataclass
 class Context:
-  key: Optional[jax.Array] = dynamic_field()
-  train_step: Optional[int] = dynamic_field()
+  key: Optional[jax.Array] = utils.dynamic_field()
+  train_step: Optional[int] = utils.dynamic_field()
 
 
 ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
@@ -67,50 +55,50 @@ class DequantMode(enum.Enum):
   OTHER_INPUT = 3
 
 
-@flax_slots_dataclass
+@utils.flax_slots_dataclass
 class Quantizer:
   """Configuration of quantization of one tensor."""
-  numerics: AbstractAqtNumerics = static_field()
-  calib_shared_axes: Optional[list[int]] = static_field()
-  scale_stop_grad: bool = static_field()
+  numerics: AbstractAqtNumerics = utils.static_field()
+  calib_shared_axes: Optional[list[int]] = utils.static_field()
+  scale_stop_grad: bool = utils.static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
-  calibration: AbstractAqtCalibration = static_field()
+  calibration: AbstractAqtCalibration = utils.static_field()
   # Round up the calibration to power of 2 (po2).
-  po2_scale: bool = static_field()
+  po2_scale: bool = utils.static_field()
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   context: Context
 
 
-@flax_slots_dataclass
+@utils.flax_slots_dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
   quantizer: Quantizer
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
-  use_fwd_quant: Optional[bool] = static_field()
+  use_fwd_quant: Optional[bool] = utils.static_field()
   # Dequantization mode.
-  dequant_mode: DequantMode = static_field()
+  dequant_mode: DequantMode = utils.static_field()
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
     return tensor_make(*args, **kwargs)
 
 
-@flax_slots_dataclass
+@utils.flax_slots_dataclass
 class LocalAqt:
-  contraction_axis_shard_count: int = static_field()
+  contraction_axis_shard_count: int = utils.static_field()
 
 
-@flax_slots_dataclass
+@utils.flax_slots_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
 
   lhs: Tensor
   rhs: Tensor
-  dg_accumulator_dtype: Optional[DType] = static_field()
-  local_aqt: Optional[LocalAqt] = static_field()
-  jax_scope_name: str = static_field()
+  dg_accumulator_dtype: Optional[DType] = utils.static_field()
+  local_aqt: Optional[LocalAqt] = utils.static_field()
+  jax_scope_name: str = utils.static_field()
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'DotGeneralRaw':
@@ -121,7 +109,7 @@ class DotGeneralRaw:
     return conv_general_dilated_make(*args, **kwargs)
 
 
-@flax_slots_dataclass
+@utils.flax_slots_dataclass
 class DotGeneral:
   """Configuration of quantization of dot_general and its gradients."""
 

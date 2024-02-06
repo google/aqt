@@ -13,16 +13,15 @@
 # limitations under the License.
 """Numerics for int8, int4, binary and other integer types."""
 
-import functools
 from typing import Any, Optional
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
-import flax.struct
 from jax import lax
 import jax.numpy as jnp
 
 
-@functools.partial(flax.struct.dataclass, frozen=False, slots=True)
+@utils.flax_slots_dataclass
 class IntNumerics(numerics.AqtNumerics):
   """Numerics for int8, int4, binary, etc."""
 
