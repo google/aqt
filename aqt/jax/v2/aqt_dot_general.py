@@ -30,7 +30,6 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 # TODO(yichizh): The following import is temporary for not breaking dependencies
 # Fix imports in other packages and delete it.
-from aqt.jax.v2.config import Context  # pylint: disable=g-importing-member, unused-import
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy

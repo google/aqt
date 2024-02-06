@@ -16,6 +16,7 @@
 import copy
 import enum
 from typing import Any, Callable, Optional
+from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
@@ -27,17 +28,9 @@ import jax.numpy as jnp
 
 
 DType = Any
-AbstractAqtNumerics = numerics.AqtNumerics
-AbstractAqtCalibration = calibration.Calibration
 
 
-@utils.flax_slots_dataclass
-class Context:
-  key: Optional[jax.Array] = utils.dynamic_field()
-  train_step: Optional[int] = utils.dynamic_field()
-
-
-ClipAndRoundFn = Callable[[jnp.ndarray, Context], jnp.ndarray]
+ClipAndRoundFn = Callable[[jnp.ndarray, aqt_quantizer.Context], jnp.ndarray]
 
 # TODO(lew): move config to aqt_tensor.py and use aqt_tensor.QTensor
 QTensor = Any
@@ -56,24 +49,9 @@ class DequantMode(enum.Enum):
 
 
 @utils.flax_slots_dataclass
-class Quantizer:
-  """Configuration of quantization of one tensor."""
-  numerics: AbstractAqtNumerics = utils.static_field()
-  calib_shared_axes: Optional[list[int]] = utils.static_field()
-  scale_stop_grad: bool = utils.static_field()
-  # noise+clip+round
-  # We apply gradient of clip_and_round in bwd pass.
-  calibration: AbstractAqtCalibration = utils.static_field()
-  # Round up the calibration to power of 2 (po2).
-  po2_scale: bool = utils.static_field()
-  # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
-  context: Context
-
-
-@utils.flax_slots_dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
-  quantizer: Quantizer
+  quantizer: aqt_quantizer.Quantizer
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool] = utils.static_field()
@@ -137,8 +115,12 @@ def set_context(
   """Set context with prng keys and train_steps for dot_general config."""
   def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
     key1, key2 = _split_key(key, num_splits=2)
-    cfg_raw.lhs.quantizer.context = Context(key=key1, train_step=train_step)
-    cfg_raw.rhs.quantizer.context = Context(key=key2, train_step=train_step)
+    cfg_raw.lhs.quantizer.context = aqt_quantizer.Context(
+        key=key1, train_step=train_step
+    )
+    cfg_raw.rhs.quantizer.context = aqt_quantizer.Context(
+        key=key2, train_step=train_step
+    )
 
   key_fwd, key_dlhs, key_drhs = _split_key(key, num_splits=3)
   ret_cfg = copy.deepcopy(cfg)
@@ -253,13 +235,13 @@ def tensor_make(
         clip_gradient=False,  # This can be disabled when using abs-max scaling.
         dtype=dtype,
     )
-  quantizer = Quantizer(
+  quantizer = aqt_quantizer.Quantizer(
       numerics=effective_numerics,
       calib_shared_axes=None,
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
       po2_scale=False,
-      context=Context(key=None, train_step=None),
+      context=aqt_quantizer.Context(key=None, train_step=None),
   )
   return Tensor(
       quantizer=quantizer,

@@ -21,6 +21,7 @@ import functools
 from typing import Iterable
 from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
+from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
@@ -402,13 +403,13 @@ def config_v4(
           dtype=jnp.int8 if 2 <= bits <= 8 else None,
       )
 
-    quantizer = config.Quantizer(
+    quantizer = aqt_quantizer.Quantizer(
         numerics=numerics,
         calib_shared_axes=None,
         scale_stop_grad=True,
         calibration=calibration.AbsMaxCalibration(),
         po2_scale=False,
-        context=config.Context(key=None, train_step=None),
+        context=aqt_quantizer.Context(key=None, train_step=None),
     )
 
     return config.Tensor(
