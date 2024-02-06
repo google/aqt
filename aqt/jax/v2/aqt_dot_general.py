@@ -190,6 +190,23 @@ def _rhs_scale_transpose_for_lhs_input(rhs_scale, dimension_numbers, lhs_shape):
   )
 
 
+def factor_reshape(x, ca, ba, num_shards):
+  """Reshape the contraction dimension into (num_shard * shard_size)."""
+  assert num_shards is not None
+  if len(ca) == 0:
+    return x, ca, ba
+  shape = list(x.shape)
+  ax = ca[0]
+  orig_size = shape[ax]
+  assert orig_size % num_shards == 0
+  shape[ax] = num_shards
+  shape.insert(ax + 1, orig_size // num_shards)
+  new_ca = [(b + int(b >= ax)) for b in ca]
+  assert new_ca[0] == ax + 1
+  new_ba = [ax] + [(b + int(b > ax)) for b in ba]
+  return x.reshape(shape), new_ca, new_ba
+
+
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
@@ -236,25 +253,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       assert cfg.rhs.use_fwd_quant is None, 'cannot set use_fwd_quant in fwd'
 
     if cfg.local_aqt is not None:
-
-      def factor_reshape(x, ca, ba):
-        factor = cfg.local_aqt.contraction_axis_shard_count
-        assert factor is not None
-        if len(ca) == 0:
-          return x, ca, ba
-        shape = list(x.shape)
-        ax = ca[0]
-        orig_size = shape[ax]
-        assert orig_size % factor == 0
-        shape[ax] = factor
-        shape.insert(ax + 1, orig_size // factor)
-        new_ca = [(b + int(b >= ax)) for b in ca]
-        assert new_ca[0] == ax + 1
-        new_ba = [ax] + [(b + int(b > ax)) for b in ba]
-        return x.reshape(shape), new_ca, new_ba
-
-      lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba)
-      rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba)
+      factor = cfg.local_aqt.contraction_axis_shard_count
+      lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba, factor)
+      rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba, factor)
 
       dimension_numbers = (lhs_ca, rhs_ca), (lhs_ba, rhs_ba)
 
