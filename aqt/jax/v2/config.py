@@ -157,11 +157,14 @@ def set_context(
 
 def set_fwd_dequant_mode(
     cfg: DotGeneral,
-    lhs_dequant_mode: DequantMode = DequantMode.OUTPUT,
-    rhs_dequant_mode: DequantMode = DequantMode.OUTPUT,
+    *,
+    lhs_dequant_mode: Optional[DequantMode] = None,
+    rhs_dequant_mode: Optional[DequantMode] = None,
 ):
-  cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
-  cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
+  if lhs_dequant_mode is not None:
+    cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
+  if rhs_dequant_mode is not None:
+    cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
 
 
 def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
