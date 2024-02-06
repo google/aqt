@@ -155,6 +155,15 @@ def set_context(
   return ret_cfg
 
 
+def set_fwd_dequant_mode(
+    cfg: DotGeneral,
+    lhs_dequant_mode: DequantMode = DequantMode.OUTPUT,
+    rhs_dequant_mode: DequantMode = DequantMode.OUTPUT,
+):
+  cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
+  cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
+
+
 def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
   cfg.fwd.lhs.numerics = fwd_numerics
   cfg.fwd.rhs.numerics = fwd_numerics
@@ -213,7 +222,9 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
   cfg.dlhs.rhs.calibration = calibration.ConstantCalibration(bound)
 
 
-def tensor_make(bits: Optional[int]) -> 'Tensor':
+def tensor_make(
+    bits: Optional[int], preserve_max_val: bool = False
+) -> 'Tensor':
   """Makes config.Tensor."""
   if bits is None:
     effective_numerics = no_numerics.NoNumerics()
@@ -223,7 +234,7 @@ def tensor_make(bits: Optional[int]) -> 'Tensor':
     effective_numerics = int_numerics.IntNumerics(
         bits=bits,
         preserve_zero=pz,
-        preserve_max_val=False,
+        preserve_max_val=preserve_max_val,
         clip=True,
         round=True,
         noise_fn=None,
