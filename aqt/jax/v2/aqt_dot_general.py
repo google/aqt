@@ -23,7 +23,6 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
-import functools
 from typing import Optional, Union
 
 from aqt.jax.v2 import aqt_tensor
@@ -276,18 +275,17 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           lhs_scale_t.append(scale_t)
         lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
     else:
-      transpose = None
-      if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
-        transpose = functools.partial(
-            _lhs_scale_transpose_to_output,
-            dimension_numbers=dimension_numbers,
-            lhs_shape=lhs.shape,
-            rhs_shape=rhs.shape,
-        )
-
-      lhs_qt, lhs_quant_grad = aqt_tensor.quant(
-          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca, transpose_fn=transpose
+      lhs_qt, lhs_quant_grad = aqt_tensor.quant_core(
+          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca
       )
+      if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
+        lhs_scale_t = []
+        for scale in lhs_qt.scale:
+          scale_t = _lhs_scale_transpose_to_output(
+              scale, dimension_numbers, lhs.shape, rhs.shape
+          )
+          lhs_scale_t.append(scale_t)
+        lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
 
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
@@ -307,17 +305,17 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           rhs_scale_t.append(scale_t)
         rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     else:
-      transpose = None
-      if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
-        transpose = functools.partial(
-            _rhs_scale_transpose_to_output,
-            dimension_numbers=dimension_numbers,
-            lhs_shape=lhs.shape,
-            rhs_shape=rhs.shape,
-        )
-      rhs_qt, rhs_quant_grad = aqt_tensor.quant(
-          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca, transpose_fn=transpose
+      rhs_qt, rhs_quant_grad = aqt_tensor.quant_core(
+          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca
       )
+      if cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT:
+        rhs_scale_t = []
+        for scale in rhs_qt.scale:
+          scale_t = _rhs_scale_transpose_to_output(
+              scale, dimension_numbers, lhs.shape, rhs.shape
+          )
+          rhs_scale_t.append(scale_t)
+        rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 

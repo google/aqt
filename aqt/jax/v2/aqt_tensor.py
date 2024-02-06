@@ -242,12 +242,11 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
   )
 
 
-def quant(
+def quant_core(
     x,
     *,
     cfg: config.Tensor,
     calibration_axes,
-    transpose_fn=None,
 ) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
   dequant_dtype = x.dtype
@@ -288,14 +287,28 @@ def quant(
   #
   # TODO(lew): Implement configuration of stop-gradient.
   scale = jax.lax.reciprocal(scale)
-  scale_t = None
-  if transpose_fn is not None:
-    scale_t = [transpose_fn(scale)]
 
   qt = QTensor(
-      qvalue=x_q, scale=[scale], scale_t=scale_t, dequant_dtype=dequant_dtype
+      qvalue=x_q, scale=[scale], scale_t=None, dequant_dtype=dequant_dtype
   )
   return qt, quant_grad
+
+
+def quant(
+    x,
+    *,
+    cfg: config.Tensor,
+    calibration_axes,
+    transpose_fn=None,
+) -> tuple[QTensor, GradientFn]:
+  """Intermediate step of a refactoring. Delete afterwards."""
+  qt, quant_grad = quant_core(x, cfg=cfg, calibration_axes=calibration_axes)
+  if transpose_fn is not None:
+    assert len(qt.scale) == 1
+    scale_t = [transpose_fn(qt.scale[0])]
+    return qt.replace(scale_t=scale_t), quant_grad
+  else:
+    return qt, quant_grad
 
 
 def make_fake_quant(cfg: config.Tensor, calibration_axes=None):
