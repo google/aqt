@@ -14,8 +14,10 @@
 
 """Test for AQT flax."""
 import functools
+from typing import Union
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2.flax import aqt_flax
@@ -115,6 +117,95 @@ class AqtFlaxTest(parameterized.TestCase):
       return jnp.sum(apply_fn(inputs)[0])
 
     train_step(jnp.ones(shape=(1, 10)))
+
+  def test_dequant_mode_other_input(self):
+    key = jax.random.PRNGKey(7)
+    _, subkey1, subkey2 = jax.random.split(key, num=3)
+    lhs_shape = (3, 4)
+    rhs_shape = (4, 5)
+    lhs = jax.random.uniform(key=subkey1, shape=lhs_shape)
+    rhs = jax.random.uniform(key=subkey2, shape=rhs_shape)
+    dims = (((1,), (0,)), ((), ()))
+
+    lhs_qt, _ = aqt_tensor.quant(
+        lhs, cfg=config.tensor_make(8), calibration_axes=[0]
+    )
+    rhs_qt, _ = aqt_tensor.quant(
+        rhs, cfg=config.tensor_make(8), calibration_axes=[1]
+    )
+
+    class Model(nn.Module):
+
+      @nn.compact
+      def __call__(
+          self,
+          lhs_in: Union[jnp.ndarray, aqt_tensor.QTensor],
+          rhs_in: Union[jnp.ndarray, aqt_tensor.QTensor],
+      ):
+        lhs_is_qt = isinstance(lhs_in, aqt_tensor.QTensor)
+        rhs_is_qt = isinstance(rhs_in, aqt_tensor.QTensor)
+        assert lhs_is_qt != rhs_is_qt
+
+        if lhs_is_qt:
+          lhs_bits = 8
+          lhs_dequant_mode = config.DequantMode.OTHER_INPUT
+          lhs_qtensor = lhs_in
+          lhs_ = jnp.zeros(lhs_shape)
+        else:
+          lhs_bits = None
+          lhs_dequant_mode = None
+          lhs_qtensor = None
+          lhs_ = lhs_in
+
+        if rhs_is_qt:
+          rhs_bits = 8
+          rhs_dequant_mode = config.DequantMode.OTHER_INPUT
+          rhs_qtensor = rhs_in
+          rhs_ = jnp.zeros(rhs_shape)
+        else:
+          rhs_bits = None
+          rhs_dequant_mode = None
+          rhs_qtensor = None
+          rhs_ = rhs_in
+
+        aqt_cfg = config.dot_general_make(lhs_bits=lhs_bits, rhs_bits=rhs_bits)
+        config.set_fwd_dequant_mode(
+            aqt_cfg,
+            lhs_dequant_mode=lhs_dequant_mode,
+            rhs_dequant_mode=rhs_dequant_mode,
+        )
+
+        dg = aqt_flax.AqtDotGeneral(
+            cfg=aqt_cfg,
+            lhs_apply_quant_mode=False,
+            rhs_apply_quant_mode=False,
+            lhs_qtensor=lhs_qtensor,
+            rhs_qtensor=rhs_qtensor,
+        )
+        out = dg(lhs_, rhs_, dims, precision=None)
+        return out
+
+    model = Model()
+
+    # multiply rhs scale to lhs
+    out1 = model.apply({}, lhs, rhs_qt, rngs={'params': jax.random.PRNGKey(0)})
+    rhs_scale_trans_to_lhs = aqt_dot_general._rhs_scale_transpose_for_lhs_input(
+        rhs_qt.scale[0], dims, lhs_shape
+    )
+    out2 = jax.lax.dot_general(
+        lhs * rhs_scale_trans_to_lhs, rhs_qt.qvalue, dims
+    )
+    assert (out1 == out2).all()
+
+    # multiply lhs scale to rhs
+    out1 = model.apply({}, lhs_qt, rhs, rngs={'params': jax.random.PRNGKey(0)})
+    lhs_scale_trans_to_rhs = aqt_dot_general._lhs_scale_transpose_for_rhs_input(
+        lhs_qt.scale[0], dims, rhs_shape
+    )
+    out2 = jax.lax.dot_general(
+        lhs_qt.qvalue, rhs * lhs_scale_trans_to_rhs, dims
+    )
+    assert (out1 == out2).all()
 
 
 if __name__ == '__main__':
