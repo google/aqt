@@ -167,7 +167,7 @@ class AqtDotGeneral(nn.Module):
         name=self.lhs_var_name,
         quant_mode=lhs_qm,
         q_shape=lhs_shape,
-        q_dtype=cfg.fwd.lhs.numerics.get_dtype(),
+        q_dtype=cfg.fwd.lhs.quantizer.numerics.get_dtype(),
         q_init=self.lhs_init,
         s_shape=lhs_scale_shape,
         s_init=self.lhs_scale_init,
@@ -178,7 +178,7 @@ class AqtDotGeneral(nn.Module):
         name=self.rhs_var_name,
         quant_mode=rhs_qm,
         q_shape=rhs_shape,
-        q_dtype=cfg.fwd.rhs.numerics.get_dtype(),
+        q_dtype=cfg.fwd.rhs.quantizer.numerics.get_dtype(),
         q_init=self.rhs_init,
         s_shape=rhs_scale_shape,
         s_init=self.rhs_scale_init,
@@ -232,9 +232,13 @@ class AqtDotGeneral(nn.Module):
 
       # Setter
       if self.lhs_apply_quant_mode:
-        lhs_freezer.set(cast(out_lhs_qt, cfg.fwd.lhs.numerics.get_dtype()))
+        lhs_freezer.set(
+            cast(out_lhs_qt, cfg.fwd.lhs.quantizer.numerics.get_dtype())
+        )
       if self.rhs_apply_quant_mode:
-        rhs_freezer.set(cast(out_rhs_qt, cfg.fwd.rhs.numerics.get_dtype()))
+        rhs_freezer.set(
+            cast(out_rhs_qt, cfg.fwd.rhs.quantizer.numerics.get_dtype())
+        )
 
       return out
 
@@ -398,14 +402,18 @@ def config_v4(
           dtype=jnp.int8 if 2 <= bits <= 8 else None,
       )
 
-    return config.Tensor(
+    quantizer = config.Quantizer(
         numerics=numerics,
         calib_shared_axes=None,
         scale_stop_grad=True,
         calibration=calibration.AbsMaxCalibration(),
         po2_scale=False,
-        use_fwd_quant=None,
         context=config.Context(key=None, train_step=None),
+    )
+
+    return config.Tensor(
+        quantizer=quantizer,
+        use_fwd_quant=None,
         dequant_mode=config.DequantMode.OUTPUT,
     )
 

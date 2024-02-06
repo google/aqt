@@ -15,7 +15,6 @@
 
 import functools
 from typing import Any, Optional
-from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2.flax import aqt_flax
@@ -78,28 +77,6 @@ class Fp8Numerics(numerics.AqtNumerics):
     del res
     ret = grad
     return (ret, None)
-
-
-def tensor_make_fp8(
-    exponent_bits: int = 4, mantissa_bits: int = 3
-) -> config.Tensor:
-  """Makes config.Tensor."""
-  # TODO(lew): refactor this into set_numerics()
-  return config.Tensor(
-      numerics=Fp8Numerics(
-          exponent_bits=exponent_bits,
-          mantissa_bits=mantissa_bits,
-          dtype=FP8_DTYPE[f'e{exponent_bits}m{mantissa_bits}'],
-          noise_fn=None,
-      ),
-      calib_shared_axes=None,
-      scale_stop_grad=True,
-      calibration=calibration.AbsMaxCalibration(),
-      po2_scale=False,
-      use_fwd_quant=None,
-      context=config.Context(key=None, train_step=None),
-      dequant_mode=config.DequantMode.OUTPUT,
-  )
 
 
 def round_to_nearest_even(x: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:

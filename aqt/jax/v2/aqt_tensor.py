@@ -257,32 +257,32 @@ def quant(
   )
   assert (
       cfg.dequant_mode != config.DequantMode.THIS_INPUT
-  ) or cfg.po2_scale, msg
+  ) or cfg.quantizer.po2_scale, msg
   # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
   # TODO(lew): After we implement optimization to not double-quantize,
   #   what would happen if we pass fq value (xhs_q2) in residual?
 
-  if isinstance(cfg.numerics, no_numerics.NoNumerics):
+  if isinstance(cfg.quantizer.numerics, no_numerics.NoNumerics):
     qt = QTensor(qvalue=x, scale=[], scale_t=[], dequant_dtype=dequant_dtype)
     return qt, None
-  shared_axes = cfg.calib_shared_axes or calibration_axes
-  bound = cfg.calibration.get_bound(x, shared_axes)
-  abs_max_mapped_to = cfg.numerics.abs_val_mapped_to()
+  shared_axes = cfg.quantizer.calib_shared_axes or calibration_axes
+  bound = cfg.quantizer.calibration.get_bound(x, shared_axes)
+  abs_max_mapped_to = cfg.quantizer.numerics.abs_val_mapped_to()
   scale = abs_max_mapped_to / bound
 
-  if cfg.po2_scale:
+  if cfg.quantizer.po2_scale:
     # With floor the biggest value (we are using jnp.max) is in the range of
     # clipping and therefore have a correct gradinet.
     scale = 2 ** jnp.floor(jnp.log2(scale))
-  if cfg.scale_stop_grad:
+  if cfg.quantizer.scale_stop_grad:
     # TODO(lew): Does not matter in DG, because we are using custom gradient.
     #   We should take that into account somehow.
     scale = lax.stop_gradient(scale)
 
   x_s = x * scale
 
-  x_q, res = cfg.numerics.vjp_fwd(x_s, cfg.context)
-  quant_grad = jax.tree_util.Partial(cfg.numerics.vjp_bwd, res)
+  x_q, res = cfg.quantizer.numerics.vjp_fwd(x_s, cfg.quantizer.context)
+  quant_grad = jax.tree_util.Partial(cfg.quantizer.numerics.vjp_bwd, res)
   # We are passing quant_grad (and not more) ot the backward pass.
   # That is equivalent to having:
   # scale = stop_gradient(scale)

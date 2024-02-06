@@ -67,8 +67,8 @@ However if there is any other use, we will drop that assumption."""
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
 
     # Flax assumptions.
-    assert cfg.lhs.calib_shared_axes == list(range(1, rank))
-    assert cfg.rhs.calib_shared_axes == list(range(0, rank - 1))
+    assert cfg.lhs.quantizer.calib_shared_axes == list(range(1, rank))
+    assert cfg.rhs.quantizer.calib_shared_axes == list(range(0, rank - 1))
 
     lhs_qt, _ = aqt_tensor.quant(lhs, cfg=cfg.lhs, calibration_axes=None)
     rhs_qt, _ = aqt_tensor.quant(rhs, cfg=cfg.rhs, calibration_axes=None)

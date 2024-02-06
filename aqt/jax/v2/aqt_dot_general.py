@@ -194,8 +194,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
   msg = 'Custom calib_shared_axes not implemented for local AQT.'
-  assert cfg.lhs.calib_shared_axes is None, msg
-  assert cfg.rhs.calib_shared_axes is None, msg
+  assert cfg.lhs.quantizer.calib_shared_axes is None, msg
+  assert cfg.rhs.quantizer.calib_shared_axes is None, msg
 
   @jax.named_scope(cfg.jax_scope_name)
   def dot_general_raw(
@@ -325,8 +325,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # TODO(yichizh): the same code is applied to lhs and rhs.
     # Should make a function of it that includes preprocess as well.
-    lhs_cast_dtype = cfg.lhs.numerics.get_dtype()
-    rhs_cast_dtype = cfg.rhs.numerics.get_dtype()
+    lhs_cast_dtype = cfg.lhs.quantizer.numerics.get_dtype()
+    rhs_cast_dtype = cfg.rhs.quantizer.numerics.get_dtype()
     msg = "Can't cast dtype in DequantMode.THIS_INPUT (fake quant) mode."
     if cfg.lhs.dequant_mode == config.DequantMode.THIS_INPUT:
       # TODO(yichizh): replace rounding in numerics with casting to dtype.

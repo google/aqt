@@ -68,9 +68,8 @@ class DequantMode(enum.Enum):
 
 
 @flax_slots_dataclass
-class Tensor:
-  """Configuration of quantization of one tensor or one side of tensor op."""
-
+class Quantizer:
+  """Configuration of quantization of one tensor."""
   numerics: AbstractAqtNumerics = static_field()
   calib_shared_axes: Optional[list[int]] = static_field()
   scale_stop_grad: bool = static_field()
@@ -79,11 +78,17 @@ class Tensor:
   calibration: AbstractAqtCalibration = static_field()
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool = static_field()
+  # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
+  context: Context
+
+
+@flax_slots_dataclass
+class Tensor:
+  """Configuration of quantization of one tensor or one side of tensor op."""
+  quantizer: Quantizer
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool] = static_field()
-  # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
-  context: Context
   # Dequantization mode.
   dequant_mode: DequantMode = static_field()
 
@@ -144,8 +149,8 @@ def set_context(
   """Set context with prng keys and train_steps for dot_general config."""
   def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
     key1, key2 = _split_key(key, num_splits=2)
-    cfg_raw.lhs.context = Context(key=key1, train_step=train_step)
-    cfg_raw.rhs.context = Context(key=key2, train_step=train_step)
+    cfg_raw.lhs.quantizer.context = Context(key=key1, train_step=train_step)
+    cfg_raw.rhs.quantizer.context = Context(key=key2, train_step=train_step)
 
   key_fwd, key_dlhs, key_drhs = _split_key(key, num_splits=3)
   ret_cfg = copy.deepcopy(cfg)
@@ -168,8 +173,8 @@ def set_fwd_dequant_mode(
 
 
 def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
-  cfg.fwd.lhs.numerics = fwd_numerics
-  cfg.fwd.rhs.numerics = fwd_numerics
+  cfg.fwd.lhs.quantizer.numerics = fwd_numerics
+  cfg.fwd.rhs.quantizer.numerics = fwd_numerics
 
 
 def set_accumulator_dtype(
@@ -202,27 +207,43 @@ def set_stochastic_rounding(
   noise_fn = noise_implementations[implementation]
 
   if vjp_lhs_stochastic_rounding:
-    cfg.dlhs.lhs.numerics = cfg.dlhs.lhs.numerics.replace(noise_fn=noise_fn)
-    cfg.drhs.lhs.numerics = cfg.drhs.lhs.numerics.replace(noise_fn=noise_fn)
+    cfg.dlhs.lhs.quantizer.numerics = cfg.dlhs.lhs.quantizer.numerics.replace(
+        noise_fn=noise_fn
+    )
+    cfg.drhs.lhs.quantizer.numerics = cfg.drhs.lhs.quantizer.numerics.replace(
+        noise_fn=noise_fn
+    )
   else:
-    cfg.dlhs.lhs.numerics = cfg.dlhs.lhs.numerics.replace(noise_fn=None)
-    cfg.drhs.lhs.numerics = cfg.drhs.lhs.numerics.replace(noise_fn=None)
+    cfg.dlhs.lhs.quantizer.numerics = cfg.dlhs.lhs.quantizer.numerics.replace(
+        noise_fn=None
+    )
+    cfg.drhs.lhs.quantizer.numerics = cfg.drhs.lhs.quantizer.numerics.replace(
+        noise_fn=None
+    )
 
   if vjp_rhs_stochastic_rounding:
-    cfg.dlhs.rhs.numerics = cfg.dlhs.rhs.numerics.replace(noise_fn=noise_fn)
-    cfg.drhs.rhs.numerics = cfg.drhs.rhs.numerics.replace(noise_fn=noise_fn)
+    cfg.dlhs.rhs.quantizer.numerics = cfg.dlhs.rhs.quantizer.numerics.replace(
+        noise_fn=noise_fn
+    )
+    cfg.drhs.rhs.quantizer.numerics = cfg.drhs.rhs.quantizer.numerics.replace(
+        noise_fn=noise_fn
+    )
   else:
-    cfg.dlhs.rhs.numerics = cfg.dlhs.rhs.numerics.replace(noise_fn=None)
-    cfg.drhs.rhs.numerics = cfg.drhs.rhs.numerics.replace(noise_fn=None)
+    cfg.dlhs.rhs.quantizer.numerics = cfg.dlhs.rhs.quantizer.numerics.replace(
+        noise_fn=None
+    )
+    cfg.drhs.rhs.quantizer.numerics = cfg.drhs.rhs.quantizer.numerics.replace(
+        noise_fn=None
+    )
 
 
 def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
-  cfg.fwd.lhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.fwd.rhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.drhs.lhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.drhs.rhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.dlhs.lhs.calibration = calibration.ConstantCalibration(bound)
-  cfg.dlhs.rhs.calibration = calibration.ConstantCalibration(bound)
+  cfg.fwd.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+  cfg.fwd.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+  cfg.drhs.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+  cfg.drhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+  cfg.dlhs.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+  cfg.dlhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
 
 
 def tensor_make(
@@ -244,16 +265,18 @@ def tensor_make(
         clip_gradient=False,  # This can be disabled when using abs-max scaling.
         dtype=dtype,
     )
-
-  return Tensor(
+  quantizer = Quantizer(
       numerics=effective_numerics,
       calib_shared_axes=None,
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
       po2_scale=False,
+      context=Context(key=None, train_step=None),
+  )
+  return Tensor(
+      quantizer=quantizer,
       # dtype_x=dtype,
       use_fwd_quant=None,
-      context=Context(key=None, train_step=None),
       dequant_mode=DequantMode.OUTPUT,
   )
 
@@ -297,9 +320,13 @@ def conv_general_dilated_make(
   config = dot_general_raw_make(lhs_bits, rhs_bits)
   # Hardcoding flax assumptions.
   if config.lhs:
-    config.lhs.calib_shared_axes = list(range(1, spatial_dimensions + 2))
+    config.lhs.quantizer.calib_shared_axes = list(
+        range(1, spatial_dimensions + 2)
+    )
   if config.rhs:
-    config.rhs.calib_shared_axes = list(range(0, spatial_dimensions + 2 - 1))
+    config.rhs.quantizer.calib_shared_axes = list(
+        range(0, spatial_dimensions + 2 - 1)
+    )
   return config
 
 
