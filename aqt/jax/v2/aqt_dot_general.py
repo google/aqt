@@ -23,7 +23,8 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
-from typing import Optional, Union
+import functools
+from typing import Any, Optional, Sequence, Union
 
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
@@ -188,6 +189,20 @@ def _rhs_scale_transpose_for_lhs_input(rhs_scale, dimension_numbers, lhs_shape):
   )
 
 
+def _get_scale_t(
+    qt: aqt_tensor.QTensor,
+    transpose_fn: Any,
+    dimension_numbers: lax.DotDimensionNumbers,
+    lhs_shape: Sequence[int],
+    rhs_shape: Sequence[int],
+) -> aqt_tensor.QTensor:
+  list_scale_t = []
+  for scale in qt.scale:
+    scale_t = transpose_fn(scale, dimension_numbers, lhs_shape, rhs_shape)
+    list_scale_t.append(scale_t)
+  return qt.replace(scale_t=list_scale_t)
+
+
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
@@ -259,6 +274,12 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
     assert isinstance(rhs, jnp.ndarray)
 
     # TODO(lew): Have a function to handle lhs and rhs uniformly.
+    get_scale_t = functools.partial(
+        _get_scale_t,
+        dimension_numbers=dimension_numbers,
+        lhs_shape=lhs.shape,
+        rhs_shape=rhs.shape,
+    )
     if lhs_qt is not None:
       lhs_quant_grad = 'Poison. Not needed in serving'
       if (
@@ -266,25 +287,13 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           and cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT
       ):
         assert lhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
-        lhs_scale_t = []
-        for scale in lhs_qt.scale:
-          scale_t = _lhs_scale_transpose_to_output(
-              scale, dimension_numbers, lhs.shape, rhs.shape
-          )
-          lhs_scale_t.append(scale_t)
-        lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
+        lhs_qt = get_scale_t(lhs_qt, _lhs_scale_transpose_to_output)
     else:
       lhs_qt, lhs_quant_grad = aqt_tensor.quant_core(
           lhs, cfg=cfg.lhs, calibration_axes=lhs_ca
       )
       if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
-        lhs_scale_t = []
-        for scale in lhs_qt.scale:
-          scale_t = _lhs_scale_transpose_to_output(
-              scale, dimension_numbers, lhs.shape, rhs.shape
-          )
-          lhs_scale_t.append(scale_t)
-        lhs_qt = lhs_qt.replace(scale_t=lhs_scale_t)
+        lhs_qt = get_scale_t(lhs_qt, _lhs_scale_transpose_to_output)
 
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
@@ -296,25 +305,13 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
           and cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT
       ):
         assert rhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
-        rhs_scale_t = []
-        for scale in rhs_qt.scale:
-          scale_t = _rhs_scale_transpose_to_output(
-              scale, dimension_numbers, lhs.shape, rhs.shape
-          )
-          rhs_scale_t.append(scale_t)
-        rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
+        rhs_qt = get_scale_t(rhs_qt, _rhs_scale_transpose_to_output)
     else:
       rhs_qt, rhs_quant_grad = aqt_tensor.quant_core(
           rhs, cfg=cfg.rhs, calibration_axes=rhs_ca
       )
       if cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT:
-        rhs_scale_t = []
-        for scale in rhs_qt.scale:
-          scale_t = _rhs_scale_transpose_to_output(
-              scale, dimension_numbers, lhs.shape, rhs.shape
-          )
-          rhs_scale_t.append(scale_t)
-        rhs_qt = rhs_qt.replace(scale_t=rhs_scale_t)
+        rhs_qt = get_scale_t(rhs_qt, _rhs_scale_transpose_to_output)
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
