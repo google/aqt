@@ -705,6 +705,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     self.assertEqual(result.shape, expected_shape)
 
+  def test_per_tensor_quant(self):
+    x = jnp.array([
+        [1, 2, 3, 4],
+        [5, 6, 7, 8],
+        [3, 5, 1, 127.5],
+    ])
+    cfg = config.dot_general_make(lhs_bits=8, rhs_bits=8)
+    cfg.fwd.lhs.quantizer.calib_shared_axes = "per_tensor"
+    # calibration_axes will not be used when cfg.calib_shared_axes is set
+    y, _ = aqt_quantizer.quant(x, cfg=cfg.fwd.lhs, calibration_axes=None)
+    self.assertEqual(y.scale[0], jnp.array([[1.0]]))
+
 
 if __name__ == "__main__":
   absltest.main()

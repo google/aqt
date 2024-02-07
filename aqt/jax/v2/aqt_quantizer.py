@@ -13,7 +13,7 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
-from typing import Optional
+from typing import Literal
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
@@ -29,8 +29,8 @@ AbstractAqtCalibration = calibration.Calibration
 
 @utils.flax_slots_dataclass
 class Context:
-  key: Optional[jax.Array] = utils.dynamic_field()
-  train_step: Optional[int] = utils.dynamic_field()
+  key: jax.Array | None = utils.dynamic_field()
+  train_step: int | None = utils.dynamic_field()
 
 
 @utils.flax_slots_dataclass
@@ -38,7 +38,9 @@ class Quantizer:
   """Configuration of quantization of one tensor."""
 
   numerics: AbstractAqtNumerics = utils.static_field()
-  calib_shared_axes: Optional[list[int]] = utils.static_field()
+  calib_shared_axes: list[int] | Literal["per_tensor"] | None = (
+      utils.static_field()
+  )
   scale_stop_grad: bool = utils.static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
@@ -67,7 +69,10 @@ def quant_core(
         qvalue=x, scale=[], scale_t=[], dequant_dtype=dequant_dtype
     )
     return qt, None
-  shared_axes = cfg.quantizer.calib_shared_axes or calibration_axes
+  if cfg.quantizer.calib_shared_axes == "per_tensor":
+    shared_axes = list(range(x.ndim))
+  else:
+    shared_axes = cfg.quantizer.calib_shared_axes or calibration_axes
   bound = cfg.quantizer.calibration.get_bound(x, shared_axes)
   abs_max_mapped_to = cfg.quantizer.numerics.abs_val_mapped_to()
   scale = abs_max_mapped_to / bound
