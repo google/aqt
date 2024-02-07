@@ -24,7 +24,6 @@
 # pylint: disable=g-explicit-length-test
 import typing
 from typing import Any, Callable, Optional, Sequence, TypeAlias
-from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
@@ -244,7 +243,7 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
 def quant_core(
     x,
     *,
-    cfg: config.Tensor,
+    cfg,
     calibration_axes,
 ) -> tuple[QTensor, GradientFn]:
   """The core quantizing function."""
@@ -296,7 +295,7 @@ def quant_core(
 def quant(
     x,
     *,
-    cfg: config.Tensor,
+    cfg,
     calibration_axes,
     transpose_fn=None,
 ) -> tuple[QTensor, GradientFn]:
@@ -310,7 +309,7 @@ def quant(
     return qt, quant_grad
 
 
-def make_fake_quant(cfg: config.Tensor, calibration_axes=None):
+def make_fake_quant(cfg, calibration_axes=None):
   def fake_quant(x):
     x_q, _ = quant(x, cfg=cfg, calibration_axes=calibration_axes)
     return x_q.dequant()
