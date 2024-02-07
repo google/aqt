@@ -22,9 +22,8 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
-import itertools
 import typing
-from typing import Any, Callable, Optional, Self, Sequence, TypeAlias
+from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import no_numerics
@@ -33,6 +32,8 @@ import flax.struct
 import jax
 from jax import lax
 import jax.numpy as jnp
+import jax.typing as jax_typing
+from typing_extensions import Self  # for python version < 3.11
 
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
 
@@ -88,19 +89,17 @@ class QTensor:
   def qvalue_astype(self, dtype) -> Self:
     return self.replace(qvalue=self.qvalue.astype(dtype))  # pytype: disable=attribute-error
 
-  def at(self, idx: int):
-    return self.__getitem__(idx)
-
-  def __getitem__(self, idx: int):
+  def __getitem__(self, idx: jax_typing.ArrayLike) -> Self:
     """Returns the indexed subtensor on the first axis."""
     assert self.scale_t is None, 'scale_t is not supported in __getitem__'
-    # start index is (idx, 0, 0, ...)
-    origin_point = (0,) * len(self.qvalue.shape)
-    start_idx = (idx,) + tuple(itertools.islice(origin_point, 1, None))
-    # slice size is (1, raw_shape, ...)
-    slice_sizes = (1,) + tuple(itertools.islice(self.qvalue.shape, 1, None))
-    qtensor = QTensor(self.qvalue, self.scale, None, self.dequant_dtype)
-    return dynamic_slice(qtensor, start_idx, slice_sizes)
+    qvalue = self.qvalue[idx]
+    scale = [s[idx] for s in self.scale]
+    return QTensor(
+        qvalue=qvalue,
+        scale=scale,
+        scale_t=self.scale_t,
+        dequant_dtype=self.dequant_dtype,
+    )
 
   @property
   def ndim(self) -> int:
