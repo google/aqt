@@ -49,10 +49,7 @@ class Quantizer:
   context: Context
 
 
-# TODO(yichizh): both quant_core and quant are duplicated in aqt_quantizer and
-# aqt_tensor. This is an intermediate stage of refactoring.
-# The one in aqt_tensor should be deleted.
-# Need to add type annotation back to cfg.
+# TODO(yichizh): Need to add type annotation back to cfg.
 def quant_core(
     x,
     *,
@@ -122,3 +119,11 @@ def quant(
     return qt.replace(scale_t=scale_t), quant_grad
   else:
     return qt, quant_grad
+
+
+def make_fake_quant(cfg, calibration_axes=None):
+  def fake_quant(x):
+    x_q, _ = quant(x, cfg=cfg, calibration_axes=calibration_axes)
+    return x_q.dequant()
+
+  return fake_quant

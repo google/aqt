@@ -16,7 +16,7 @@
 import copy
 from absl.testing import absltest
 from absl.testing import parameterized
-from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
 import aqt.jax.v2.aqt_conv_general as aqt_conv
@@ -134,7 +134,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     sample_size = 10000
     shape = (sample_size,)
     a = jax.random.uniform(key, shape, minval=-v, maxval=v)
-    a_fq = aqt_tensor.make_fake_quant(cfg)(a)
+    a_fq = aqt_quantizer.make_fake_quant(cfg)(a)
     bucket_noise = a_fq - a  #  ~ U(-bucket_size/2, bucket_size/2)
     bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
     bucket_size = (v * 2) / bucket_count
@@ -178,7 +178,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     cfg.quantizer.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
     grad = jnp.ones(shape) * 12345.0
-    x_fq, backprop = jax.vjp(aqt_tensor.make_fake_quant(cfg), x)
+    x_fq, backprop = jax.vjp(aqt_quantizer.make_fake_quant(cfg), x)
     gx_fq = backprop(grad)
     # print(f"x     =\n{x}")
     # print(f"x_fq  =\n{x_fq}")
@@ -601,8 +601,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqt_tensor.make_fake_quant(cfg.lhs)(lhs)
-    rhs_fq = aqt_tensor.make_fake_quant(cfg.rhs)(rhs)
+    lhs_fq = aqt_quantizer.make_fake_quant(cfg.lhs)(lhs)
+    rhs_fq = aqt_quantizer.make_fake_quant(cfg.rhs)(rhs)
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv_fn(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()

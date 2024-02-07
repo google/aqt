@@ -25,11 +25,9 @@
 import typing
 from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import utils
-from aqt.jax.v2.numerics import no_numerics
 import flax.cursor
 import flax.struct
 import jax
-from jax import lax
 import jax.numpy as jnp
 import jax.typing as jax_typing
 from typing_extensions import Self  # for python version < 3.11
@@ -238,80 +236,3 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
       None,
       operand.dequant_dtype,
   )
-
-
-def quant_core(
-    x,
-    *,
-    cfg,
-    calibration_axes,
-) -> tuple[QTensor, GradientFn]:
-  """The core quantizing function."""
-  dequant_dtype = x.dtype
-  # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
-  # TODO(lew): After we implement optimization to not double-quantize,
-  #   what would happen if we pass fq value (xhs_q2) in residual?
-
-  if isinstance(cfg.quantizer.numerics, no_numerics.NoNumerics):
-    qt = QTensor(qvalue=x, scale=[], scale_t=[], dequant_dtype=dequant_dtype)
-    return qt, None
-  shared_axes = cfg.quantizer.calib_shared_axes or calibration_axes
-  bound = cfg.quantizer.calibration.get_bound(x, shared_axes)
-  abs_max_mapped_to = cfg.quantizer.numerics.abs_val_mapped_to()
-  scale = abs_max_mapped_to / bound
-
-  if cfg.quantizer.po2_scale:
-    # With floor the biggest value (we are using jnp.max) is in the range of
-    # clipping and therefore have a correct gradinet.
-    scale = 2 ** jnp.floor(jnp.log2(scale))
-  if cfg.quantizer.scale_stop_grad:
-    # TODO(lew): Does not matter in DG, because we are using custom gradient.
-    #   We should take that into account somehow.
-    scale = lax.stop_gradient(scale)
-
-  x_s = x * scale
-
-  x_q, res = cfg.quantizer.numerics.vjp_fwd(x_s, cfg.quantizer.context)
-  quant_grad = jax.tree_util.Partial(cfg.quantizer.numerics.vjp_bwd, res)
-  # We are passing quant_grad (and not more) ot the backward pass.
-  # That is equivalent to having:
-  # scale = stop_gradient(scale)
-  #
-  # This is not the only possible choice and we intend to allow experimentation.
-  # However for today we hardcoded this choice.
-  #
-  # In order to achevie no-stop-gradiend solution, we should take vjp
-  # of a larger piece of code like the whole _scale_quant.
-  #
-  # TODO(lew): Implement configuration of stop-gradient.
-  scale = jax.lax.reciprocal(scale)
-
-  qt = QTensor(
-      qvalue=x_q, scale=[scale], scale_t=None, dequant_dtype=dequant_dtype
-  )
-  return qt, quant_grad
-
-
-def quant(
-    x,
-    *,
-    cfg,
-    calibration_axes,
-    transpose_fn=None,
-) -> tuple[QTensor, GradientFn]:
-  """Intermediate step of a refactoring. Delete afterwards."""
-  qt, quant_grad = quant_core(x, cfg=cfg, calibration_axes=calibration_axes)
-  if transpose_fn is not None:
-    assert len(qt.scale) == 1
-    scale_t = [transpose_fn(qt.scale[0])]
-    return qt.replace(scale_t=scale_t), quant_grad
-  else:
-    return qt, quant_grad
-
-
-def make_fake_quant(cfg, calibration_axes=None):
-  def fake_quant(x):
-    x_q, _ = quant(x, cfg=cfg, calibration_axes=calibration_axes)
-    return x_q.dequant()
-
-  return fake_quant

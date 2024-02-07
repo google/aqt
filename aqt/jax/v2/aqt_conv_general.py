@@ -22,6 +22,7 @@
 
 # pylint: disable=protected-access
 
+from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 import jax
@@ -70,8 +71,8 @@ However if there is any other use, we will drop that assumption."""
     assert cfg.lhs.quantizer.calib_shared_axes == list(range(1, rank))
     assert cfg.rhs.quantizer.calib_shared_axes == list(range(0, rank - 1))
 
-    lhs_qt, _ = aqt_tensor.quant(lhs, cfg=cfg.lhs, calibration_axes=None)
-    rhs_qt, _ = aqt_tensor.quant(rhs, cfg=cfg.rhs, calibration_axes=None)
+    lhs_qt, _ = aqt_quantizer.quant(lhs, cfg=cfg.lhs, calibration_axes=None)
+    rhs_qt, _ = aqt_quantizer.quant(rhs, cfg=cfg.rhs, calibration_axes=None)
 
     out = lax.conv_general_dilated(
         lhs=lhs_qt.qvalue,

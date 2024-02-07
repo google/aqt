@@ -16,7 +16,7 @@
 import functools
 from absl.testing import absltest
 from absl.testing import parameterized
-from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import config
 from aqt.jax.v2.flax import aqt_flax
 import flax.linen as nn
@@ -40,14 +40,14 @@ class AqtFlaxTest(parameterized.TestCase):
             and (self.aqt_cfg is None)
         ), 'aqt_cfg cannot be None when providing qtensor as inputs to einsum'
         if self.lhs_qt_external:
-          lhs_in, _ = aqt_tensor.quant(
+          lhs_in, _ = aqt_quantizer.quant(
               lhs, cfg=self.aqt_cfg.fwd.lhs, calibration_axes=(2, 3)
           )
           lhs_dtype = self.aqt_cfg.fwd.lhs.quantizer.numerics.get_dtype()
           lhs_in = lhs_in.qvalue_astype(lhs_dtype)
         rhs_in = rhs
         if self.rhs_qt_external:
-          rhs_in, _ = aqt_tensor.quant(
+          rhs_in, _ = aqt_quantizer.quant(
               rhs, cfg=self.aqt_cfg.fwd.rhs, calibration_axes=(1, 2)
           )
           rhs_dtype = self.aqt_cfg.fwd.rhs.quantizer.numerics.get_dtype()
