@@ -26,7 +26,6 @@
 import functools
 from typing import Any, Optional, Sequence, Union
 
-from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
@@ -290,8 +289,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         assert lhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
         lhs_qt = get_scale_t(lhs_qt, _lhs_scale_transpose_to_output)
     else:
-      lhs_qt, lhs_quant_grad = aqt_quantizer.quant_core(
-          lhs, cfg=cfg.lhs, calibration_axes=lhs_ca
+      lhs_qt, lhs_quant_grad = cfg.lhs.quantizer.quant(
+          lhs, calibration_axes=lhs_ca
       )
       if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
         lhs_qt = get_scale_t(lhs_qt, _lhs_scale_transpose_to_output)
@@ -308,8 +307,8 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
         assert rhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
         rhs_qt = get_scale_t(rhs_qt, _rhs_scale_transpose_to_output)
     else:
-      rhs_qt, rhs_quant_grad = aqt_quantizer.quant_core(
-          rhs, cfg=cfg.rhs, calibration_axes=rhs_ca
+      rhs_qt, rhs_quant_grad = cfg.rhs.quantizer.quant(
+          rhs, calibration_axes=rhs_ca
       )
       if cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT:
         rhs_qt = get_scale_t(rhs_qt, _rhs_scale_transpose_to_output)
