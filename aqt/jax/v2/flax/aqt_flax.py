@@ -371,6 +371,32 @@ class AqtEinsum(nn.Module):
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)
 
 
+def dtype_from_bits(bits: int) -> jnp.dtype | None:
+  """Get the dtype for the number of bits provided.
+
+  Args:
+    bits: number of bits for the dtype.
+
+  Returns:
+    The coresponding container dtype for the number of bits provided.
+
+  """
+  if bits == 4:
+    # this branch should return jnp.int4 directly but
+    # lax.dot_general(int4, int4) is illegal on cpu.
+    # TODO(aqt): Remove this platform check once
+    # https://github.com/google/jax/issues/19682 is fixed.
+    if jax.local_devices()[0].platform != 'cpu':
+      return jnp.int4
+    else:
+      return jnp.int8
+  else:
+    if bits <= 8 and bits >= 2:
+      return jnp.int8
+    else:
+      return None
+
+
 def config_v4(
     *,
     fwd_bits: Optional[int] = 8,
@@ -386,7 +412,6 @@ def config_v4(
     drhs_accumulator_dtype: ... = None,
 ) -> config.DotGeneral:
   """Version 4 of user-visible AQT config."""
-
   def tensor_config(bits: Optional[int]) -> config.Tensor:
     assert bits is None or bits >= 2, 'Need at least 2 bits.'
     if bits is None:
@@ -400,7 +425,7 @@ def config_v4(
           round=True,
           noise_fn=None,
           clip_gradient=False,  # Can be False when using abs-max scaling.
-          dtype=jnp.int8 if 2 <= bits <= 8 else None,
+          dtype=dtype_from_bits(bits),
       )
 
     quantizer = aqt_quantizer.Quantizer(

@@ -25,19 +25,43 @@ import jax.numpy as jnp
 
 class MnistTest(parameterized.TestCase):
 
-  def test_mnist_training(self):
+  # Unable to use config_v4() in parameters since it needs jax.device info.
+  # TODO(aqt): Move confiv_v4() into parameters once int4 works for cpu.
+  @parameterized.parameters([
+      (
+          {
+              "drhs_bits": 8,
+              "drhs_accumulator_dtype": jnp.int32,  # overwrite the default None
+          },
+          8,
+      ),
+      (
+          {
+              "fwd_bits": 4,
+              "fwd_accumulator_dtype": None,
+              "dlhs_accumulator_dtype": None,
+          },
+          4,
+      ),
+  ])
+  def test_mnist_training(self, configs, bits):
+    aqt_cfg = aqt_flax.config_v4(**configs)
     target_loss = {
-        "cpu": [3.931982755661010742187500000000],
-        "TPU v2": [3.950709819793701171875000000000],
-        "TPU v3": [3.950709819793701171875000000000],
-        "TPU v4": [3.950191974639892578125000000000],
-        "TPU v5 lite": [3.949246168136596679687500000000],
+        8: {
+            "cpu": [3.931982755661010742187500000000],
+            "TPU v2": [3.950709819793701171875000000000],
+            "TPU v3": [3.950709819793701171875000000000],
+            "TPU v4": [3.950191974639892578125000000000],
+            "TPU v5 lite": [3.949246168136596679687500000000],
+        },
+        4: {
+            "cpu": [2.300473213195800781250000000000],
+            "TPU v2": [2.302628040313720703125000000000],
+            "TPU v3": [2.302628040313720703125000000000],
+            "TPU v4": [2.302628040313720703125000000000],
+            "TPU v5 lite": [2.302628040313720703125000000000],
+        },
     }
-
-    aqt_cfg = aqt_flax.config_v4(
-        drhs_bits=8,
-        drhs_accumulator_dtype=jnp.int32,  # overwrite the default None
-    )
     # below 3 lines are differences between config_v4/v3 and fully_quantized
     config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
     aqt_cfg.dlhs.rhs.use_fwd_quant = True
@@ -75,7 +99,7 @@ class MnistTest(parameterized.TestCase):
     )
 
     device_kind = jax.devices()[0].device_kind
-    expected_train_loss = target_loss[device_kind]
+    expected_train_loss = target_loss[bits][device_kind]
     if train_loss not in expected_train_loss:
       msg = "train_loss changed. Consider updating with the following:\n"
       msg += f'        "{device_kind}": [{train_loss:.30f}]'
@@ -89,13 +113,14 @@ class MnistTest(parameterized.TestCase):
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
+    expected_dtype = aqt_flax.dtype_from_bits(bits)
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
                 "AqtDotGeneral_0": {
                     "qlhs": {
                         "scale": (dtype("float32"), (1, 10)),
-                        "value": (dtype("int8"), (10, 10)),
+                        "value": (expected_dtype, (10, 10)),
                     }
                 }
             },
@@ -103,7 +128,7 @@ class MnistTest(parameterized.TestCase):
                 "AqtDotGeneral_0": {
                     "qrhs": {
                         "scale": (dtype("float32"), (1, 256)),
-                        "value": (dtype("int8"), (3136, 256)),
+                        "value": (expected_dtype, (3136, 256)),
                     }
                 }
             },
@@ -111,7 +136,7 @@ class MnistTest(parameterized.TestCase):
                 "AqtDotGeneral_0": {
                     "qrhs": {
                         "scale": (dtype("float32"), (1, 10)),
-                        "value": (dtype("int8"), (256, 10)),
+                        "value": (expected_dtype, (256, 10)),
                     }
                 }
             },
