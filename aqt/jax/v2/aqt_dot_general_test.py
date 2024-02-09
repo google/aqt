@@ -714,7 +714,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     cfg = config.dot_general_make(lhs_bits=8, rhs_bits=8)
     cfg.fwd.lhs.quantizer.calib_shared_axes = "per_tensor"
     # calibration_axes will not be used when cfg.calib_shared_axes is set
-    y, _ = aqt_quantizer.quant(x, cfg=cfg.fwd.lhs, calibration_axes=None)
+    y, _ = cfg.fwd.lhs.quantizer.quant(x, calibration_axes=None)
     self.assertEqual(y.scale[0], jnp.array([[1.0]]))
 
 

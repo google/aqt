@@ -108,26 +108,9 @@ class Quantizer:
     return qt, quant_grad
 
 
-def quant(
-    x,
-    *,
-    cfg,
-    calibration_axes,
-    transpose_fn=None,
-) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
-  """Intermediate step of a refactoring. Delete afterwards."""
-  qt, quant_grad = cfg.quantizer.quant(x, calibration_axes=calibration_axes)
-  if transpose_fn is not None:
-    assert len(qt.scale) == 1
-    scale_t = [transpose_fn(qt.scale[0])]
-    return qt.replace(scale_t=scale_t), quant_grad
-  else:
-    return qt, quant_grad
-
-
 def make_fake_quant(cfg, calibration_axes=None):
   def fake_quant(x):
-    x_q, _ = quant(x, cfg=cfg, calibration_axes=calibration_axes)
+    x_q, _ = cfg.quantizer.quant(x, calibration_axes=calibration_axes)
     return x_q.dequant()
 
   return fake_quant
