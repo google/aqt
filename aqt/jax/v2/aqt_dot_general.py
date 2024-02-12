@@ -273,45 +273,45 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     assert isinstance(rhs, jnp.ndarray)
 
-    # TODO(lew): Have a function to handle lhs and rhs uniformly.
-    get_scale_t = functools.partial(
-        _get_scale_t,
-        dimension_numbers=dimension_numbers,
-        lhs_shape=lhs.shape,
-        rhs_shape=rhs.shape,
-    )
-    if lhs_qt is not None:
-      lhs_quant_grad = 'Poison. Not needed in serving'
+    def _compute_qtensor(
+        inputs: jnp.ndarray,
+        input_qtensor: aqt_tensor.QTensor,
+        tensor_cfg: config.Tensor,
+        calibration_axes: Sequence[int],
+        transpose_fn: Any,
+    ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
+      """Compute qtensor from input or input_qtensor."""
+      if input_qtensor is not None:
+        quant_grad = 'Poison. Not needed in serving'
+        output_qtensor = input_qtensor
+      else:
+        output_qtensor, quant_grad = tensor_cfg.quantizer.quant(
+            inputs, calibration_axes=calibration_axes
+        )
       if (
-          lhs_qt.scale_t is None
-          and cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT
+          output_qtensor.scale_t is None
+          and tensor_cfg.dequant_mode != config.DequantMode.OTHER_INPUT
       ):
-        assert lhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
-        lhs_qt = get_scale_t(lhs_qt, _lhs_scale_transpose_to_output)
-    else:
-      lhs_qt, lhs_quant_grad = cfg.lhs.quantizer.quant(
-          lhs, calibration_axes=lhs_ca
-      )
-      if cfg.lhs.dequant_mode != config.DequantMode.OTHER_INPUT:
-        lhs_qt = get_scale_t(lhs_qt, _lhs_scale_transpose_to_output)
+        msg = 'scale, scale_t cannot be both unknown'
+        assert output_qtensor.scale is not None, msg
+        get_scale_t = functools.partial(
+            _get_scale_t,
+            dimension_numbers=dimension_numbers,
+            lhs_shape=lhs.shape,
+            rhs_shape=rhs.shape,
+        )
+        output_qtensor = get_scale_t(output_qtensor, transpose_fn)
+      return output_qtensor, quant_grad
 
+    lhs_qt, lhs_quant_grad = _compute_qtensor(
+        lhs, lhs_qt, cfg.lhs, lhs_ca, _lhs_scale_transpose_to_output
+    )
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
-    if rhs_qt is not None:
-      rhs_quant_grad = 'Poison. Not needed in serving'
-      if (
-          rhs_qt.scale_t is None
-          and cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT
-      ):
-        assert rhs_qt.scale is not None, 'scale, scale_t cannot be both unknown'
-        rhs_qt = get_scale_t(rhs_qt, _rhs_scale_transpose_to_output)
-    else:
-      rhs_qt, rhs_quant_grad = cfg.rhs.quantizer.quant(
-          rhs, calibration_axes=rhs_ca
-      )
-      if cfg.rhs.dequant_mode != config.DequantMode.OTHER_INPUT:
-        rhs_qt = get_scale_t(rhs_qt, _rhs_scale_transpose_to_output)
+    rhs_qt, rhs_quant_grad = _compute_qtensor(
+        rhs, rhs_qt, cfg.rhs, rhs_ca, _rhs_scale_transpose_to_output
+    )
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
