@@ -23,14 +23,10 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
-import functools
 from typing import Any, Optional, Sequence, Union
-
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
-# TODO(yichizh): The following import is temporary for not breaking dependencies
-# Fix imports in other packages and delete it.
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy
@@ -221,8 +217,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   ):
     """Creates a dot_general function without custom gradient."""
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-    # We need to copy because we modify cfg to populate some defaults.
-
     # TODO(lew):
     #  - Use qx.value with the int type.
     #  - Handle qx.value with the int type in an optimized way.
@@ -294,13 +288,13 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       ):
         msg = 'scale, scale_t cannot be both unknown'
         assert output_qtensor.scale is not None, msg
-        get_scale_t = functools.partial(
-            _get_scale_t,
+        output_qtensor = _get_scale_t(
+            qt=output_qtensor,
+            transpose_fn=transpose_fn,
             dimension_numbers=dimension_numbers,
             lhs_shape=lhs.shape,
             rhs_shape=rhs.shape,
         )
-        output_qtensor = get_scale_t(output_qtensor, transpose_fn)
       return output_qtensor, quant_grad
 
     lhs_qt, lhs_quant_grad = _compute_qtensor(
@@ -449,11 +443,10 @@ def _dot_general_raw_attach_gradient():
       res: tuple[Optional[DotGeneralRes], config.DotGeneral],
       g,
   ):
-    # g[1] is gradient with respect to qret which we are ignoring.
     dg_res, cfg = res
     msg = 'dg_res can only be None in 2nd derivative. It is not yet supported.'
     assert dg_res is not None, msg
-    g = g[0]
+    g = g[0]  # g[1] is gradient with respect to qret which we are ignoring.
     def ranges_like(*xs):
       start = 0
       for x in xs:
