@@ -122,8 +122,7 @@ def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[int],
     qdtype: jnp.dtype,
-    # TODO(yichizh): change the argument name to dequant_dtype
-    sdtype: jnp.dtype,
+    dequant_dtype: jnp.dtype,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
   scale_shape = list(shape)
@@ -134,9 +133,9 @@ def zeros_with_scale(
   # other libraries to not break their functionality.
   return QTensor(
       jnp.zeros(shape, dtype=qdtype),
-      [jnp.ones(scale_shape, dtype=sdtype)],
+      [jnp.ones(scale_shape, dtype=dequant_dtype)],
       None,
-      dequant_dtype=sdtype,
+      dequant_dtype=dequant_dtype,
   )
 
 
