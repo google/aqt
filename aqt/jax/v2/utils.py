@@ -20,6 +20,10 @@ promote them to dedicated files.
 
 import functools
 import flax.struct
+import jax.numpy as jnp
+
+float_dtype = [jnp.bfloat16, jnp.float32, jnp.float64]
+int_dtype = [jnp.int4, jnp.int8]
 
 
 flax_slots_dataclass = functools.partial(
