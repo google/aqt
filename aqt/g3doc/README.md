@@ -1,20 +1,24 @@
-# AQT : Accurate Quantized Training
+# AQTp : Accurate Quantized Training for production
 
-go/aqt2
+go/aqtp
 
 ## AQT Users chat
 
-*go/aqt-users*
+go/aqt-chat
+
+This is a good place to ask any questions about quantization in JAX and AQT usage.
+(Consider starting threads with **bolded title**).
 
 Note: If for some reason you see a message 'Failed to join', that happened before for unknown reasons. Please ping yichizh@ or lew@ and we will add you manually.
 
-Feel free to have any AQT-related discussion there. (Consider starting threads with **bolded title**).
+
 
 ## Main README.md
 
 Most of the AQT documentation is in the [main README.md](../README.md). It
 contains:
 
+-   installation instructions (`pip install aqtp`) ,
 -   list of features,
 -   links to Cloud ML blog posts and research papers,
 -   tutorial on how to use it with JAX and Flax libraries,
@@ -52,6 +56,19 @@ yielding similarly good results.
 
 [Cloud ML AQT introduction](https://cloud.google.com/blog/products/compute/accurate-quantized-training-aqt-for-tpu-v5e/)
 has some more quality details.
+
+## Google3 support
+
+AQT is a rather quickly evolving project with a wide variety of users.
+When we do a refactoring that affects other project, we will do our best to
+update all of google3 code.
+
+If you'd like your project to be officially supported please provide
+- Tests that we can add to our AQT presubmit. Here is [an example](http://google3/third_party/py/aqt/METADATA;l=51;rcl=596716629).
+- Add `mdb-group:aqt-buildcops` line to `OWNERS` of your project. This will be used *only* for the AQT maintenance CLs.
+
+If that recipe is infeasible for some reason, please contact `lew`.
+
 
 ## How to use AQT in Pax
 
