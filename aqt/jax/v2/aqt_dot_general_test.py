@@ -156,12 +156,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       assert jnp.all(noise_mean * jnp.sqrt(num_values) < 4 * noise_std)
 
     # jax.uniform implementation
-    jax_uniform_noise = jax.random.uniform(jax.random.PRNGKey(10), shape) - 0.5
+    noise_fn = stochastic_rounding.JaxUniform()
+    jax_uniform_noise = noise_fn(shape, jax.random.PRNGKey(10))
     assert_clt(jax_uniform_noise)
     # customized more efficient implementation
-    custom_1_noise = stochastic_rounding.random_centered_uniform(
-        shape, jax.random.PRNGKey(11)
-    )
+    noise_fn = stochastic_rounding.RandomCenteredUniform()
+    custom_1_noise = noise_fn(shape, jax.random.PRNGKey(11))
     assert_clt(custom_1_noise)
 
   @parameterized.parameters([

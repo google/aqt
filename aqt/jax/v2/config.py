@@ -169,8 +169,8 @@ def set_stochastic_rounding(
 ):
   """Configure stochastic rounding implementation."""
   noise_implementations = {
-      'jax.uniform': lambda shape, key: jax.random.uniform(key, shape) - 0.5,
-      'custom-1': stochastic_rounding.random_centered_uniform,
+      'jax.uniform': stochastic_rounding.JaxUniform(),
+      'custom-1': stochastic_rounding.RandomCenteredUniform(),
   }
   msg = f'{implementation} not supported.'
   assert implementation in noise_implementations.keys(), msg
