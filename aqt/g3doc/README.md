@@ -61,13 +61,12 @@ has some more quality details.
 
 AQT is a rather quickly evolving project with a wide variety of users.
 When we do a refactoring that affects other project, we will do our best to
-update all of google3 code.
+update all of google3 code. If you'd like your project to be officially supported please consider:
 
-If you'd like your project to be officially supported please provide
-- Tests that we can add to our AQT presubmit. Here is [an example](http://google3/third_party/py/aqt/METADATA;l=51;rcl=596716629).
+- Provide some basic tests that we can add to AQT presubmit. Here is [an example](http://google3/third_party/py/aqt/METADATA;l=51;rcl=596716629).
 - Add `mdb-group:aqt-buildcops` line to `OWNERS` of your project. This will be used *only* for the AQT maintenance CLs.
 
-If that recipe is infeasible for some reason, please contact `lew`.
+If that recipe is infeasible for some reason, please contact `lew@`.
 
 
 ## How to use AQT in Pax
