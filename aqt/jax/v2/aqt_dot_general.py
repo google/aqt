@@ -307,8 +307,10 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       fwd_quantized = rhs.qx.scale_t is not None and len(rhs.qx.scale_t) == 1  # pytype: disable=attribute-error
       expect_fwd_quantized = cfg.rhs.use_fwd_quant is not None
       msg = (
-          'Misconfiguration: use_fwd_quant=True, but there is no fwd'
-          ' quantization (but rhs.qx is None).'
+          'If fwd is quantized, use_fwd_quant should be either True/False;'
+          ' otherwise, use_fwd_quant should be None. Misconfiguration: found'
+          f' use_fwd_quant is {cfg.rhs.use_fwd_quant} in bwd, but fwd'
+          f' quantization is {fwd_quantized}.'
       )
       assert fwd_quantized == expect_fwd_quantized, msg
       if cfg.rhs.use_fwd_quant:

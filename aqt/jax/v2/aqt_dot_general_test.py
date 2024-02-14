@@ -534,6 +534,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           ),
       ])
 
+    def unquant_aqt_dg(lhs, rhs):
+      dg = aqt.make_dot_general(config.default_unquantized_config())
+      return dg(lhs, rhs, dims)
+
+    def lax_dg(lhs, rhs):
+      return jax.lax.dot_general(lhs, rhs, dims)
+
+    check([
+        ("unquantized default:", unquant_aqt_dg, dict()),
+        ("lax.dot_general:", lax_dg, dict()),
+    ])
+
   def test_dynamic_context(self):
     @jax.jit
     def f(lhs, rhs):

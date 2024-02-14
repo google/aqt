@@ -101,7 +101,7 @@ class DotGeneral:
 
 
 ################################################################################
-# Functions below are auxiliary helpers.
+# Functions below are auxiliary config attribute setters.
 
 
 def _split_key(key: Optional[jax.Array], num_splits: int):
@@ -214,6 +214,44 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
   cfg.drhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
   cfg.dlhs.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
   cfg.dlhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+
+
+################################################################################
+# Functions below are auxiliary config creators.
+
+
+def default_unquantized_config() -> DotGeneral:
+  """Aqt config for floating-point dot general."""
+
+  def tensor_cfg() -> Tensor:
+    quantizer = aqt_quantizer.Quantizer(
+        numerics=no_numerics.NoNumerics(),
+        calib_shared_axes=None,
+        scale_stop_grad=True,
+        calibration=calibration.AbsMaxCalibration(),
+        po2_scale=False,
+        context=aqt_quantizer.Context(key=None, train_step=None),
+    )
+    cfg = Tensor(
+        quantizer=quantizer, use_fwd_quant=None, dequant_mode=DequantMode.OUTPUT
+    )
+    return cfg
+
+  def dg_raw_cfg(jax_scope_name: str) -> DotGeneralRaw:
+    return DotGeneralRaw(
+        lhs=tensor_cfg(),
+        rhs=tensor_cfg(),
+        dg_accumulator_dtype=None,
+        local_aqt=None,
+        jax_scope_name=jax_scope_name,
+    )
+
+  dg_cfg = DotGeneral(
+      fwd=dg_raw_cfg('aqt_fwd'),
+      dlhs=dg_raw_cfg('aqt_dlhs'),
+      drhs=dg_raw_cfg('aqt_drhs'),
+  )
+  return dg_cfg
 
 
 def tensor_make(
