@@ -199,6 +199,86 @@ def _get_scale_t(
   return qt.replace(scale_t=list_scale_t)
 
 
+def _qtensor_dot_general(
+    lhs_qt: aqt_tensor.QTensor,
+    rhs_qt: aqt_tensor.QTensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    cfg: config.DotGeneralRaw,
+    # dequant_dtype: config.DType,
+    dequant_dtype: jnp.dtype,
+) -> aqt_tensor.QTensor:
+  """QTensor lax.dot_general replacement."""
+
+  def _cast_dtype(
+      input_qtensor: aqt_tensor.QTensor, tensor_cfg: config.Tensor
+  ) -> jnp.ndarray:
+    dtype = tensor_cfg.quantizer.numerics.get_dtype()
+    msg = "Can't cast dtype in DequantMode.THIS_INPUT (fake quant) mode."
+    if tensor_cfg.dequant_mode == config.DequantMode.THIS_INPUT:
+      assert dtype is None, msg
+      output = input_qtensor.dequant()
+    else:
+      # TODO(yichizh): replace rounding in numerics with casting to dtype.
+      # So fake quant becomes casting to dtype first, then casting to bfloat.
+      # This is because FP8 numerics relies on this cast to do the rounding.
+      qvalue = input_qtensor.qvalue
+      output = qvalue if dtype is None else qvalue.astype(dtype)
+    return output
+
+  lhs_qin = _cast_dtype(lhs_qt, cfg.lhs)
+  rhs_qin = _cast_dtype(rhs_qt, cfg.rhs)
+
+  dtype_ms = (
+      f'Found {cfg.dg_accumulator_dtype=}, {lhs_qin.dtype=} and'
+      f' {rhs_qin.dtype=}. Dot general accumulator dtype can only be'
+      ' jnp.int32 when both inputs are int8. Otherwise it is recommended to'
+      ' be None to let lax.dot_general automatically decide it.'
+  )
+  if cfg.dg_accumulator_dtype == jnp.int32:
+    dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
+    assert (
+        lhs_qin.dtype in dtypes_allowed_for_int32_accum
+        and rhs_qin.dtype in dtypes_allowed_for_int32_accum
+    ), dtype_ms
+
+  dtypes_can_be_scaled = [jnp.bfloat16, jnp.float32, jnp.float64]
+  if cfg.lhs.dequant_mode == config.DequantMode.OTHER_INPUT:
+    assert rhs_qin.dtype in dtypes_can_be_scaled
+    for scale in lhs_qt.scale:
+      rhs_qin = rhs_qin * _lhs_scale_transpose_for_rhs_input(
+          scale, dimension_numbers, rhs_qt.shape
+      )
+  if cfg.rhs.dequant_mode == config.DequantMode.OTHER_INPUT:
+    assert lhs_qin.dtype in dtypes_can_be_scaled
+    for scale in rhs_qt.scale:
+      lhs_qin = lhs_qin * _rhs_scale_transpose_for_lhs_input(
+          scale, dimension_numbers, lhs_qt.shape
+      )
+
+  out = lax.dot_general(
+      lhs_qin,
+      rhs_qin,
+      dimension_numbers=dimension_numbers,
+      preferred_element_type=cfg.dg_accumulator_dtype,
+      precision=lax.Precision.DEFAULT,
+  )
+  # TODO(lew): Do we have a correct precision above?
+  #   Relevant: https://github.com/google/jax/issues/14022
+  out = aqt_tensor.QTensor(
+      qvalue=out,
+      scale=[],
+      scale_t=None,
+      dequant_dtype=dequant_dtype,
+  )
+  assert out.scale is not None  # pytype help
+
+  if cfg.lhs.dequant_mode == config.DequantMode.OUTPUT:
+    out.scale.extend(lhs_qt.scale_t)
+  if cfg.rhs.dequant_mode == config.DequantMode.OUTPUT:
+    out.scale.extend(rhs_qt.scale_t)
+  return out
+
+
 def _make_dot_general_raw(cfg: config.DotGeneralRaw):
   """Makes quantized lax.dot_general replacement."""
 
@@ -311,74 +391,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
 
     # TODO(lew): mt.x above should be clipped for clipping calibrations
 
-    def _cast_dtype(
-        input_qtensor: aqt_tensor.QTensor, tensor_cfg: config.Tensor
-    ) -> jnp.ndarray:
-      dtype = tensor_cfg.quantizer.numerics.get_dtype()
-      msg = "Can't cast dtype in DequantMode.THIS_INPUT (fake quant) mode."
-      if tensor_cfg.dequant_mode == config.DequantMode.THIS_INPUT:
-        assert dtype is None, msg
-        output = input_qtensor.dequant()
-      else:
-        # TODO(yichizh): replace rounding in numerics with casting to dtype.
-        # So fake quant becomes casting to dtype first, then casting to bfloat.
-        # This is because FP8 numerics relies on this cast to do the rounding.
-        qvalue = input_qtensor.qvalue
-        output = qvalue if dtype is None else qvalue.astype(dtype)
-      return output
-
-    lhs_qin = _cast_dtype(lhs_qt, cfg.lhs)
-    rhs_qin = _cast_dtype(rhs_qt, cfg.rhs)
-
-    dtype_ms = (
-        f'Found {cfg.dg_accumulator_dtype=}, {lhs_qin.dtype=} and'
-        f' {rhs_qin.dtype=}. Dot general accumulator dtype can only be'
-        ' jnp.int32 when both inputs are int8. Otherwise it is recommended to'
-        ' be None to let lax.dot_general automatically decide it.'
+    out = _qtensor_dot_general(
+        lhs_qt, rhs_qt, dimension_numbers, cfg, jnp.promote_types(lhs, rhs)
     )
-    if cfg.dg_accumulator_dtype == jnp.int32:
-      dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
-      assert (
-          lhs_qin.dtype in dtypes_allowed_for_int32_accum
-          and rhs_qin.dtype in dtypes_allowed_for_int32_accum
-      ), dtype_ms
-
-    dtypes_can_be_scaled = [jnp.bfloat16, jnp.float32, jnp.float64]
-    if cfg.lhs.dequant_mode == config.DequantMode.OTHER_INPUT:
-      assert rhs_qin.dtype in dtypes_can_be_scaled
-      for scale in lhs_qt.scale:
-        rhs_qin = rhs_qin * _lhs_scale_transpose_for_rhs_input(
-            scale, dimension_numbers, rhs.shape
-        )
-    if cfg.rhs.dequant_mode == config.DequantMode.OTHER_INPUT:
-      assert lhs_qin.dtype in dtypes_can_be_scaled
-      for scale in rhs_qt.scale:
-        lhs_qin = lhs_qin * _rhs_scale_transpose_for_lhs_input(
-            scale, dimension_numbers, lhs.shape
-        )
-
-    out = lax.dot_general(
-        lhs_qin,
-        rhs_qin,
-        dimension_numbers=dimension_numbers,
-        preferred_element_type=cfg.dg_accumulator_dtype,
-        precision=lax.Precision.DEFAULT,
-    )
-    # TODO(lew): Do we have a correct precision above?
-    #   Relevant: https://github.com/google/jax/issues/14022
-
-    out = aqt_tensor.QTensor(
-        qvalue=out,
-        scale=[],
-        scale_t=None,
-        dequant_dtype=jnp.promote_types(lhs, rhs),
-    )
-    assert out.scale is not None  # pytype help
-
-    if cfg.lhs.dequant_mode == config.DequantMode.OUTPUT:
-      out.scale.extend(lhs_qt.scale_t)
-    if cfg.rhs.dequant_mode == config.DequantMode.OUTPUT:
-      out.scale.extend(rhs_qt.scale_t)
 
     out = out.dequant()
 
