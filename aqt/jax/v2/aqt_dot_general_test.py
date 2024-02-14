@@ -193,9 +193,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   @parameterized.parameters([
       dict(
+          # TODO(aqt): Change dlhs_bits to 4bit once
+          # https://github.com/google/jax/issues/19682 is fixed.
           cfg=config.config_v3(
               fwd_bits=3,
-              dlhs_bits=4,
+              dlhs_bits=6,
               drhs_bits=5,
               drhs_accumulator_dtype=jnp.int32,  # overwriting the default None
           )

@@ -223,8 +223,16 @@ def tensor_make(
   if bits is None:
     effective_numerics = no_numerics.NoNumerics()
   else:
+    def _dtype_from_bits(bits, pz):
+      if 2 <= bits <= 8 and pz:
+        if bits == 4:
+          return jnp.int4
+        else:
+          return jnp.int8
+      else:
+        return None
     pz = False if bits == 1 else True
-    dtype = jnp.int8 if 2 <= bits <= 8 and pz else None
+    dtype = _dtype_from_bits(bits, pz)
     effective_numerics = int_numerics.IntNumerics(
         bits=bits,
         preserve_zero=pz,
