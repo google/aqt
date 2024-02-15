@@ -217,6 +217,11 @@ class AqtDotGeneral(nn.Module):
       lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
       rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
 
+      # TODO(jianlijianli): Remove this conversion when int4 direct loading is
+      # possible.
+      if rhs_qt is not None and cfg.fwd.rhs.quantizer.numerics.bits == 4:
+        rhs_qt = rhs_qt.replace(qvalue=rhs_qt.qvalue.astype(jnp.int4))
+
       out, (out_lhs_qt, out_rhs_qt) = dg(
           lhs=lhs,
           rhs=rhs,
