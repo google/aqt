@@ -279,23 +279,17 @@ def _qtensor_dot_general(
   return out
 
 
-def _make_dot_general_raw(cfg: config.DotGeneralRaw):
-  """Makes quantized lax.dot_general replacement."""
-
-  msg = 'Custom calib_shared_axes not implemented for local AQT.'
-  assert cfg.lhs.quantizer.calib_shared_axes is None, msg
-  assert cfg.rhs.quantizer.calib_shared_axes is None, msg
-
-  @jax.named_scope(cfg.jax_scope_name)
-  def dot_general_raw(
-      lhs: jnp.ndarray,
-      rhs: Union[jnp.ndarray, MultiTensor],
-      # xhs_qt are used in serving.
-      lhs_qt: Optional[aqt_tensor.QTensor],
-      rhs_qt: Optional[aqt_tensor.QTensor],
-      dimension_numbers: jax.lax.DotDimensionNumbers,
-  ):
-    """Creates a dot_general function without custom gradient."""
+def _dot_general_raw(
+    lhs: jnp.ndarray,
+    rhs: Union[jnp.ndarray, MultiTensor],
+    # xhs_qt are used in serving.
+    lhs_qt: Optional[aqt_tensor.QTensor],
+    rhs_qt: Optional[aqt_tensor.QTensor],
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    cfg: config.DotGeneralRaw,
+):
+  """A quantized dot_general function without custom gradient."""
+  with jax.named_scope(cfg.jax_scope_name):
     (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
     # TODO(lew):
     #  - Use qx.value with the int type.
@@ -325,6 +319,9 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       assert cfg.rhs.use_fwd_quant is None, 'cannot set use_fwd_quant in fwd'
 
     if cfg.local_aqt is not None:
+      msg = 'Custom calib_shared_axes not implemented for local AQT.'
+      assert cfg.lhs.quantizer.calib_shared_axes is None, msg
+      assert cfg.rhs.quantizer.calib_shared_axes is None, msg
 
       def factor_reshape(x, ca, ba):
         factor = cfg.local_aqt.contraction_axis_shard_count
@@ -411,8 +408,6 @@ def _make_dot_general_raw(cfg: config.DotGeneralRaw):
       res = None
     return out, res
 
-  return dot_general_raw
-
 
 # TODO(yichizh): inline this function. Make all child functions top-level.
 def _dot_general_raw_attach_gradient():
@@ -436,13 +431,13 @@ def _dot_general_raw_attach_gradient():
       assert (
           lhs.dtype == rhs.dtype
       ), f'Unmatched lhs and rhs dtype: {lhs.dtype} vs {rhs.dtype}'
-      fwd_dot_general_raw = _make_dot_general_raw(cfg.fwd)
-      ret, res = fwd_dot_general_raw(
+      ret, res = _dot_general_raw(
           lhs,
           rhs,
           lhs_qt,
           rhs_qt,
           dimension_numbers,
+          cfg=cfg.fwd,
       )
       ret = ret.astype(lhs.dtype)
       # We return these values to allow for materialization.
@@ -491,8 +486,7 @@ def _dot_general_raw_attach_gradient():
         g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
       dims = ((g_ca, y_ra), (g_ba, y_ba))
 
-      dot_general = _make_dot_general_raw(cfg_raw)
-      out, _ = dot_general(g, y_res.mt, None, None, dims)
+      out, _ = _dot_general_raw(g, y_res.mt, None, None, dims, cfg=cfg_raw)
 
       x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
       out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))

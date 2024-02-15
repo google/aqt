@@ -420,8 +420,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     def aqt_dg_raw(dequant_mode):
       cfg = modify_cfg(dequant_mode=dequant_mode)
       cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-      dg_raw = aqt._make_dot_general_raw(cfg.fwd)
-      return lambda lhs, rhs: dg_raw(lhs, rhs, None, None, dims)[0]
+      return lambda lhs, rhs: aqt._dot_general_raw(
+          lhs, rhs, None, None, dims, cfg=cfg.fwd
+      )[0]
 
     test_jaxpr_dtype(
         lambda: aqt_dg_full(config.DequantMode.OUTPUT)(lhs, rhs),
@@ -561,12 +562,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     cfg = config.dot_general_raw_make(8, 8)
 
     def dg(lhs, rhs):
-      ret, _ = aqt._make_dot_general_raw(cfg)(
+      ret, _ = aqt._dot_general_raw(
           lhs,
           rhs,
           None,
           None,
           (((1,), (0,)), ((), ())),
+          cfg=cfg,
       )
       return ret
 
