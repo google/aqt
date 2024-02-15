@@ -13,11 +13,10 @@
 # limitations under the License.
 
 """Test for AQT configs."""
-import difflib
-import pprint
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
+from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
 import jax.numpy as jnp
 
@@ -36,7 +35,6 @@ class AqtConfigTest(parameterized.TestCase):
         dlhs_accumulator_dtype=jnp.int8,
         drhs_accumulator_dtype=jnp.int4,
     )
-    cfg_str = pprint.pformat(cfg)
     expected_cfg_str = """DotGeneral(fwd=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=IntNumerics(bits=8,
                                                                                  preserve_zero=True,
                                                                                  preserve_max_val=False,
@@ -142,15 +140,103 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=<class 'jax.numpy.int4'>,
                               local_aqt=LocalAqt(contraction_axis_shard_count=3),
                               jax_scope_name='aqt_drhs'))"""
+    utils.test_pprint_eq(cfg, expected_cfg_str)
 
-    def print_diff():
-      diff_generator = difflib.context_diff(
-          cfg_str.split(' '), expected_cfg_str.split(' ')
-      )
-      for diff in diff_generator:
-        print(diff)
-
-    assert cfg_str == expected_cfg_str, print_diff()
+  def test_configv4_original(self):
+    expected_cfg_str = """DotGeneral(fwd=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=IntNumerics(bits=8,
+                                                                                 preserve_zero=True,
+                                                                                 preserve_max_val=False,
+                                                                                 clip=True,
+                                                                                 clip_gradient=False,
+                                                                                 round=True,
+                                                                                 noise_fn=None,
+                                                                                 dtype=<class 'jax.numpy.int8'>),
+                                                            calib_shared_axes=None,
+                                                            scale_stop_grad=True,
+                                                            calibration=AbsMaxCalibration(),
+                                                            po2_scale=False,
+                                                            context=Context(key=None,
+                                                                            train_step=None)),
+                                        use_fwd_quant=None,
+                                        dequant_mode=<DequantMode.OUTPUT: 1>),
+                             rhs=Tensor(quantizer=Quantizer(numerics=IntNumerics(bits=8,
+                                                                                 preserve_zero=True,
+                                                                                 preserve_max_val=False,
+                                                                                 clip=True,
+                                                                                 clip_gradient=False,
+                                                                                 round=True,
+                                                                                 noise_fn=None,
+                                                                                 dtype=<class 'jax.numpy.int8'>),
+                                                            calib_shared_axes=None,
+                                                            scale_stop_grad=True,
+                                                            calibration=AbsMaxCalibration(),
+                                                            po2_scale=False,
+                                                            context=Context(key=None,
+                                                                            train_step=None)),
+                                        use_fwd_quant=None,
+                                        dequant_mode=<DequantMode.OUTPUT: 1>),
+                             dg_accumulator_dtype=<class 'jax.numpy.int32'>,
+                             local_aqt=None,
+                             jax_scope_name='aqt_fwd'),
+           dlhs=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=IntNumerics(bits=8,
+                                                                                  preserve_zero=True,
+                                                                                  preserve_max_val=False,
+                                                                                  clip=True,
+                                                                                  clip_gradient=False,
+                                                                                  round=True,
+                                                                                  noise_fn=JaxUniform(),
+                                                                                  dtype=<class 'jax.numpy.int8'>),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=None,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              rhs=Tensor(quantizer=Quantizer(numerics=IntNumerics(bits=8,
+                                                                                  preserve_zero=True,
+                                                                                  preserve_max_val=False,
+                                                                                  clip=True,
+                                                                                  clip_gradient=False,
+                                                                                  round=True,
+                                                                                  noise_fn=None,
+                                                                                  dtype=<class 'jax.numpy.int8'>),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=False,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              dg_accumulator_dtype=<class 'jax.numpy.int32'>,
+                              local_aqt=None,
+                              jax_scope_name='aqt_dlhs'),
+           drhs=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=NoNumerics(noise_fn=JaxUniform(),
+                                                                                 dtype=None),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=None,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              rhs=Tensor(quantizer=Quantizer(numerics=NoNumerics(noise_fn=None,
+                                                                                 dtype=None),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=False,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              dg_accumulator_dtype=None,
+                              local_aqt=None,
+                              jax_scope_name='aqt_drhs'))"""
+    utils.test_pprint_eq(aqt_flax.config_v4(), expected_cfg_str)
 
 
 if __name__ == '__main__':

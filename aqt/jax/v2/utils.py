@@ -18,7 +18,10 @@ However, it is acceptable to grow pieces of funcionality in this file and later
 promote them to dedicated files.
 """
 
+import difflib
 import functools
+import pprint
+from typing import Any
 import flax.struct
 
 
@@ -33,3 +36,15 @@ def static_field():
 
 def dynamic_field():
   return flax.struct.field(pytree_node=True)
+
+
+def print_diff(str_a: str, str_b: str):
+  diff_generator = difflib.context_diff(str_a.split(' '), str_b.split(' '))
+  for diff in diff_generator:
+    print(diff)
+
+
+def test_pprint_eq(input_a: Any, input_b: Any):
+  str_input_a = input_a if isinstance(input_a, str) else pprint.pformat(input_a)
+  str_input_b = input_b if isinstance(input_b, str) else pprint.pformat(input_b)
+  assert str_input_a == str_input_b, print_diff(str_input_a, str_input_b)
