@@ -13,6 +13,7 @@
 # limitations under the License.
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax.v2 import config
 from aqt.jax.v2.examples import flax_e2e_model
 import aqt.jax.v2.numerics.fp8_numerics as numerics
 import jax
@@ -141,7 +142,7 @@ class MyTest(parameterized.TestCase):
         ),
     }
 
-    aqt_cfg = numerics.config_fwd_fp8(fwd_bits)
+    aqt_cfg = config.config_fwd_fp8(fwd_bits)
     state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
 
     _, train_loss, _ = flax_e2e_model.train_epoch(

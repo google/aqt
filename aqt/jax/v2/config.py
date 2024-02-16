@@ -20,6 +20,7 @@ from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import fp8_numerics
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
@@ -630,4 +631,24 @@ def config_v4(
   )
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
 
+  return cfg
+
+
+def config_fwd_fp8(fwd_bits: str = 'e4m3') -> DotGeneral:
+  """Configs for FP8 forward pass."""
+  assert (
+      fwd_bits in fp8_numerics.FP8_DTYPE.keys()
+  ), 'FP8 only supports 4 or 5 exponent bits'
+  exponent_bits, mantissa_bits = int(fwd_bits[1]), int(fwd_bits[3])
+  cfg = config_v4(fwd_bits=8, dlhs_bits=None, drhs_bits=None)
+  effective_numerics = fp8_numerics.Fp8Numerics(
+      exponent_bits=exponent_bits,
+      mantissa_bits=mantissa_bits,
+      dtype=fp8_numerics.FP8_DTYPE[fwd_bits],
+      noise_fn=None,
+  )
+  set_fwd_numerics(cfg, effective_numerics)
+  set_accumulator_dtype(cfg, jnp.float32, None, None)
+  set_stochastic_rounding(cfg, False, False, 'jax.uniform')
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg

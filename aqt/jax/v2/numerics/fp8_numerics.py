@@ -14,7 +14,6 @@
 """Numerics for fp8."""
 
 from typing import Any, Optional
-from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -84,21 +83,3 @@ def round_to_nearest_even(x: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
   x = jax.lax.bitcast_convert_type(x, jnp.uint8)
   x = jax.lax.bitcast_convert_type(x, dtype)
   return x.astype(original_dtype)
-
-
-def config_fwd_fp8(fwd_bits: str = 'e4m3') -> config.DotGeneral:
-  """Configs for FP8 forward pass."""
-  assert fwd_bits in FP8_DTYPE.keys(), 'FP8 only supports 4 or 5 exponent bits'
-  exponent_bits, mantissa_bits = int(fwd_bits[1]), int(fwd_bits[3])
-  cfg = config.config_v4(fwd_bits=8, dlhs_bits=None, drhs_bits=None)
-  fp8_numerics = Fp8Numerics(
-      exponent_bits=exponent_bits,
-      mantissa_bits=mantissa_bits,
-      dtype=FP8_DTYPE[fwd_bits],
-      noise_fn=None,
-  )
-  config.set_fwd_numerics(cfg, fp8_numerics)
-  config.set_accumulator_dtype(cfg, jnp.float32, None, None)
-  config.set_stochastic_rounding(cfg, False, False, 'jax.uniform')
-  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
-  return cfg

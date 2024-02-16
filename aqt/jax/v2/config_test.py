@@ -17,7 +17,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
-from aqt.jax.v2.numerics import fp8_numerics
 import jax.numpy as jnp
 
 
@@ -312,7 +311,7 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_drhs'))"""
-    utils.test_pprint_eq(fp8_numerics.config_fwd_fp8(), expected_cfg)
+    utils.test_pprint_eq(config.config_fwd_fp8(), expected_cfg)
 
 if __name__ == '__main__':
   absltest.main()
