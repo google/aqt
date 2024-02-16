@@ -254,6 +254,15 @@ def _qtensor_dot_general(
           scale, dimension_numbers, lhs_qt.shape
       )
 
+  if jax.local_devices()[0].platform == 'cpu':
+    # lax.dot_general(int4, int4) is illegal on cpu.
+    # TODO(lew): Remove this platform check once
+    # https://github.com/google/jax/issues/19682 is fixed.
+    if lhs_qin.dtype == jnp.int4:
+      lhs_qin = lhs_qin.astype(jnp.int8)
+    if rhs_qin.dtype == jnp.int4:
+      rhs_qin = rhs_qin.astype(jnp.int8)
+
   out = lax.dot_general(
       lhs_qin,
       rhs_qin,

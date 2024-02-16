@@ -13,6 +13,7 @@
 # limitations under the License.
 """Base abstract class for all numerics."""
 import abc
+import jax.numpy as jnp
 
 
 class AqtNumerics(abc.ABC):
@@ -22,7 +23,7 @@ class AqtNumerics(abc.ABC):
   # it in test. Remove and leave only get_dtype(
 
   @abc.abstractmethod
-  def get_dtype(self):
+  def get_dtype(self) -> jnp.dtype:
     pass
 
   @abc.abstractmethod

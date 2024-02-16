@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for int8, int4, binary and other integer types."""
 
-from typing import Any, Optional
+from typing import Optional
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -34,7 +34,7 @@ class IntNumerics(numerics.AqtNumerics):
   clip_gradient: bool
   round: bool
   noise_fn: Optional[stochastic_rounding.NoiseFn]
-  dtype: Optional[Any] = None
+  dtype: jnp.dtype
 
   # pylint: disable=line-too-long
   # Verifying the correctness of these functions amounts to verifying this table:
@@ -73,7 +73,8 @@ class IntNumerics(numerics.AqtNumerics):
       fwd_clip_bound -= 0.5
     return fwd_clip_bound
 
-  def get_dtype(self):
+  def get_dtype(self) -> jnp.dtype:
+    # assert self.dtype is not None, 'TODO, pytype should catch that.'
     return self.dtype
 
   def vjp_fwd(self, x, context):

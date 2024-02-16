@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for fp8."""
 
-from typing import Any, Literal, Optional, TypeAlias
+from typing import Literal, Optional, TypeAlias
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -29,7 +29,7 @@ fp8_map = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 
-  dtype: Any
+  dtype: jnp.dtype
   exponent_bits: int = 4
   mantissa_bits: int = 3
   noise_fn: Optional[stochastic_rounding.NoiseFn] = None
@@ -37,7 +37,8 @@ class Fp8Numerics(numerics.AqtNumerics):
   def _get_edge_of_last_fp8_bucket(self):
     return jnp.finfo(self.dtype).max.astype(jnp.bfloat16)
 
-  def get_dtype(self):
+  def get_dtype(self) -> jnp.dtype:
+    # assert self.dtype is not None, 'TODO, pytype should catch that.'
     return self.dtype
 
   def abs_val_mapped_to(self):
