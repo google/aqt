@@ -23,6 +23,7 @@ from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2.numerics import int_numerics
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -52,6 +53,7 @@ class Freezer(nn.Module):
   quant_mode: QuantMode
   q_shape: Iterable[int]
   q_dtype: jnp.dtype
+  q_bits: int
   q_init: nn.initializers.Initializer
   s_shape: Iterable[int]
   s_init: nn.initializers.Initializer
@@ -70,6 +72,9 @@ class Freezer(nn.Module):
       # but we are unsure how this would complicate the init function,
       # which could potentially be used by adding metadata such as
       # sharding axises, etc.
+      # TODO(jianlijianli): Remove this when loading int4 is allowed.
+      if self.q_bits == 4:
+        q_dtype = jnp.int8
       self.qvalue = self.variable(collection, 'value', q_init, q_shape, q_dtype)
       self.scale_t = self.variable(collection, 'scale', s_init, s_shape)
 
@@ -79,12 +84,17 @@ class Freezer(nn.Module):
     elif self.quant_mode == QuantMode.CONVERT:
       return None
     elif self.quant_mode == QuantMode.SERVE:
-      return aqt_tensor.QTensor(
+      qt = aqt_tensor.QTensor(
           self.qvalue.value,
           scale=None,
           scale_t=[self.scale_t.value],
           dequant_dtype=None,  # Rely on dg output dtype for dequant
       )
+      # TODO(jianlijianli): Remove this when loading int4 is allowed.
+      if self.q_bits == 4:
+        return qt.qvalue_astype(jnp.int4)
+      else:
+        return qt
     else:
       assert False, 'Unknown quant mode.'
 
@@ -92,7 +102,8 @@ class Freezer(nn.Module):
     if self.quant_mode == QuantMode.TRAIN:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
-      self.qvalue.value = inputs.qvalue
+      # TODO(jianlijianli): Remove cast when loading int4 is allowed.
+      self.qvalue.value = inputs.qvalue.astype(self.q_dtype)
       assert inputs.scale_t is not None and len(inputs.scale_t) == 1
       self.scale_t.value = inputs.scale_t[0]
     elif self.quant_mode == QuantMode.SERVE:
@@ -160,11 +171,17 @@ class AqtDotGeneral(nn.Module):
     rhs_qm = self.rhs_quant_mode
     lhs_qm = self.lhs_quant_mode
 
+    def _get_bits(numerics) -> int:
+      if isinstance(numerics, int_numerics.IntNumerics):
+        return numerics.bits
+      return 8
+
     lhs_freezer = Freezer(
         name=self.lhs_var_name,
         quant_mode=lhs_qm,
         q_shape=lhs_shape,
         q_dtype=cfg.fwd.lhs.quantizer.numerics.get_dtype(),
+        q_bits=_get_bits(cfg.fwd.lhs.quantizer.numerics),
         q_init=self.lhs_init,
         s_shape=lhs_scale_shape,
         s_init=self.lhs_scale_init,
@@ -176,6 +193,7 @@ class AqtDotGeneral(nn.Module):
         quant_mode=rhs_qm,
         q_shape=rhs_shape,
         q_dtype=cfg.fwd.rhs.quantizer.numerics.get_dtype(),
+        q_bits=_get_bits(cfg.fwd.rhs.quantizer.numerics),
         q_init=self.rhs_init,
         s_shape=rhs_scale_shape,
         s_init=self.rhs_scale_init,

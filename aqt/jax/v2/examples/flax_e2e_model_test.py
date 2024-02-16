@@ -112,7 +112,8 @@ class MnistTest(parameterized.TestCase):
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
-    expected_dtype = config.infer_dtype_from_bits(bits)
+    # TODO(jianlijianli): Change 4bit to jnp.int4 when loading int4 is ready.
+    expected_dtype = jnp.int8
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
