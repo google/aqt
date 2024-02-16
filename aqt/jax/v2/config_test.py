@@ -17,6 +17,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import fp8_numerics
 import jax.numpy as jnp
 
 
@@ -237,6 +238,81 @@ class AqtConfigTest(parameterized.TestCase):
                               jax_scope_name='aqt_drhs'))"""
     utils.test_pprint_eq(config.config_v4(), expected_cfg_str)
 
+  def test_config_fwd_fp8(self):
+    expected_cfg = """DotGeneral(fwd=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=Fp8Numerics(dtype=<class 'jax.numpy.float8_e4m3fn'>,
+                                                                                 exponent_bits=4,
+                                                                                 mantissa_bits=3,
+                                                                                 noise_fn=None),
+                                                            calib_shared_axes=None,
+                                                            scale_stop_grad=True,
+                                                            calibration=AbsMaxCalibration(),
+                                                            po2_scale=False,
+                                                            context=Context(key=None,
+                                                                            train_step=None)),
+                                        use_fwd_quant=None,
+                                        dequant_mode=<DequantMode.OUTPUT: 1>),
+                             rhs=Tensor(quantizer=Quantizer(numerics=Fp8Numerics(dtype=<class 'jax.numpy.float8_e4m3fn'>,
+                                                                                 exponent_bits=4,
+                                                                                 mantissa_bits=3,
+                                                                                 noise_fn=None),
+                                                            calib_shared_axes=None,
+                                                            scale_stop_grad=True,
+                                                            calibration=AbsMaxCalibration(),
+                                                            po2_scale=False,
+                                                            context=Context(key=None,
+                                                                            train_step=None)),
+                                        use_fwd_quant=None,
+                                        dequant_mode=<DequantMode.OUTPUT: 1>),
+                             dg_accumulator_dtype=<class 'jax.numpy.float32'>,
+                             local_aqt=None,
+                             jax_scope_name='aqt_fwd'),
+           dlhs=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=NoNumerics(noise_fn=None,
+                                                                                 dtype=None),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=None,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              rhs=Tensor(quantizer=Quantizer(numerics=NoNumerics(noise_fn=None,
+                                                                                 dtype=None),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=False,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              dg_accumulator_dtype=None,
+                              local_aqt=None,
+                              jax_scope_name='aqt_dlhs'),
+           drhs=DotGeneralRaw(lhs=Tensor(quantizer=Quantizer(numerics=NoNumerics(noise_fn=None,
+                                                                                 dtype=None),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=None,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              rhs=Tensor(quantizer=Quantizer(numerics=NoNumerics(noise_fn=None,
+                                                                                 dtype=None),
+                                                             calib_shared_axes=None,
+                                                             scale_stop_grad=True,
+                                                             calibration=AbsMaxCalibration(),
+                                                             po2_scale=False,
+                                                             context=Context(key=None,
+                                                                             train_step=None)),
+                                         use_fwd_quant=False,
+                                         dequant_mode=<DequantMode.OUTPUT: 1>),
+                              dg_accumulator_dtype=None,
+                              local_aqt=None,
+                              jax_scope_name='aqt_drhs'))"""
+    utils.test_pprint_eq(fp8_numerics.config_fwd_fp8(), expected_cfg)
 
 if __name__ == '__main__':
   absltest.main()
