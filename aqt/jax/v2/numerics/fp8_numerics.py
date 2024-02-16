@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for fp8."""
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional, TypeAlias
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -21,7 +21,8 @@ import jax
 import jax.numpy as jnp
 
 
-FP8_DTYPE = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
+FP8Dtype: TypeAlias = Literal['e4m3', 'e5m2']
+fp8_map = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 
 
 @utils.flax_slots_dataclass

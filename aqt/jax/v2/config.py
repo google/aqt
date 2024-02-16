@@ -634,17 +634,17 @@ def config_v4(
   return cfg
 
 
-def config_fwd_fp8(fwd_bits: str = 'e4m3') -> DotGeneral:
+def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
   """Configs for FP8 forward pass."""
   assert (
-      fwd_bits in fp8_numerics.FP8_DTYPE.keys()
+      fwd_bits in fp8_numerics.fp8_map.keys()
   ), 'FP8 only supports 4 or 5 exponent bits'
   exponent_bits, mantissa_bits = int(fwd_bits[1]), int(fwd_bits[3])
   cfg = config_v4(fwd_bits=8, dlhs_bits=None, drhs_bits=None)
   effective_numerics = fp8_numerics.Fp8Numerics(
       exponent_bits=exponent_bits,
       mantissa_bits=mantissa_bits,
-      dtype=fp8_numerics.FP8_DTYPE[fwd_bits],
+      dtype=fp8_numerics.fp8_map[fwd_bits],
       noise_fn=None,
   )
   set_fwd_numerics(cfg, effective_numerics)
