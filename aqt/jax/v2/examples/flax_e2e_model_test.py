@@ -18,7 +18,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2.examples import flax_e2e_model
-from aqt.jax.v2.flax import aqt_flax
 import jax
 import jax.numpy as jnp
 
@@ -45,7 +44,7 @@ class MnistTest(parameterized.TestCase):
       ),
   ])
   def test_mnist_training(self, configs, bits):
-    aqt_cfg = aqt_flax.config_v4(**configs)
+    aqt_cfg = config.config_v4(**configs)
     target_loss = {
         8: {
             "cpu": [3.931982755661010742187500000000],
@@ -113,7 +112,7 @@ class MnistTest(parameterized.TestCase):
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
-    expected_dtype = aqt_flax.dtype_from_bits(bits)
+    expected_dtype = config.infer_dtype_from_bits(bits)
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {

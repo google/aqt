@@ -17,7 +17,6 @@ from typing import Any, Optional
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
-from aqt.jax.v2.flax import aqt_flax
 from aqt.jax.v2.numerics import numerics
 import jax
 import jax.numpy as jnp
@@ -91,7 +90,7 @@ def config_fwd_fp8(fwd_bits: str = 'e4m3') -> config.DotGeneral:
   """Configs for FP8 forward pass."""
   assert fwd_bits in FP8_DTYPE.keys(), 'FP8 only supports 4 or 5 exponent bits'
   exponent_bits, mantissa_bits = int(fwd_bits[1]), int(fwd_bits[3])
-  cfg = aqt_flax.config_v4(fwd_bits=8, dlhs_bits=None, drhs_bits=None)
+  cfg = config.config_v4(fwd_bits=8, dlhs_bits=None, drhs_bits=None)
   fp8_numerics = Fp8Numerics(
       exponent_bits=exponent_bits,
       mantissa_bits=mantissa_bits,

@@ -16,7 +16,7 @@
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from aqt.jax.v2.flax import aqt_flax
+from aqt.jax.v2 import config
 from aqt.jax.v2.pax import pax_base_ops
 import jax
 import jax.numpy as jnp
@@ -26,7 +26,7 @@ class PaxBaseOpsTest(parameterized.TestCase):
 
   @parameterized.parameters(
       dict(cfg=None),
-      dict(cfg=aqt_flax.config_v4()),
+      dict(cfg=config.config_v4()),
   )
   def test_einsum_is_quantized(self, cfg):
     prng_key = jax.random.PRNGKey(seed=123)

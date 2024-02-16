@@ -17,14 +17,13 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
-from aqt.jax.v2.flax import aqt_flax
 import jax.numpy as jnp
 
 
 class AqtConfigTest(parameterized.TestCase):
 
   def test_config_v4(self):
-    cfg = aqt_flax.config_v4(
+    cfg = config.config_v4(
         fwd_bits=8,
         dlhs_bits=7,
         drhs_bits=6,
@@ -236,7 +235,7 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_drhs'))"""
-    utils.test_pprint_eq(aqt_flax.config_v4(), expected_cfg_str)
+    utils.test_pprint_eq(config.config_v4(), expected_cfg_str)
 
 
 if __name__ == '__main__':

@@ -71,16 +71,16 @@ class AqtFlaxTest(parameterized.TestCase):
       return out
 
     out_float = test(Model, None)
-    out_int8 = test(Model, aqt_flax.config_v4())
+    out_int8 = test(Model, config.config_v4())
     out_int8_lqt = test(
-        functools.partial(Model, lhs_qt_external=True), aqt_flax.config_v4()
+        functools.partial(Model, lhs_qt_external=True), config.config_v4()
     )
     out_int8_rqt = test(
-        functools.partial(Model, rhs_qt_external=True), aqt_flax.config_v4()
+        functools.partial(Model, rhs_qt_external=True), config.config_v4()
     )
     out_int8_qt = test(
         functools.partial(Model, lhs_qt_external=True, rhs_qt_external=True),
-        aqt_flax.config_v4(),
+        config.config_v4(),
     )
 
     assert (out_int8 == out_int8_lqt).all(), 'lhs external qt failed'
