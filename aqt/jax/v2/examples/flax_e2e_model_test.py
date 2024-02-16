@@ -113,6 +113,9 @@ class MnistTest(parameterized.TestCase):
 
     dtype = jnp.dtype
     expected_dtype = config.infer_dtype_from_bits(bits)
+    # TODO(b/325626080): Remove the optional upcasting.
+    if expected_dtype == jnp.int4:
+      expected_dtype = jnp.int8
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
