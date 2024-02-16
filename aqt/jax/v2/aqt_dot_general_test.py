@@ -14,6 +14,9 @@
 
 """Tests for dot_general."""
 import copy
+import functools
+from typing import Callable
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_quantizer
@@ -100,6 +103,41 @@ def test_eq(name, a, b):
     assert False
 
 
+# Test exact equalities.
+def _check_result_eq(dgs, *, lhs, rhs, gra):
+  good_lr, good_gl, good_gr = None, None, None
+  for name, dg, options in dgs:
+    # Default settings:
+    if "test_gradient" not in options:
+      options["test_gradient"] = True
+    if "mult" not in options:
+      options["mult"] = (1.0, 1.0, 1.0)
+    if "check_fwd_lhs_tricky_clip_and_round" not in options:
+      options["check_fwd_lhs_tricky_clip_and_round"] = False
+
+    lrf = dg(lhs, rhs)
+    lr, backprop = jax.vjp(dg, lhs, rhs)
+
+    gl, gr = backprop(gra) if options["test_gradient"] else (None, None)
+
+    if options["check_fwd_lhs_tricky_clip_and_round"]:
+      # Test that all the expected were zero anyway
+      where_zero_gradient_expected = lhs < 0
+      assert (gl[where_zero_gradient_expected] == 0.0).all()
+
+    good_lr = lr if good_lr is None else good_lr
+    good_gl = gl if good_gl is None else good_gl
+    good_gr = gr if good_gr is None else good_gr
+
+    test_eq(f"{name}: lr vs lrf", lr, lrf)
+
+    lr_mult, gl_mult, gr_mult = options["mult"]
+    test_eq(f"{name}: lr", good_lr, lr / lr_mult)  # forward pass
+    if options["test_gradient"]:
+      test_eq(f"{name}: gl", good_gl, gl / gl_mult)  # backward pass  # pytype: disable=unsupported-operands
+      test_eq(f"{name}: gr", good_gr, gr / gr_mult)  # backward pass  # pytype: disable=unsupported-operands
+
+
 def fqt_param_dict(s, use_fwd_quant, **kwargs):
   return dict(
       cfg=config.fully_quantized(
@@ -108,6 +146,197 @@ def fqt_param_dict(s, use_fwd_quant, **kwargs):
           **kwargs,
       ),
       seed=s,
+  )
+
+
+class _TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
+  # Needed because int8 casting would do additional clip and round.
+  dtype: jnp.dtype | None = None
+
+  def get_dtype(self):
+    return self.dtype
+
+  def abs_val_mapped_to(self) -> jnp.ndarray:
+    return jnp.array(1.0)
+
+  def fwd(self, x, context):
+    del context
+    return jax.lax.round(x, jax.lax.RoundingMethod.TO_NEAREST_EVEN)
+
+  def vjp_fwd(self, x, context):
+    res = (x,)
+    return self.fwd(x, context), res
+
+  def vjp_bwd(self, res, grad):
+    (x,) = res
+    ret = grad * (x >= 0)
+    return (ret, None)
+
+
+def _modify_cfg(
+    readonly_cfg: config.DotGeneral,
+    *,
+    lhs_dequant_mode: config.DequantMode = config.DequantMode.OUTPUT,
+    rhs_dequant_mode: config.DequantMode = config.DequantMode.OUTPUT,
+    use_fwd_quant: bool | None = None,
+    fwd_lhs_tricky_clip_and_round: bool = False,
+    local_aqt: config.LocalAqt | None = None,
+    clip_gradient: bool = False,
+) -> config.DotGeneral:
+  cfg = copy.deepcopy(readonly_cfg)
+  if fwd_lhs_tricky_clip_and_round:
+    # Tricky means that we have zero gradient on x < 0
+    cfg.fwd.lhs.quantizer.numerics = _TrickyNumerics()
+    cfg.fwd.dg_accumulator_dtype = None
+
+  # Setting po2_scale is ensuring that fake_quant and full dot_general
+  # have the same numerics when scales are power of two (po2).
+  # We are passing dims to config so that we can reuse it in fake_quant.
+  # Power-of-2 scales allow FQ and AQT to be exactly the same.
+  def _apply_po2_scale(c):
+    c.lhs.quantizer.po2_scale = True
+    c.rhs.quantizer.po2_scale = True
+
+  def _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode):
+    c.lhs.dequant_mode = lhs_dequant_mode
+    c.rhs.dequant_mode = rhs_dequant_mode
+
+  def _disable_quant_types(c, on_lhs=True, on_rhs=True):
+    if on_lhs:
+      c.lhs.quantizer.numerics = c.lhs.quantizer.numerics.replace(dtype=None)
+    if on_rhs:
+      c.rhs.quantizer.numerics = c.rhs.quantizer.numerics.replace(dtype=None)
+    if on_lhs or on_rhs:
+      c.dg_accumulator_dtype = None
+
+  disable_lhs_quant = lhs_dequant_mode == config.DequantMode.THIS_INPUT
+  disable_rhs_quant = rhs_dequant_mode == config.DequantMode.THIS_INPUT
+  for c in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+    _apply_po2_scale(c)
+    _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode)
+    _disable_quant_types(c, disable_lhs_quant, disable_rhs_quant)
+
+  if use_fwd_quant is not None:
+    # If we disable all rounding, we are just testing whether the scales are
+    # correct. We don't even need to disable clipping and we are testing
+    # that the scales are not too large.
+    def disable_quant(c):
+      _disable_quant_types(c)
+      if isinstance(c.lhs.quantizer.numerics, int_numerics.IntNumerics):
+        c.lhs.quantizer.numerics = c.lhs.quantizer.numerics.replace(round=False)
+      if isinstance(c.rhs.quantizer.numerics, int_numerics.IntNumerics):
+        c.rhs.quantizer.numerics = c.rhs.quantizer.numerics.replace(round=False)
+      # c.lhs.quantizer.numerics.clip = False
+      # c.rhs.quantizer.numerics.clip = False
+
+    disable_quant(cfg.fwd)
+    disable_quant(cfg.dlhs)
+    disable_quant(cfg.drhs)
+    lhs_quant = not isinstance(
+        cfg.fwd.lhs.quantizer.numerics, no_numerics.NoNumerics
+    )
+    rhs_quant = not isinstance(
+        cfg.fwd.rhs.quantizer.numerics, no_numerics.NoNumerics
+    )
+    if lhs_quant:
+      cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+    if rhs_quant:
+      cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+  if local_aqt is not None:
+    # Currently we are not supporting local_aqt in fwd pass
+    # cfg.fwd.local_aqt = local_aqt
+    cfg.dlhs.local_aqt = local_aqt
+    cfg.drhs.local_aqt = local_aqt
+
+    # When using abs-max scaling, this should be a no-op.
+  if isinstance(cfg.fwd.lhs.quantizer.numerics, int_numerics.IntNumerics):
+    cfg.fwd.lhs.quantizer.numerics = cfg.fwd.lhs.quantizer.numerics.replace(
+        clip_gradient=clip_gradient
+    )
+  if isinstance(cfg.fwd.rhs.quantizer.numerics, int_numerics.IntNumerics):
+    cfg.fwd.rhs.quantizer.numerics = cfg.fwd.rhs.quantizer.numerics.replace(
+        clip_gradient=clip_gradient
+    )
+
+  return cfg
+
+
+def _aqt_dg_full_lr_diff(
+    lhs_dequant_mode: config.DequantMode,
+    rhs_dequant_mode: config.DequantMode,
+    use_fwd_quant: bool | None = None,
+    fwd_lhs_tricky_clip_and_round: bool = False,
+    local_aqt: config.LocalAqt | None = None,
+    *,
+    readonly_cfg: config.DotGeneral,
+    dims: jax.lax.DotDimensionNumbers,
+    clip_gradient: bool = False,
+) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+  cfg = _modify_cfg(
+      readonly_cfg,
+      lhs_dequant_mode=lhs_dequant_mode,
+      rhs_dequant_mode=rhs_dequant_mode,
+      use_fwd_quant=use_fwd_quant,
+      fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
+      local_aqt=local_aqt,
+      clip_gradient=clip_gradient,
+  )
+  cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
+  dg = aqt.make_dot_general(cfg)
+  return lambda lhs, rhs: dg(lhs, rhs, dims)
+
+
+def _aqt_dg_full(
+    dequant_mode: config.DequantMode,
+    use_fwd_quant: bool | None = None,
+    fwd_lhs_tricky_clip_and_round: bool = False,
+    local_aqt: config.LocalAqt | None = None,
+    *,
+    readonly_cfg: config.DotGeneral,
+    dims: jax.lax.DotDimensionNumbers,
+    clip_gradient: bool = False,
+) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+  return _aqt_dg_full_lr_diff(
+      dequant_mode,
+      dequant_mode,
+      use_fwd_quant,
+      fwd_lhs_tricky_clip_and_round,
+      local_aqt,
+      readonly_cfg=readonly_cfg,
+      dims=dims,
+      clip_gradient=clip_gradient
+  )
+
+
+def _aqt_dg_raw_lr_diff(
+    lhs_dequant_mode: config.DequantMode,
+    rhs_dequant_mode: config.DequantMode,
+    *,
+    readonly_cfg: config.DotGeneral,
+    dims: jax.lax.DotDimensionNumbers,
+) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+  cfg = _modify_cfg(
+      readonly_cfg,
+      lhs_dequant_mode=lhs_dequant_mode,
+      rhs_dequant_mode=rhs_dequant_mode,
+  )
+  cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
+  return lambda lhs, rhs: aqt._dot_general_raw(
+      lhs, rhs, None, None, dims, cfg=cfg.fwd
+  )[0]
+
+
+def _aqt_dg_raw(
+    dequant_mode: config.DequantMode,
+    *,
+    readonly_cfg: config.DotGeneral,
+    dims: jax.lax.DotDimensionNumbers,
+) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+  return _aqt_dg_raw_lr_diff(
+      dequant_mode,
+      dequant_mode,
+      readonly_cfg=readonly_cfg,
+      dims=dims,
   )
 
 
@@ -277,153 +506,24 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     readonly_cfg = cfg
     del cfg
 
-    def modify_cfg(
-        *,
-        dequant_mode=config.DequantMode.OUTPUT,
-        use_fwd_quant=None,
-        fwd_lhs_tricky_clip_and_round=False,
-        local_aqt=None,
-        clip_gradient=False,
-    ):
-      cfg = copy.deepcopy(readonly_cfg)
-      if fwd_lhs_tricky_clip_and_round:
-        # Tricky means that we have zero gradient on x < 0
-        class TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
-          # Needed because int8 casting would do additional clip and round.
-          dtype = None
-
-          def get_dtype(self):
-            return self.dtype
-
-          def abs_val_mapped_to(self) -> jnp.ndarray:
-            return jnp.array(1.0)
-
-          def fwd(self, x, context):
-            del context
-            return jax.lax.round(x, jax.lax.RoundingMethod.TO_NEAREST_EVEN)
-            # return x
-
-          def vjp_fwd(self, x, context):
-            res = (x,)
-            return self.fwd(x, context), res
-
-          def vjp_bwd(self, res, grad):
-            (x,) = res
-            ret = grad * (x >= 0)
-            return (ret, None)
-
-        cfg.fwd.lhs.quantizer.numerics = TrickyNumerics()
-        cfg.fwd.dg_accumulator_dtype = None
-
-      # Setting po2_scale is ensuring that fake_quant and full dot_general
-      # have the same numerics when scales are power of two (po2).
-      # We are passing dims to config so that we can reuse it in fake_quant.
-      # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      cfg.fwd.lhs.quantizer.po2_scale = True
-      cfg.fwd.rhs.quantizer.po2_scale = True
-
-      cfg.dlhs.lhs.quantizer.po2_scale = True
-      cfg.dlhs.rhs.quantizer.po2_scale = True
-
-      cfg.drhs.lhs.quantizer.po2_scale = True
-      cfg.drhs.rhs.quantizer.po2_scale = True
-
-      cfg.fwd.lhs.dequant_mode = dequant_mode
-      cfg.fwd.rhs.dequant_mode = dequant_mode
-
-      cfg.dlhs.lhs.dequant_mode = dequant_mode
-      cfg.dlhs.rhs.dequant_mode = dequant_mode
-
-      cfg.drhs.lhs.dequant_mode = dequant_mode
-      cfg.drhs.rhs.dequant_mode = dequant_mode
-
-      def disable_quant_types(c):
-        c.lhs.quantizer.numerics = c.lhs.quantizer.numerics.replace(dtype=None)
-        c.rhs.quantizer.numerics = c.rhs.quantizer.numerics.replace(dtype=None)
-        c.dg_accumulator_dtype = None
-
-      if dequant_mode == config.DequantMode.THIS_INPUT:
-        disable_quant_types(cfg.fwd)
-        disable_quant_types(cfg.dlhs)
-        disable_quant_types(cfg.drhs)
-
-      if use_fwd_quant is not None:
-        # If we disable all rounding, we are just testing whether the scales are
-        # correct. We don't even need to disable clipping and we are testing
-        # that the scales are not too large.
-        def disable_quant(c):
-          disable_quant_types(c)
-          if isinstance(c.lhs.quantizer.numerics, int_numerics.IntNumerics):
-            c.lhs.quantizer.numerics = c.lhs.quantizer.numerics.replace(
-                round=False
-            )
-          if isinstance(c.rhs.quantizer.numerics, int_numerics.IntNumerics):
-            c.rhs.quantizer.numerics = c.rhs.quantizer.numerics.replace(
-                round=False
-            )
-          # c.lhs.quantizer.numerics.clip = False
-          # c.rhs.quantizer.numerics.clip = False
-
-        disable_quant(cfg.fwd)
-        disable_quant(cfg.dlhs)
-        disable_quant(cfg.drhs)
-        lhs_quant = not isinstance(
-            cfg.fwd.lhs.quantizer.numerics, no_numerics.NoNumerics
-        )
-        rhs_quant = not isinstance(
-            cfg.fwd.rhs.quantizer.numerics, no_numerics.NoNumerics
-        )
-        if lhs_quant:
-          cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
-        if rhs_quant:
-          cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
-      if local_aqt is not None:
-        # Currently we are not supporting local_aqt in fwd pass
-        # cfg.fwd.local_aqt = local_aqt
-        cfg.dlhs.local_aqt = local_aqt
-        cfg.drhs.local_aqt = local_aqt
-
-      # When using abs-max scaling, this should be a no-op.
-      if isinstance(cfg.fwd.lhs.quantizer.numerics, int_numerics.IntNumerics):
-        cfg.fwd.lhs.quantizer.numerics = cfg.fwd.lhs.quantizer.numerics.replace(
-            clip_gradient=clip_gradient
-        )
-      if isinstance(cfg.fwd.rhs.quantizer.numerics, int_numerics.IntNumerics):
-        cfg.fwd.rhs.quantizer.numerics = cfg.fwd.rhs.quantizer.numerics.replace(
-            clip_gradient=clip_gradient
-        )
-
-      return cfg
-
-    # test dot_general
     lhs = rand_unif(lhs_shape, lhs_maxval, seed, dtype)
     rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
     gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
 
-    def aqt_dg_full(
-        dequant_mode,
-        use_fwd_quant=None,
-        fwd_lhs_tricky_clip_and_round=False,
-        local_aqt=None,
-    ):
-      cfg = modify_cfg(
-          dequant_mode=dequant_mode,
-          use_fwd_quant=use_fwd_quant,
-          fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
-          local_aqt=local_aqt,
-          clip_gradient=clip_gradient,
-      )
-      cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-      dg = aqt.make_dot_general(cfg)
-      return lambda lhs, rhs: dg(lhs, rhs, dims)
+    # Prepare utility functions for test.
+    aqt_dg_full = functools.partial(
+        _aqt_dg_full,
+        readonly_cfg=readonly_cfg,
+        dims=dims,
+        clip_gradient=clip_gradient,
+    )
+    aqt_dg_raw = functools.partial(
+        _aqt_dg_raw, readonly_cfg=readonly_cfg, dims=dims
+    )
+    modify_cfg = functools.partial(_modify_cfg, readonly_cfg=readonly_cfg)
+    check = functools.partial(_check_result_eq, lhs=lhs, rhs=rhs, gra=gra)
 
-    def aqt_dg_raw(dequant_mode):
-      cfg = modify_cfg(dequant_mode=dequant_mode)
-      cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-      return lambda lhs, rhs: aqt._dot_general_raw(
-          lhs, rhs, None, None, dims, cfg=cfg.fwd
-      )[0]
-
+    # Tests for dot_general.
     test_jaxpr_dtype(
         lambda: aqt_dg_full(config.DequantMode.OUTPUT)(lhs, rhs),
         [modify_cfg().fwd],
@@ -440,42 +540,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         [modify_cfg().dlhs, modify_cfg().drhs],
         gra.dtype,
     )
-
-    # Test exact equalities.
-    def check(dgs):
-      good_lr = None
-      good_gl = None
-      good_gr = None
-      for name, dg, options in dgs:
-        # Default settings:
-        if "test_gradient" not in options:
-          options["test_gradient"] = True
-        if "mult" not in options:
-          options["mult"] = (1.0, 1.0, 1.0)
-        if "check_fwd_lhs_tricky_clip_and_round" not in options:
-          options["check_fwd_lhs_tricky_clip_and_round"] = False
-
-        lrf = dg(lhs, rhs)
-        lr, backprop = jax.vjp(dg, lhs, rhs)
-
-        gl, gr = backprop(gra) if options["test_gradient"] else (None, None)
-
-        if options["check_fwd_lhs_tricky_clip_and_round"]:
-          # Test that all the expected were zero anyway
-          where_zero_gradient_expected = lhs < 0
-          assert (gl[where_zero_gradient_expected] == 0.0).all()
-
-        good_lr = lr if good_lr is None else good_lr
-        good_gl = gl if good_gl is None else good_gl
-        good_gr = gr if good_gr is None else good_gr
-
-        test_eq(f"{name}: lr vs lrf", lr, lrf)
-
-        lr_mult, gl_mult, gr_mult = options["mult"]
-        test_eq(f"{name}: lr", good_lr, lr / lr_mult)  # forward pass
-        if options["test_gradient"]:
-          test_eq(f"{name}: gl", good_gl, gl / gl_mult)  # backward pass  # pytype: disable=unsupported-operands
-          test_eq(f"{name}: gr", good_gr, gr / gr_mult)  # backward pass  # pytype: disable=unsupported-operands
 
     check([
         ("default    ", aqt_dg_full(config.DequantMode.OUTPUT), dict()),
