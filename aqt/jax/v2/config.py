@@ -29,10 +29,8 @@ import jax.numpy as jnp
 
 
 DType = Any
-
-
 ClipAndRoundFn = Callable[[jnp.ndarray, aqt_quantizer.Context], jnp.ndarray]
-
+dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
 # TODO(lew): move config to aqt_tensor.py and use aqt_tensor.QTensor
 QTensor = Any
 
@@ -105,6 +103,31 @@ class DotGeneral:
 # Functions below are auxiliary config attribute setters.
 
 
+def infer_dtype_from_bits(bits: int) -> jnp.dtype | None:
+  """Get the dtype for the number of bits provided.
+
+  Args:
+    bits: number of bits for the dtype.
+
+  Returns:
+    The corresponding container dtype for the number of bits provided.
+  """
+  if bits == 4:
+    # this branch should return jnp.int4 directly but
+    # lax.dot_general(int4, int4) is illegal on cpu.
+    # TODO(aqt): Remove this platform check once
+    # https://github.com/google/jax/issues/19682 is fixed.
+    if jax.local_devices()[0].platform != 'cpu':
+      return jnp.int4
+    else:
+      return jnp.int8
+  else:
+    if bits <= 8 and bits >= 2:
+      return jnp.int8
+    else:
+      return None
+
+
 def _split_key(key: Optional[jax.Array], num_splits: int):
   default = (None,) * num_splits
   return default if key is None else jax.random.split(key, num_splits)
@@ -143,9 +166,26 @@ def set_fwd_dequant_mode(
     cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
 
 
-def set_fwd_numerics(cfg, fwd_numerics: numerics.AqtNumerics):
-  cfg.fwd.lhs.quantizer.numerics = fwd_numerics
-  cfg.fwd.rhs.quantizer.numerics = fwd_numerics
+def set_numerics(
+    cfg: DotGeneralRaw,
+    lhs_numerics: numerics.AqtNumerics,
+    rhs_numerics: numerics.AqtNumerics,
+):
+  """Set numerics for DotGeneralRaw config."""
+  cfg.lhs.quantizer.numerics = lhs_numerics
+  cfg.rhs.quantizer.numerics = rhs_numerics
+  if (
+      lhs_numerics.get_dtype() in dtypes_allowed_for_int32_accum
+      and rhs_numerics.get_dtype() in dtypes_allowed_for_int32_accum
+  ):
+    cfg.dg_accumulator_dtype = jnp.int32
+  elif (
+      lhs_numerics.get_dtype() in fp8_numerics.fp8_map.values()
+      or rhs_numerics.get_dtype() in fp8_numerics.fp8_map.values()
+  ):
+    cfg.dg_accumulator_dtype = jnp.float32
+  else:
+    cfg.dg_accumulator_dtype = None
 
 
 def set_accumulator_dtype(
@@ -215,6 +255,49 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
   cfg.drhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
   cfg.dlhs.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
   cfg.dlhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+
+
+def set_bits(
+    cfg: DotGeneral,
+    fwd_lhs_bit: int | None | fp8_numerics.FP8Dtype,
+    fwd_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+    dlhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
+    dlhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+    drhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
+    drhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+) -> DotGeneral:
+  """Set quantization bits for dot_general config."""
+
+  def get_numerics(bits):
+    if bits is None:
+      effective_numerics = no_numerics.NoNumerics()
+    elif bits in fp8_numerics.fp8_map.keys():
+      exponent_bits, mantissa_bits = int(bits[1]), int(bits[3])
+      effective_numerics = fp8_numerics.Fp8Numerics(
+          exponent_bits=exponent_bits,
+          mantissa_bits=mantissa_bits,
+          dtype=fp8_numerics.fp8_map[bits],
+          noise_fn=None,
+      )
+    else:
+      pz = False if bits == 1 else True
+      dtype = infer_dtype_from_bits(bits) if pz else None
+      effective_numerics = int_numerics.IntNumerics(
+          bits=bits,
+          preserve_zero=pz,
+          preserve_max_val=False,
+          clip=True,
+          round=True,
+          noise_fn=None,
+          clip_gradient=False,  # Can be disabled when using abs-max scaling.
+          dtype=dtype,
+      )
+    return effective_numerics
+
+  set_numerics(cfg.fwd, get_numerics(fwd_lhs_bit), get_numerics(fwd_rhs_bit))
+  set_numerics(cfg.dlhs, get_numerics(dlhs_lhs_bit), get_numerics(dlhs_rhs_bit))
+  set_numerics(cfg.drhs, get_numerics(drhs_lhs_bit), get_numerics(drhs_rhs_bit))
+  return cfg
 
 
 ################################################################################
@@ -494,31 +577,6 @@ def config_v3(
   return cfg
 
 
-def infer_dtype_from_bits(bits: int) -> jnp.dtype | None:
-  """Get the dtype for the number of bits provided.
-
-  Args:
-    bits: number of bits for the dtype.
-
-  Returns:
-    The corresponding container dtype for the number of bits provided.
-  """
-  if bits == 4:
-    # this branch should return jnp.int4 directly but
-    # lax.dot_general(int4, int4) is illegal on cpu.
-    # TODO(aqt): Remove this platform check once
-    # https://github.com/google/jax/issues/19682 is fixed.
-    if jax.local_devices()[0].platform != 'cpu':
-      return jnp.int4
-    else:
-      return jnp.int8
-  else:
-    if bits <= 8 and bits >= 2:
-      return jnp.int8
-    else:
-      return None
-
-
 def config_v4(
     *,
     fwd_bits: Optional[int] = 8,
@@ -639,16 +697,16 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
   assert (
       fwd_bits in fp8_numerics.fp8_map.keys()
   ), 'FP8 only supports 4 or 5 exponent bits'
-  exponent_bits, mantissa_bits = int(fwd_bits[1]), int(fwd_bits[3])
   cfg = config_v4(fwd_bits=8, dlhs_bits=None, drhs_bits=None)
-  effective_numerics = fp8_numerics.Fp8Numerics(
-      exponent_bits=exponent_bits,
-      mantissa_bits=mantissa_bits,
-      dtype=fp8_numerics.fp8_map[fwd_bits],
-      noise_fn=None,
+  set_bits(
+      cfg,
+      fwd_lhs_bit=fwd_bits,
+      fwd_rhs_bit=fwd_bits,
+      dlhs_lhs_bit=None,
+      dlhs_rhs_bit=None,
+      drhs_lhs_bit=None,
+      drhs_rhs_bit=None,
   )
-  set_fwd_numerics(cfg, effective_numerics)
-  set_accumulator_dtype(cfg, jnp.float32, None, None)
   set_stochastic_rounding(cfg, False, False, 'jax.uniform')
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg

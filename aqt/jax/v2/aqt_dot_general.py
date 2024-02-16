@@ -235,10 +235,9 @@ def _qtensor_dot_general(
       ' be None to let lax.dot_general automatically decide it.'
   )
   if cfg.dg_accumulator_dtype == jnp.int32:
-    dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
     assert (
-        lhs_qin.dtype in dtypes_allowed_for_int32_accum
-        and rhs_qin.dtype in dtypes_allowed_for_int32_accum
+        lhs_qin.dtype in config.dtypes_allowed_for_int32_accum
+        and rhs_qin.dtype in config.dtypes_allowed_for_int32_accum
     ), dtype_ms
 
   dtypes_can_be_scaled = [jnp.bfloat16, jnp.float32, jnp.float64]
