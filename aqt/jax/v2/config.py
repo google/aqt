@@ -15,7 +15,7 @@
 
 import copy
 import enum
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional, TypeAlias, Union
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
@@ -27,12 +27,15 @@ from aqt.jax.v2.numerics import numerics
 import jax
 import jax.numpy as jnp
 
+SKIP = 'skip'
 
-DType = Any
+# Typing
 ClipAndRoundFn = Callable[[jnp.ndarray, aqt_quantizer.Context], jnp.ndarray]
 dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
 # TODO(lew): move config to aqt_tensor.py and use aqt_tensor.QTensor
 QTensor = Any
+# None often has special meaning. Use SKIP as optional
+SkipT: TypeAlias = Literal[SKIP]
 
 
 class DequantMode(enum.Enum):
@@ -73,7 +76,7 @@ class DotGeneralRaw:
 
   lhs: Tensor
   rhs: Tensor
-  dg_accumulator_dtype: Optional[DType] = utils.static_field()
+  dg_accumulator_dtype: Optional[jnp.dtype] = utils.static_field()
   local_aqt: Optional[LocalAqt] = utils.static_field()
   jax_scope_name: str = utils.static_field()
 
@@ -190,13 +193,16 @@ def set_numerics(
 
 def set_accumulator_dtype(
     cfg: DotGeneral,
-    fwd_dtype: Optional[DType],
-    dlhs_dtype: Optional[DType],
-    drhs_dtype: Optional[DType],
+    fwd_dtype: Union[jnp.dtype, None, SkipT],
+    dlhs_dtype: Union[jnp.dtype, None, SkipT],
+    drhs_dtype: Union[jnp.dtype, None, SkipT],
 ):
-  cfg.fwd.dg_accumulator_dtype = fwd_dtype
-  cfg.dlhs.dg_accumulator_dtype = dlhs_dtype
-  cfg.drhs.dg_accumulator_dtype = drhs_dtype
+  if fwd_dtype != SKIP:
+    cfg.fwd.dg_accumulator_dtype = fwd_dtype
+  if dlhs_dtype != SKIP:
+    cfg.dlhs.dg_accumulator_dtype = dlhs_dtype
+  if drhs_dtype != SKIP:
+    cfg.drhs.dg_accumulator_dtype = drhs_dtype
 
 
 def set_stochastic_rounding(
@@ -257,14 +263,39 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
   cfg.dlhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
 
 
+def set_local_aqt(
+    cfg: DotGeneral,
+    fwd_local_aqt: Union[SkipT, LocalAqt, None],
+    dlhs_local_aqt: Union[SkipT, LocalAqt, None],
+    drhs_local_aqt: Union[SkipT, LocalAqt, None],
+):
+  if fwd_local_aqt != SKIP:
+    cfg.fwd.local_aqt = fwd_local_aqt
+  if dlhs_local_aqt != SKIP:
+    cfg.dlhs.local_aqt = dlhs_local_aqt
+  if drhs_local_aqt != SKIP:
+    cfg.drhs.local_aqt = drhs_local_aqt
+
+
+def set_use_fwd_quant(
+    cfg: DotGeneral,
+    dlhs_use_fwd_quant: Union[bool, None, SkipT],
+    drhs_use_fwd_quant: Union[bool, None, SkipT],
+):
+  if dlhs_use_fwd_quant != SKIP:
+    cfg.dlhs.rhs.use_fwd_quant = dlhs_use_fwd_quant
+  if drhs_use_fwd_quant != SKIP:
+    cfg.drhs.rhs.use_fwd_quant = drhs_use_fwd_quant
+
+
 def set_bits(
     cfg: DotGeneral,
-    fwd_lhs_bit: int | None | fp8_numerics.FP8Dtype,
-    fwd_rhs_bit: int | None | fp8_numerics.FP8Dtype,
-    dlhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
-    dlhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
-    drhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
-    drhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+    fwd_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    fwd_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    dlhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    dlhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    drhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    drhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
 ) -> DotGeneral:
   """Set quantization bits for dot_general config."""
 
@@ -297,6 +328,13 @@ def set_bits(
   set_numerics(cfg.fwd, get_numerics(fwd_lhs_bit), get_numerics(fwd_rhs_bit))
   set_numerics(cfg.dlhs, get_numerics(dlhs_lhs_bit), get_numerics(dlhs_rhs_bit))
   set_numerics(cfg.drhs, get_numerics(drhs_lhs_bit), get_numerics(drhs_rhs_bit))
+  # use_fwd_quant is by default set to False if fwd pass is quantized.
+  # This is to make the configuration logically correct,
+  # i.e., use_fwd_quant cannot be None when fwd is quantized.
+  # It is user's responsibility to further choose between False and True.
+  dlhs_use_fwd_quant = False if fwd_rhs_bit is not None else SKIP
+  drhs_use_fwd_quant = False if fwd_lhs_bit is not None else SKIP
+  set_use_fwd_quant(cfg, dlhs_use_fwd_quant, drhs_use_fwd_quant)
   return cfg
 
 
@@ -578,6 +616,60 @@ def config_v3(
 
 
 def config_v4(
+    *,
+    fwd_bits: Optional[int] = 8,
+    dlhs_bits: Optional[int] = 8,
+    drhs_bits: Optional[int] = None,
+    # The dummy static bound flag is for performance benchmarking.
+    use_dummy_static_bound: bool = False,
+    rng_type: str = 'jax.uniform',  # 'custom-1'
+    dlhs_local_aqt: Optional[LocalAqt] = None,
+    drhs_local_aqt: Optional[LocalAqt] = None,
+    # accumulator dtype by default is automatically set in set_bits,
+    # but users can still configure a special dtype such as jnp.int16, etc.
+    fwd_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
+    dlhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
+    drhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
+) -> DotGeneral:
+  """Version 4 of user-visible AQT config."""
+  cfg = default_unquantized_config()
+  set_bits(
+      cfg,
+      fwd_lhs_bit=fwd_bits,
+      fwd_rhs_bit=fwd_bits,
+      dlhs_lhs_bit=dlhs_bits,
+      dlhs_rhs_bit=dlhs_bits,
+      drhs_lhs_bit=drhs_bits,
+      drhs_rhs_bit=drhs_bits,
+  )
+  set_accumulator_dtype(
+      cfg,
+      fwd_dtype=fwd_accumulator_dtype,
+      dlhs_dtype=dlhs_accumulator_dtype,
+      drhs_dtype=drhs_accumulator_dtype,
+  )
+  set_stochastic_rounding(
+      cfg,
+      vjp_lhs_stochastic_rounding=True,
+      vjp_rhs_stochastic_rounding=False,
+      implementation=rng_type,
+  )
+  if use_dummy_static_bound:
+    set_static_bound(cfg, 1.0)
+  set_local_aqt(
+      cfg,
+      fwd_local_aqt=SKIP,
+      dlhs_local_aqt=dlhs_local_aqt,
+      drhs_local_aqt=drhs_local_aqt,
+  )
+  # TODO(yichizh): remove set_use_fwd_quant here since it will be automatically
+  # set in set_bits. Or make them as an argument.
+  set_use_fwd_quant(cfg, dlhs_use_fwd_quant=False, drhs_use_fwd_quant=False)
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
+  return cfg
+
+
+def config_v4_old(
     *,
     fwd_bits: Optional[int] = 8,
     dlhs_bits: Optional[int] = 8,
