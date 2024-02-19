@@ -15,11 +15,14 @@
 
 import abc
 from typing import Union
+
+from aqt.jax.v2 import aqt_state
 from aqt.jax.v2 import utils
 import jax.numpy as jnp
 
 
 class Calibration(abc.ABC):
+  state: aqt_state.State | None = None
 
   @abc.abstractmethod
   def get_bound(self, x, shared_axes) -> jnp.ndarray:
@@ -48,6 +51,10 @@ class AbsMaxCalibration(Calibration):
         ' to set them.'
     )
     assert shared_axes is not None, msg
+
+    if self.state is not None:
+      assert isinstance(self.state, aqt_state.StaticRangeState)
+      return self.state.max
 
     # NOTE: If you want to clip, consider using clip and clip_gradient in
     # int_numerics.IntNumerics.
