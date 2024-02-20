@@ -244,15 +244,19 @@ def _qtensor_dot_general(
   if cfg.lhs.dequant_mode == config.DequantMode.OTHER_INPUT:
     assert rhs_qin.dtype in dtypes_can_be_scaled
     for scale in lhs_qt.scale:
-      rhs_qin = rhs_qin * _lhs_scale_transpose_for_rhs_input(
+      transposed_scale = _lhs_scale_transpose_for_rhs_input(
           scale, dimension_numbers, rhs_qt.shape
       )
+      assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
+      rhs_qin = rhs_qin * transposed_scale.astype(rhs_qin.dtype)
   if cfg.rhs.dequant_mode == config.DequantMode.OTHER_INPUT:
     assert lhs_qin.dtype in dtypes_can_be_scaled
     for scale in rhs_qt.scale:
-      lhs_qin = lhs_qin * _rhs_scale_transpose_for_lhs_input(
+      transposed_scale = _rhs_scale_transpose_for_lhs_input(
           scale, dimension_numbers, lhs_qt.shape
       )
+      assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
+      lhs_qin = lhs_qin * transposed_scale.astype(lhs_qin.dtype)
 
   out = lax.dot_general(
       lhs_qin,
