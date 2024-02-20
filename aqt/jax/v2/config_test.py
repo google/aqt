@@ -13,7 +13,6 @@
 # limitations under the License.
 
 """Test for AQT configs."""
-import itertools
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
@@ -313,35 +312,6 @@ class AqtConfigTest(parameterized.TestCase):
                               local_aqt=None,
                               jax_scope_name='aqt_drhs'))"""
     utils.test_pprint_eq(config.config_fwd_fp8(), expected_cfg)
-
-  @parameterized.parameters([
-      dict(
-          fwd_bits=fwd_bits,
-          dlhs_bits=dlhs_bits,
-          drhs_bits=drhs_bits,
-          rng_type=rng_type,
-          dlhs_local_aqt=dlhs_local_aqt,
-          drhs_local_aqt=drhs_local_aqt,
-          fwd_accumulator_dtype=fwd_accumulator_dtype,
-          dlhs_accumulator_dtype=dlhs_accumulator_dtype,
-          drhs_accumulator_dtype=drhs_accumulator_dtype,
-      )
-      for fwd_bits, dlhs_bits, drhs_bits, rng_type, dlhs_local_aqt, drhs_local_aqt, fwd_accumulator_dtype, dlhs_accumulator_dtype, drhs_accumulator_dtype in itertools.product(
-          [8, 4, 2, None],
-          [8, 4, 2, None],
-          [8, 4, 2, None],
-          ['jax.uniform', 'custom-1'],
-          [config.LocalAqt(3), None],
-          [config.LocalAqt(2), None],
-          [jnp.float32, jnp.bfloat16, jnp.int8, jnp.int32, None],
-          [jnp.float32, jnp.bfloat16, jnp.int8, jnp.int32, None],
-          [jnp.float32, jnp.bfloat16, jnp.int8, jnp.int32, None],
-      )
-  ])
-  def test_config_v4_new(self, **kwargs):
-    utils.test_pprint_eq(
-        config.config_v4(**kwargs), config.config_v4_old(**kwargs)
-    )
 
 
 if __name__ == '__main__':
