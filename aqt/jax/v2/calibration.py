@@ -16,6 +16,8 @@
 import abc
 from typing import Union
 from aqt.jax.v2 import utils
+import flax.linen as nn
+import jax
 import jax.numpy as jnp
 
 
@@ -54,3 +56,37 @@ class AbsMaxCalibration(Calibration):
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     return abs_max
+
+
+class StaticRangeCalibration(Calibration, nn.Module):
+  """State for static range AQT/PTQ/QAT."""
+
+  moving_average_weight: float
+  quant_collection: str
+
+  @nn.compact
+  def get_bound(self, x, shared_axes) -> jnp.ndarray:
+    if shared_axes == 'per_tensor':
+      shared_axes = list(range(x.ndim))
+
+    running_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
+    running_max = jnp.where(
+        running_max == 0.0, jnp.ones_like(running_max), running_max
+    )
+
+    self.max = self.variable(
+        self.quant_collection,
+        'max',
+        jnp.zeros,
+        running_max.shape,
+        running_max.dtype,
+    )
+
+    self.max.value = jax.lax.cond(
+        jnp.any(self.max.value != 0 & self.max.value != 1),
+        lambda: self.max.value * self.moving_average_weight
+        + running_max * (1.0 - self.moving_average_weight),
+        lambda: running_max,
+    )
+
+    return self.max.value
