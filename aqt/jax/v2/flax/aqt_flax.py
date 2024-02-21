@@ -16,22 +16,18 @@
 # pylint: disable=unnecessary-lambda
 
 import copy
-import enum
 import functools
 from typing import Iterable
 from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2.flax import aqt_state_updator
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-
-class QuantMode(enum.Enum):
-  TRAIN = 1
-  CONVERT = 2
-  SERVE = 3
+QuantMode = aqt_state_updator.QuantMode
 
 
 class Freezer(nn.Module):
@@ -76,6 +72,8 @@ class Freezer(nn.Module):
   def get(self) -> Optional[aqt_tensor.QTensor]:
     if self.quant_mode == QuantMode.TRAIN:
       return None
+    elif self.quant_mode == QuantMode.CALIBRATE:
+      return None
     elif self.quant_mode == QuantMode.CONVERT:
       return None
     elif self.quant_mode == QuantMode.SERVE:
@@ -90,6 +88,8 @@ class Freezer(nn.Module):
 
   def set(self, inputs: aqt_tensor.QTensor) -> None:
     if self.quant_mode == QuantMode.TRAIN:
+      pass
+    elif self.quant_mode == QuantMode.CALIBRATE:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
       self.qvalue.value = inputs.qvalue
@@ -185,6 +185,13 @@ class AqtDotGeneral(nn.Module):
     prng_name = self.prng_name
     key = self.make_rng(prng_name) if prng_name is not None else None
     cfg = config.set_context(cfg, key, train_step=None)
+
+    # Ad hoc code for temporal test.
+    if isinstance(
+        cfg.fwd.lhs.quantizer.calibration,
+        aqt_state_updator.StaticRangeCalibration,
+    ):
+      cfg.fwd.lhs.quantizer.calibration.quant_collection = self.quant_collection
 
     dg = aqt_dot_general._dot_general_raw_attach_gradient()  # pylint: disable=protected-access
 
