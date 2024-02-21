@@ -121,8 +121,22 @@ def _rhs_scale_transpose_to_output(
   return qrhs_scale_t
 
 
+def _get_ra(rank: int, ca: Sequence[int], ba: Sequence[int]):
+  """Returns the remaining axes."""
+  ret = []
+  for i in range(rank):
+    if i not in list(ca) + list(ba):
+      ret.append(i)
+  return ret
+
+
 def _scale_trans_for_other_input(
-    x, my_ca, my_ba, other_ca, other_ba, other_rank
+    x: jax.Array,
+    my_ca: Sequence[int],
+    my_ba: Sequence[int],
+    other_ca: Sequence[int],
+    other_ba: Sequence[int],
+    other_rank: int,
 ):
   """Transposes x to other inputs' dimension order."""
   my_ca = list(my_ca)
@@ -137,7 +151,7 @@ def _scale_trans_for_other_input(
   transpose_dim = [-1] * len(x.shape)
   my_axis_mapped = my_ca + my_ba
   other_axis_mapped = other_ca + other_ba
-  my_ra = list(i for i in range(len(x.shape)) if i not in my_axis_mapped)
+  my_ra = _get_ra(x.ndim, my_ca, my_ba)
   for axis in my_ra:
     assert x.shape[axis] == 1
   for my_axis, other_axis in zip(my_axis_mapped, other_axis_mapped):
@@ -353,10 +367,18 @@ def _dot_general_raw(
         inputs: jnp.ndarray,
         input_qtensor: aqt_tensor.QTensor,
         tensor_cfg: config.Tensor,
-        calibration_axes: Sequence[int],
+        ndim: int,
+        ca: Sequence[int],
+        ba: Sequence[int],
         transpose_fn: Any,
     ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
       """Compute qtensor from input or input_qtensor."""
+      match tensor_cfg.calibration_mode:
+        case config.CalibrationMode.REMAINING_AXIS:
+          calibration_axes = _get_ra(ndim, ca, ba)
+        case config.CalibrationMode.CONTRACTING_AXIS:
+          calibration_axes = ca
+
       if input_qtensor is not None:
         quant_grad = 'Poison. Not needed in serving'
         output_qtensor = input_qtensor
@@ -364,9 +386,10 @@ def _dot_general_raw(
         output_qtensor, quant_grad = tensor_cfg.quantizer.quant(
             inputs, calibration_axes=calibration_axes
         )
+      mode = tensor_cfg.calibration_mode
       if (
           output_qtensor.scale_t is None
-          and tensor_cfg.dequant_mode != config.DequantMode.OTHER_INPUT
+          and mode == config.CalibrationMode.CONTRACTING_AXIS
       ):
         msg = 'scale, scale_t cannot be both unknown'
         assert output_qtensor.scale is not None, msg
@@ -380,13 +403,25 @@ def _dot_general_raw(
       return output_qtensor, quant_grad
 
     lhs_qt, lhs_quant_grad = _compute_qtensor(
-        lhs, lhs_qt, cfg.lhs, lhs_ca, _lhs_scale_transpose_to_output
+        lhs,
+        lhs_qt,
+        cfg.lhs,
+        lhs.ndim,
+        lhs_ca,
+        lhs_ba,
+        _lhs_scale_transpose_to_output,
     )
     lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
     lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
     rhs_qt, rhs_quant_grad = _compute_qtensor(
-        rhs, rhs_qt, cfg.rhs, rhs_ca, _rhs_scale_transpose_to_output
+        rhs,
+        rhs_qt,
+        cfg.rhs,
+        rhs.ndim,
+        rhs_ca,
+        rhs_ba,
+        _rhs_scale_transpose_to_output,
     )
     rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
     rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
@@ -481,8 +516,8 @@ def _dot_general_raw_attach_gradient():
         (y_ca, x_ca) = (x_ca, y_ca)
         (y_ba, x_ba) = (x_ba, y_ba)
       g_ndim = g.ndim - y_ndim + len(x_ba) + 2 * len(x_ca)
-      x_ra = tuple(i for i in range(g_ndim) if i not in x_ca and i not in x_ba)
-      y_ra = tuple(i for i in range(y_ndim) if i not in y_ca and i not in y_ba)
+      x_ra = tuple(_get_ra(g_ndim, x_ca, x_ba))
+      y_ra = tuple(_get_ra(y_ndim, y_ca, y_ba))
       if y_is_lhs:
         g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
       else:
@@ -544,6 +579,8 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
     assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
     assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
+
+    config.assert_config_validity(cfg)
 
     out, _ = dg(
         lhs=lhs,

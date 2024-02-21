@@ -38,15 +38,24 @@ QTensor = Any
 SkipT: TypeAlias = Literal[SKIP]
 
 
+class CalibrationMode(enum.Enum):
+  """Calibration axis modes."""
+  CONTRACTING_AXIS = 1
+  REMAINING_AXIS = 2
+
+
 class DequantMode(enum.Enum):
   """Dequant modes."""
 
   # Multiply output of dot_general by the transposed scale
+  # Compatible with CONTRACTING_AXIS.
   OUTPUT = 1
   # Multiply QTensor.qvalue by untransposed QTensor.scale before
   # dot_general (a.k.a. FakeQuant )
+  # Compatible with both CalibrationMode.
   THIS_INPUT = 2
   # Multiply other argument of dot general by appropriately transposed scale.
+  # Compatible with REMAINING_AXIS.
   OTHER_INPUT = 3
 
 
@@ -59,6 +68,8 @@ class Tensor:
   use_fwd_quant: Optional[bool] = utils.static_field()
   # Dequantization mode.
   dequant_mode: DequantMode = utils.static_field()
+  # Calibration axis mode.
+  calibration_mode: CalibrationMode = utils.static_field()
 
   @classmethod
   def make(cls, *args, **kwargs) -> 'Tensor':
@@ -167,6 +178,18 @@ def set_fwd_dequant_mode(
     cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
   if rhs_dequant_mode is not None:
     cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
+
+
+def set_fwd_calibration_mode(
+    cfg: DotGeneral,
+    *,
+    lhs_calibration_mode: CalibrationMode | SkipT = SKIP,
+    rhs_calibration_mode: CalibrationMode | SkipT = SKIP,
+):
+  if lhs_calibration_mode != SKIP:
+    cfg.fwd.lhs.calibration_mode = lhs_calibration_mode
+  if rhs_calibration_mode != SKIP:
+    cfg.fwd.rhs.calibration_mode = rhs_calibration_mode
 
 
 def set_numerics(
@@ -355,7 +378,10 @@ def default_unquantized_config() -> DotGeneral:
         context=aqt_quantizer.Context(key=None, train_step=None),
     )
     cfg = Tensor(
-        quantizer=quantizer, use_fwd_quant=None, dequant_mode=DequantMode.OUTPUT
+        quantizer=quantizer,
+        use_fwd_quant=None,
+        dequant_mode=DequantMode.OUTPUT,
+        calibration_mode=CalibrationMode.CONTRACTING_AXIS,
     )
     return cfg
 
@@ -416,6 +442,7 @@ def tensor_make(
       # dtype_x=dtype,
       use_fwd_quant=None,
       dequant_mode=DequantMode.OUTPUT,
+      calibration_mode=CalibrationMode.CONTRACTING_AXIS
   )
 
 
@@ -613,6 +640,59 @@ def config_v3(
   )
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg
+
+
+def assert_config_validity(cfg: DotGeneral):
+  """Asserts if the given config.DotGeneral is valid."""
+
+  # use_fwd_quant is not enabled when calibration_axis = remaining_axis.
+  msg_fwd_quant = (
+      'use_fwd_quant should be set to None when remaining axis are used for'
+      ' calibration axis.'
+  )
+
+  if cfg.fwd.rhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
+    msg_fwd_quant += (
+        f'rhs.calibration_mode: {cfg.fwd.rhs.calibration_mode},'
+        f' dlhs use_fwd_quant: {cfg.dlhs.rhs.use_fwd_quant}'
+    )
+    assert cfg.dlhs.rhs.use_fwd_quant is None, msg_fwd_quant
+
+  if cfg.fwd.lhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
+    msg_fwd_quant += (
+        f'lhs.calibration_mode: {cfg.fwd.lhs.calibration_mode},'
+        f' drhs use_fwd_quant: {cfg.drhs.rhs.use_fwd_quant}'
+    )
+    assert cfg.drhs.rhs.use_fwd_quant is None, msg_fwd_quant
+
+  # Check valid combination between calibration_mode and dequant_mode
+  unsupported_calibration_dequant_pairs = [
+      (DequantMode.OUTPUT, CalibrationMode.REMAINING_AXIS),
+      (DequantMode.OTHER_INPUT, CalibrationMode.CONTRACTING_AXIS),
+  ]
+  msg_mode_mismatch = 'Unsupported calibration mode - dequant mode combination '
+  for (
+      dequant_mode,
+      calibration_mode,
+  ) in unsupported_calibration_dequant_pairs:
+    assert not (
+        cfg.fwd.lhs.calibration_mode == calibration_mode
+        and cfg.fwd.lhs.dequant_mode == dequant_mode
+    ), (
+        msg_mode_mismatch
+        + ' for lhs. calibration_mode:'
+        f' {cfg.fwd.lhs.calibration_mode}, dequant_mode:'
+        f' {cfg.fwd.lhs.dequant_mode}'
+    )
+    assert not (
+        cfg.fwd.rhs.calibration_mode == calibration_mode
+        and cfg.fwd.rhs.dequant_mode == dequant_mode
+    ), (
+        msg_mode_mismatch
+        + ' for rhs. calibration_mode:'
+        f' {cfg.fwd.rhs.calibration_mode}, dequant_mode:'
+        f' {cfg.fwd.rhs.dequant_mode}'
+    )
 
 
 def config_v4(
