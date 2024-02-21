@@ -16,22 +16,19 @@
 # pylint: disable=unnecessary-lambda
 
 import copy
-import enum
 import functools
 from typing import Iterable
 from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2.flax import aqt_state_updator
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
 
-class QuantMode(enum.Enum):
-  TRAIN = 1
-  CONVERT = 2
-  SERVE = 3
+QuantMode = aqt_state_updator.QuantMode
 
 
 class Freezer(nn.Module):
@@ -56,6 +53,13 @@ class Freezer(nn.Module):
   s_shape: Iterable[int]
   s_init: nn.initializers.Initializer
 
+  # 11. A proper static range support for AQT / PTQ will require huge update on
+  # the Freezer / dot_general part, since for activation during convert it
+  # should store the scales (not scale_t); during serving inference we need to
+  # get the qvalue when the scale is provided from outside.
+  # Let's make a separated bug item for this.
+  # For now, it will reuse the exising max value, which is gathered during
+  # calibration.
   def setup(self):
     mode = self.quant_mode
     if mode == QuantMode.SERVE or mode == QuantMode.CONVERT:
@@ -76,6 +80,8 @@ class Freezer(nn.Module):
   def get(self) -> Optional[aqt_tensor.QTensor]:
     if self.quant_mode == QuantMode.TRAIN:
       return None
+    elif self.quant_mode == QuantMode.CALIBRATE:
+      return None
     elif self.quant_mode == QuantMode.CONVERT:
       return None
     elif self.quant_mode == QuantMode.SERVE:
@@ -90,6 +96,8 @@ class Freezer(nn.Module):
 
   def set(self, inputs: aqt_tensor.QTensor) -> None:
     if self.quant_mode == QuantMode.TRAIN:
+      pass
+    elif self.quant_mode == QuantMode.CALIBRATE:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
       self.qvalue.value = inputs.qvalue
@@ -135,7 +143,9 @@ class AqtDotGeneral(nn.Module):
       self,
       lhs_shape,
       rhs_shape,
-      dimension_numbers: tuple[Iterable[int], Iterable[int]],
+      lhs_dtype,
+      rhs_dtype,
+      dimension_numbers
   ):
     if self.cfg is None:
       return jax.lax.dot_general
@@ -182,6 +192,34 @@ class AqtDotGeneral(nn.Module):
         quant_collection=self.quant_collection,
     )
 
+    # 5. Inside aqt_flax.py, create state_updator for lhs and rhs.
+    # Algorithm Extensibility: Choose which state to use based on the
+    # configuration.
+    lhs_state_updator = aqt_state_updator.DotGeneralStaticRangeStateUpdator(
+        quant_collection=self.quant_collection,
+        quant_mode=self.lhs_quant_mode,
+        is_lhs=True,
+        lhs_shape=lhs_shape,
+        lhs_dtype=lhs_dtype,
+        rhs_shape=rhs_shape,
+        rhs_dtype=rhs_dtype,
+        calib_shared_axes=cfg.fwd.lhs.quantizer.calib_shared_axes,
+        dimension_numbers=dimension_numbers,
+        moving_average_weight=0.9,
+    )
+    rhs_state_updator = aqt_state_updator.DotGeneralStaticRangeStateUpdator(
+        quant_collection=self.quant_collection,
+        quant_mode=self.rhs_quant_mode,
+        is_lhs=False,
+        lhs_shape=lhs_shape,
+        lhs_dtype=lhs_dtype,
+        rhs_shape=rhs_shape,
+        rhs_dtype=rhs_dtype,
+        calib_shared_axes=cfg.fwd.rhs.quantizer.calib_shared_axes,
+        dimension_numbers=dimension_numbers,
+        moving_average_weight=0.9,
+    )
+
     prng_name = self.prng_name
     key = self.make_rng(prng_name) if prng_name is not None else None
     cfg = config.set_context(cfg, key, train_step=None)
@@ -215,6 +253,14 @@ class AqtDotGeneral(nn.Module):
       lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
       rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
 
+      # 6. Collect states for dot_general.
+      lhs_state_updator.update(lhs=lhs, rhs=rhs)
+      rhs_state_updator.update(lhs=lhs, rhs=rhs)
+
+      cfg.fwd.lhs.quantizer.calibration.state = lhs_state_updator.get_state()
+      cfg.fwd.rhs.quantizer.calibration.state = rhs_state_updator.get_state()
+
+      # The states must be used to quantize.
       out, (out_lhs_qt, out_rhs_qt) = dg(
           lhs=lhs,
           rhs=rhs,
@@ -252,7 +298,9 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-    aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
+    aqt_dg = self.make_aqt_dg(
+        lhs.shape, rhs.shape, lhs.dtype, rhs.dtype, dimension_numbers
+    )
     return aqt_dg(
         lhs,
         rhs,
