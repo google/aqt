@@ -23,15 +23,277 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
+import enum
 from typing import Any, Optional, Sequence, Union
+from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
-from aqt.jax.v2 import config
+from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import int_numerics
+from aqt.jax.v2.numerics import no_numerics
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 import numpy as onp
+
+dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
+
+
+class CalibrationMode(enum.Enum):
+  """Calibration axis modes."""
+
+  CONTRACTING_AXIS = 1
+  REMAINING_AXIS = 2
+
+
+class DequantMode(enum.Enum):
+  """Dequant modes."""
+
+  # Multiply output of dot_general by the transposed scale
+  # Compatible with CONTRACTING_AXIS.
+  OUTPUT = 1
+  # Multiply QTensor.qvalue by untransposed QTensor.scale before
+  # dot_general (a.k.a. FakeQuant )
+  # Compatible with both CalibrationMode.
+  THIS_INPUT = 2
+  # Multiply other argument of dot general by appropriately transposed scale.
+  # Compatible with REMAINING_AXIS.
+  OTHER_INPUT = 3
+
+
+@utils.flax_slots_dataclass
+class Tensor:
+  """Configuration of quantization of one tensor or one side of tensor op."""
+
+  quantizer: aqt_quantizer.Quantizer
+  # Controls at what value of input tensor should be used.
+  # Setting it to True, but not quantizing fwd pass will assert-fail.
+  use_fwd_quant: Optional[bool] = utils.static_field()
+  # Dequantization mode.
+  dequant_mode: DequantMode = utils.static_field()
+  # Calibration axis mode.
+  calibration_mode: CalibrationMode = utils.static_field()
+
+  @classmethod
+  def make(cls, *args, **kwargs) -> 'Tensor':
+    return tensor_make(*args, **kwargs)
+
+
+@utils.flax_slots_dataclass
+class LocalAqt:
+  contraction_axis_shard_count: int = utils.static_field()
+
+
+@utils.flax_slots_dataclass
+class DotGeneralRaw:
+  """Configuration of quantization of one dot_general without gradient."""
+
+  lhs: Tensor
+  rhs: Tensor
+  dg_accumulator_dtype: Optional[jnp.dtype] = utils.static_field()
+  local_aqt: Optional[LocalAqt] = utils.static_field()
+  jax_scope_name: str = utils.static_field()
+
+  @classmethod
+  def make(cls, *args, **kwargs) -> 'DotGeneralRaw':
+    return dot_general_raw_make(*args, **kwargs)
+
+  @classmethod
+  def make_conv_general_dilated(cls, *args, **kwargs) -> 'DotGeneralRaw':
+    return conv_general_dilated_make(*args, **kwargs)
+
+
+@utils.flax_slots_dataclass
+class DotGeneral:
+  """Configuration of quantization of dot_general and its gradients."""
+
+  fwd: DotGeneralRaw
+  dlhs: DotGeneralRaw
+  drhs: DotGeneralRaw
+
+  @classmethod
+  def make(cls, *args, **kwargs) -> 'DotGeneral':
+    return dot_general_make(*args, **kwargs)
+
+
+def assert_config_validity(cfg: DotGeneral):
+  """Asserts if the given config.DotGeneral is valid."""
+
+  # use_fwd_quant is not enabled when calibration_axis = remaining_axis.
+  msg_fwd_quant = (
+      'use_fwd_quant should be set to None when remaining axis are used for'
+      ' calibration axis.'
+  )
+
+  if cfg.fwd.rhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
+    msg_fwd_quant += (
+        f'rhs.calibration_mode: {cfg.fwd.rhs.calibration_mode},'
+        f' dlhs use_fwd_quant: {cfg.dlhs.rhs.use_fwd_quant}'
+    )
+    assert cfg.dlhs.rhs.use_fwd_quant is None, msg_fwd_quant
+
+  if cfg.fwd.lhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
+    msg_fwd_quant += (
+        f'lhs.calibration_mode: {cfg.fwd.lhs.calibration_mode},'
+        f' drhs use_fwd_quant: {cfg.drhs.rhs.use_fwd_quant}'
+    )
+    assert cfg.drhs.rhs.use_fwd_quant is None, msg_fwd_quant
+
+  # Check valid combination between calibration_mode and dequant_mode
+  unsupported_calibration_dequant_pairs = [
+      (DequantMode.OUTPUT, CalibrationMode.REMAINING_AXIS),
+      (DequantMode.OTHER_INPUT, CalibrationMode.CONTRACTING_AXIS),
+  ]
+  msg_mode_mismatch = 'Unsupported calibration mode - dequant mode combination '
+  for (
+      dequant_mode,
+      calibration_mode,
+  ) in unsupported_calibration_dequant_pairs:
+    assert not (
+        cfg.fwd.lhs.calibration_mode == calibration_mode
+        and cfg.fwd.lhs.dequant_mode == dequant_mode
+    ), (
+        msg_mode_mismatch
+        + ' for lhs. calibration_mode:'
+        f' {cfg.fwd.lhs.calibration_mode}, dequant_mode:'
+        f' {cfg.fwd.lhs.dequant_mode}'
+    )
+    assert not (
+        cfg.fwd.rhs.calibration_mode == calibration_mode
+        and cfg.fwd.rhs.dequant_mode == dequant_mode
+    ), (
+        msg_mode_mismatch
+        + ' for rhs. calibration_mode:'
+        f' {cfg.fwd.rhs.calibration_mode}, dequant_mode:'
+        f' {cfg.fwd.rhs.dequant_mode}'
+    )
+
+
+def tensor_make(
+    bits: Optional[int], preserve_max_val: bool = False
+) -> 'Tensor':
+  """Makes config.Tensor."""
+  if bits is None:
+    effective_numerics = no_numerics.NoNumerics()
+  else:
+
+    def _dtype_from_bits(bits, pz):
+      if 2 <= bits <= 8 and pz:
+        if bits == 4:
+          return jnp.int4
+        else:
+          return jnp.int8
+      else:
+        return None
+
+    pz = False if bits == 1 else True
+    dtype = _dtype_from_bits(bits, pz)
+    effective_numerics = int_numerics.IntNumerics(
+        bits=bits,
+        preserve_zero=pz,
+        preserve_max_val=preserve_max_val,
+        clip=True,
+        round=True,
+        noise_fn=None,
+        clip_gradient=False,  # This can be disabled when using abs-max scaling.
+        dtype=dtype,
+    )
+  quantizer = aqt_quantizer.Quantizer(
+      numerics=effective_numerics,
+      calib_shared_axes=None,
+      scale_stop_grad=True,
+      calibration=calibration.AbsMaxCalibration(),
+      po2_scale=False,
+      context=aqt_quantizer.Context(key=None, train_step=None),
+  )
+  return Tensor(
+      quantizer=quantizer,
+      # dtype_x=dtype,
+      use_fwd_quant=None,
+      dequant_mode=DequantMode.OUTPUT,
+      calibration_mode=CalibrationMode.CONTRACTING_AXIS,
+  )
+
+
+def dot_general_raw_make(
+    lhs_bits=None,
+    rhs_bits=None,
+    local_aqt=None,
+    jax_scope_name='aqt',
+) -> 'DotGeneralRaw':
+  """Create quantization configs for input matrices to a matmul."""
+  lhs_cfg = tensor_make(lhs_bits)
+  rhs_cfg = tensor_make(rhs_bits)
+
+  # Binary uses 0.5 right now.
+  if (
+      lhs_bits is not None
+      and rhs_bits is not None
+      and 2 <= lhs_bits <= 8
+      and 2 <= rhs_bits <= 8
+  ):
+    dg_accumulator_dtype = jnp.int32
+  else:
+    dg_accumulator_dtype = None
+
+  return DotGeneralRaw(
+      lhs=lhs_cfg,
+      rhs=rhs_cfg,
+      dg_accumulator_dtype=dg_accumulator_dtype,
+      local_aqt=local_aqt,
+      jax_scope_name=jax_scope_name,
+  )
+
+
+def conv_general_dilated_make(
+    spatial_dimensions=2,
+    lhs_bits: Optional[int] = None,
+    rhs_bits: Optional[int] = None,
+) -> 'DotGeneralRaw':
+  """Create quantization config conv_general_dilated."""
+  config = dot_general_raw_make(lhs_bits, rhs_bits)
+  # Hardcoding flax assumptions.
+  if config.lhs:
+    config.lhs.quantizer.calib_shared_axes = list(
+        range(1, spatial_dimensions + 2)
+    )
+  if config.rhs:
+    config.rhs.quantizer.calib_shared_axes = list(
+        range(0, spatial_dimensions + 2 - 1)
+    )
+  return config
+
+
+def dot_general_make(
+    lhs_bits: Optional[int] = None,
+    rhs_bits: Optional[int] = None,
+    bwd_bits: Optional[int] = None,
+    use_fwd_quant: bool = True,
+    dlhs_local_aqt=None,
+    drhs_local_aqt=None,
+) -> 'DotGeneral':
+  """Create quantization configs for input matrices to a matmul."""
+  fwd = dot_general_raw_make(lhs_bits, rhs_bits, jax_scope_name='aqt_fwd')
+  dlhs = dot_general_raw_make(
+      bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt, jax_scope_name='aqt_dlhs'
+  )
+  drhs = dot_general_raw_make(
+      bwd_bits, bwd_bits, local_aqt=drhs_local_aqt, jax_scope_name='aqt_drhs'
+  )
+  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
+
+  # Surprising: lhs quantization determines what drhs can do.
+  if lhs_bits is not None:
+    # Only rhs is accepting MultiTensor.
+    cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+  if rhs_bits is not None:
+    cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+  assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
+  return cfg
+
+
+# ------------------------------------------------------------------------------
 
 
 @utils.flax_slots_dataclass
@@ -43,6 +305,7 @@ class MultiTensor:
 @utils.flax_slots_dataclass
 class TensorRes:
   """All the things we pass from the forward pass to the backward pass."""
+
   mt: MultiTensor
   quant_grad: aqt_tensor.GradientFn
 
@@ -217,18 +480,18 @@ def _qtensor_dot_general(
     lhs_qt: aqt_tensor.QTensor,
     rhs_qt: aqt_tensor.QTensor,
     dimension_numbers: jax.lax.DotDimensionNumbers,
-    cfg: config.DotGeneralRaw,
-    # dequant_dtype: config.DType,
+    cfg: DotGeneralRaw,
+    # dequant_dtype: DType,
     dequant_dtype: jnp.dtype,
 ) -> aqt_tensor.QTensor:
   """QTensor lax.dot_general replacement."""
 
   def _cast_dtype(
-      input_qtensor: aqt_tensor.QTensor, tensor_cfg: config.Tensor
+      input_qtensor: aqt_tensor.QTensor, tensor_cfg: Tensor
   ) -> jnp.ndarray:
     dtype = tensor_cfg.quantizer.numerics.get_dtype()
     msg = "Can't cast dtype in DequantMode.THIS_INPUT (fake quant) mode."
-    if tensor_cfg.dequant_mode == config.DequantMode.THIS_INPUT:
+    if tensor_cfg.dequant_mode == DequantMode.THIS_INPUT:
       assert dtype is None, msg
       output = input_qtensor.dequant()
     else:
@@ -250,12 +513,12 @@ def _qtensor_dot_general(
   )
   if cfg.dg_accumulator_dtype == jnp.int32:
     assert (
-        lhs_qin.dtype in config.dtypes_allowed_for_int32_accum
-        and rhs_qin.dtype in config.dtypes_allowed_for_int32_accum
+        lhs_qin.dtype in dtypes_allowed_for_int32_accum
+        and rhs_qin.dtype in dtypes_allowed_for_int32_accum
     ), dtype_ms
 
   dtypes_can_be_scaled = [jnp.bfloat16, jnp.float32, jnp.float64]
-  if cfg.lhs.dequant_mode == config.DequantMode.OTHER_INPUT:
+  if cfg.lhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert rhs_qin.dtype in dtypes_can_be_scaled
     for scale in lhs_qt.scale:
       transposed_scale = _lhs_scale_transpose_for_rhs_input(
@@ -263,7 +526,7 @@ def _qtensor_dot_general(
       )
       assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
       rhs_qin = rhs_qin * transposed_scale.astype(rhs_qin.dtype)
-  if cfg.rhs.dequant_mode == config.DequantMode.OTHER_INPUT:
+  if cfg.rhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert lhs_qin.dtype in dtypes_can_be_scaled
     for scale in rhs_qt.scale:
       transposed_scale = _rhs_scale_transpose_for_lhs_input(
@@ -289,9 +552,9 @@ def _qtensor_dot_general(
   )
   assert out.scale is not None  # pytype help
 
-  if cfg.lhs.dequant_mode == config.DequantMode.OUTPUT:
+  if cfg.lhs.dequant_mode == DequantMode.OUTPUT:
     out.scale.extend(lhs_qt.scale_t)
-  if cfg.rhs.dequant_mode == config.DequantMode.OUTPUT:
+  if cfg.rhs.dequant_mode == DequantMode.OUTPUT:
     out.scale.extend(rhs_qt.scale_t)
   return out
 
@@ -303,7 +566,7 @@ def _dot_general_raw(
     lhs_qt: Optional[aqt_tensor.QTensor],
     rhs_qt: Optional[aqt_tensor.QTensor],
     dimension_numbers: jax.lax.DotDimensionNumbers,
-    cfg: config.DotGeneralRaw,
+    cfg: DotGeneralRaw,
 ):
   """A quantized dot_general function without custom gradient."""
   with jax.named_scope(cfg.jax_scope_name):
@@ -366,7 +629,7 @@ def _dot_general_raw(
     def _compute_qtensor(
         inputs: jnp.ndarray,
         input_qtensor: aqt_tensor.QTensor,
-        tensor_cfg: config.Tensor,
+        tensor_cfg: Tensor,
         ndim: int,
         ca: Sequence[int],
         ba: Sequence[int],
@@ -374,10 +637,14 @@ def _dot_general_raw(
     ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
       """Compute qtensor from input or input_qtensor."""
       match tensor_cfg.calibration_mode:
-        case config.CalibrationMode.REMAINING_AXIS:
+        case CalibrationMode.REMAINING_AXIS:
           calibration_axes = _get_ra(ndim, ca, ba)
-        case config.CalibrationMode.CONTRACTING_AXIS:
+        case CalibrationMode.CONTRACTING_AXIS:
           calibration_axes = ca
+        case _:
+          raise ValueError(
+              f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
+          )
 
       if input_qtensor is not None:
         quant_grad = 'Poison. Not needed in serving'
@@ -389,7 +656,7 @@ def _dot_general_raw(
       mode = tensor_cfg.calibration_mode
       if (
           output_qtensor.scale_t is None
-          and mode == config.CalibrationMode.CONTRACTING_AXIS
+          and mode == CalibrationMode.CONTRACTING_AXIS
       ):
         msg = 'scale, scale_t cannot be both unknown'
         assert output_qtensor.scale is not None, msg
@@ -464,7 +731,7 @@ def _dot_general_raw_attach_gradient():
         lhs_qt: Optional[aqt_tensor.QTensor],
         rhs_qt: Optional[aqt_tensor.QTensor],
         dimension_numbers: lax.DotDimensionNumbers,
-        cfg: config.DotGeneral,
+        cfg: DotGeneral,
     ):
       assert (
           lhs.dtype == rhs.dtype
@@ -490,13 +757,14 @@ def _dot_general_raw_attach_gradient():
 
   def vjp_bwd(
       fwd_dimension_numbers: lax.DotDimensionNumbers,
-      res: tuple[Optional[DotGeneralRes], config.DotGeneral],
+      res: tuple[Optional[DotGeneralRes], DotGeneral],
       g,
   ):
     dg_res, cfg = res
     msg = 'dg_res can only be None in 2nd derivative. It is not yet supported.'
     assert dg_res is not None, msg
     g = g[0]  # g[1] is gradient with respect to qret which we are ignoring.
+
     def ranges_like(*xs):
       start = 0
       for x in xs:
@@ -506,7 +774,7 @@ def _dot_general_raw_attach_gradient():
     def grad_dot_general(
         y_res: TensorRes,
         quant_grad: aqt_tensor.GradientFn,
-        cfg_raw: config.DotGeneralRaw,
+        cfg_raw: DotGeneralRaw,
         y_is_lhs,
     ):
       y_ndim = y_res.mt.x.ndim
@@ -556,7 +824,7 @@ def _dot_general_raw_attach_gradient():
   return vjp
 
 
-def make_dot_general(cfg: Optional[config.DotGeneral]):
+def make_dot_general(cfg: Optional[DotGeneral]):
   """Makes quantized lax.dot_general replacement with attached gradients."""
   if cfg is None:
     return jax.lax.dot_general
@@ -580,7 +848,7 @@ def make_dot_general(cfg: Optional[config.DotGeneral]):
     assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
     assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
 
-    config.assert_config_validity(cfg)
+    assert_config_validity(cfg)
 
     out, _ = dg(
         lhs=lhs,

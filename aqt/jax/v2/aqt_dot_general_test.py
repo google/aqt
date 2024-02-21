@@ -35,7 +35,7 @@ import numpy as np
 import scipy.stats
 
 
-def test_jaxpr_dtype(f, cfgs: list[config.DotGeneralRaw], float_dtype):
+def test_jaxpr_dtype(f, cfgs: list[aqt.DotGeneralRaw], float_dtype):
   """Tests whether dot_generals in f conform to dtypes inside of cfgs."""
 
   def jaxpr_to_trityp(jaxpr):
@@ -174,17 +174,17 @@ class _TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
 
 
 def _modify_cfg(
-    readonly_cfg: config.DotGeneral,
+    readonly_cfg: aqt.DotGeneral,
     *,
-    lhs_dequant_mode: config.DequantMode = config.DequantMode.OUTPUT,
-    rhs_dequant_mode: config.DequantMode = config.DequantMode.OUTPUT,
-    lhs_calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
-    rhs_calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
+    lhs_dequant_mode: aqt.DequantMode = aqt.DequantMode.OUTPUT,
+    rhs_dequant_mode: aqt.DequantMode = aqt.DequantMode.OUTPUT,
+    lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
+    rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     use_fwd_quant: bool | None = None,
     fwd_lhs_tricky_clip_and_round: bool = False,
-    local_aqt: config.LocalAqt | None = None,
+    local_aqt: aqt.LocalAqt | None = None,
     clip_gradient: bool = False,
-) -> config.DotGeneral:
+) -> aqt.DotGeneral:
   cfg = copy.deepcopy(readonly_cfg)
   if fwd_lhs_tricky_clip_and_round:
     # Tricky means that we have zero gradient on x < 0
@@ -217,8 +217,8 @@ def _modify_cfg(
     if on_lhs or on_rhs:
       c.dg_accumulator_dtype = None
 
-  disable_lhs_quant = lhs_dequant_mode == config.DequantMode.THIS_INPUT
-  disable_rhs_quant = rhs_dequant_mode == config.DequantMode.THIS_INPUT
+  disable_lhs_quant = lhs_dequant_mode == aqt.DequantMode.THIS_INPUT
+  disable_rhs_quant = rhs_dequant_mode == aqt.DequantMode.THIS_INPUT
   for c in [cfg.fwd, cfg.dlhs, cfg.drhs]:
     _apply_po2_scale(c)
     _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode)
@@ -273,15 +273,15 @@ def _modify_cfg(
 
 
 def _aqt_dg_full_lr_diff(
-    lhs_dequant_mode: config.DequantMode,
-    rhs_dequant_mode: config.DequantMode,
-    lhs_calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
-    rhs_calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
+    lhs_dequant_mode: aqt.DequantMode,
+    rhs_dequant_mode: aqt.DequantMode,
+    lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
+    rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     use_fwd_quant: bool | None = None,
     fwd_lhs_tricky_clip_and_round: bool = False,
-    local_aqt: config.LocalAqt | None = None,
+    local_aqt: aqt.LocalAqt | None = None,
     *,
-    readonly_cfg: config.DotGeneral,
+    readonly_cfg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
     clip_gradient: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
@@ -302,13 +302,13 @@ def _aqt_dg_full_lr_diff(
 
 
 def _aqt_dg_full(
-    dequant_mode: config.DequantMode,
-    calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
+    dequant_mode: aqt.DequantMode,
+    calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     use_fwd_quant: bool | None = None,
     fwd_lhs_tricky_clip_and_round: bool = False,
-    local_aqt: config.LocalAqt | None = None,
+    local_aqt: aqt.LocalAqt | None = None,
     *,
-    readonly_cfg: config.DotGeneral,
+    readonly_cfg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
     clip_gradient: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
@@ -327,12 +327,12 @@ def _aqt_dg_full(
 
 
 def _aqt_dg_raw_lr_diff(
-    lhs_dequant_mode: config.DequantMode,
-    rhs_dequant_mode: config.DequantMode,
-    lhs_calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
-    rhs_calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
+    lhs_dequant_mode: aqt.DequantMode,
+    rhs_dequant_mode: aqt.DequantMode,
+    lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
+    rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     *,
-    readonly_cfg: config.DotGeneral,
+    readonly_cfg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   cfg = _modify_cfg(
@@ -349,10 +349,10 @@ def _aqt_dg_raw_lr_diff(
 
 
 def _aqt_dg_raw(
-    dequant_mode: config.DequantMode,
-    calibration_mode: config.CalibrationMode = config.CalibrationMode.CONTRACTING_AXIS,
+    dequant_mode: aqt.DequantMode,
+    calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     *,
-    readonly_cfg: config.DotGeneral,
+    readonly_cfg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   return _aqt_dg_raw_lr_diff(
@@ -463,12 +463,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.dot_general_make(2, 2)),
       dict(cfg=config.dot_general_make(8, 8)),
       dict(cfg=config.dot_general_make(8, 8), clip_gradient=True),
-      dict(
-          cfg=config.dot_general_make(8, 8, dlhs_local_aqt=config.LocalAqt(2))
-      ),
-      dict(
-          cfg=config.dot_general_make(8, 8, drhs_local_aqt=config.LocalAqt(2))
-      ),
+      dict(cfg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
+      dict(cfg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
       # That test could fail numerically because bf16
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
@@ -489,7 +485,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           cfg=fqt_param_dict(
               s=10,
               use_fwd_quant=True,
-              dlhs_local_aqt=config.LocalAqt(2),
+              dlhs_local_aqt=aqt.LocalAqt(2),
           )["cfg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
@@ -510,7 +506,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ])
   def test_dot_general_calibration_with_contracting_axis(
       self,
-      cfg: config.DotGeneral,
+      cfg: aqt.DotGeneral,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
       gra_maxval=30.0,
@@ -550,16 +546,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     # Tests for dot_general.
     test_jaxpr_dtype(
-        lambda: aqt_dg_full(config.DequantMode.OUTPUT)(lhs, rhs),
+        lambda: aqt_dg_full(aqt.DequantMode.OUTPUT)(lhs, rhs),
         [modify_cfg().fwd],
         lhs.dtype,
     )
     test_jaxpr_dtype(
-        lambda: jax.vjp(aqt_dg_full(config.DequantMode.OUTPUT), lhs, rhs),
+        lambda: jax.vjp(aqt_dg_full(aqt.DequantMode.OUTPUT), lhs, rhs),
         [modify_cfg().fwd],
         lhs.dtype,
     )
-    _, backprop = jax.vjp(aqt_dg_full(config.DequantMode.OUTPUT), lhs, rhs)
+    _, backprop = jax.vjp(aqt_dg_full(aqt.DequantMode.OUTPUT), lhs, rhs)
     test_jaxpr_dtype(
         lambda: backprop(gra),
         [modify_cfg().dlhs, modify_cfg().drhs],
@@ -567,16 +563,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     )
 
     check([
-        ("default    ", aqt_dg_full(config.DequantMode.OUTPUT), dict()),
-        ("FQ         ", aqt_dg_full(config.DequantMode.THIS_INPUT), dict()),
+        ("default    ", aqt_dg_full(aqt.DequantMode.OUTPUT), dict()),
+        ("FQ         ", aqt_dg_full(aqt.DequantMode.THIS_INPUT), dict()),
         (
             "raw fwd    ",
-            aqt_dg_raw(config.DequantMode.OUTPUT),
+            aqt_dg_raw(aqt.DequantMode.OUTPUT),
             dict(test_gradient=False),
         ),
         (
             "raw fwd FQ ",
-            aqt_dg_raw(config.DequantMode.THIS_INPUT),
+            aqt_dg_raw(aqt.DequantMode.THIS_INPUT),
             dict(test_gradient=False),
         ),
     ])
@@ -584,12 +580,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     check([
         (
             "fwd_quant=T",
-            aqt_dg_full(config.DequantMode.OUTPUT, use_fwd_quant=False),
+            aqt_dg_full(aqt.DequantMode.OUTPUT, use_fwd_quant=False),
             dict(),
         ),
         (
             "fwd_quant=F",
-            aqt_dg_full(config.DequantMode.OUTPUT, use_fwd_quant=True),
+            aqt_dg_full(aqt.DequantMode.OUTPUT, use_fwd_quant=True),
             dict(),
         ),
     ])
@@ -597,16 +593,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     check([
         (
             "default    ",
-            aqt_dg_full(
-                config.DequantMode.OUTPUT, local_aqt=config.LocalAqt(2)
-            ),
+            aqt_dg_full(aqt.DequantMode.OUTPUT, local_aqt=aqt.LocalAqt(2)),
             dict(),
         ),
         (
             "default    ",
-            aqt_dg_full(
-                config.DequantMode.THIS_INPUT, local_aqt=config.LocalAqt(2)
-            ),
+            aqt_dg_full(aqt.DequantMode.THIS_INPUT, local_aqt=aqt.LocalAqt(2)),
             dict(),
         ),
     ])
@@ -618,7 +610,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           (
               "check_fwd_lhs_tricky_clip_and_round",
               aqt_dg_full(
-                  config.DequantMode.OUTPUT, fwd_lhs_tricky_clip_and_round=True
+                  aqt.DequantMode.OUTPUT, fwd_lhs_tricky_clip_and_round=True
               ),
               dict(check_fwd_lhs_tricky_clip_and_round=True),
           ),
@@ -652,12 +644,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(cfg=config.dot_general_make(2, 2)),
       dict(cfg=config.dot_general_make(8, 8)),
       dict(cfg=config.dot_general_make(8, 8), clip_gradient=True),
-      dict(
-          cfg=config.dot_general_make(8, 8, dlhs_local_aqt=config.LocalAqt(2))
-      ),
-      dict(
-          cfg=config.dot_general_make(8, 8, drhs_local_aqt=config.LocalAqt(2))
-      ),
+      dict(cfg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
+      dict(cfg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
       # That test could fail numerically because bf16
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
@@ -726,56 +714,56 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         (
             "RA L       ",
             aqt_dg_full_lr_diff(
-                config.DequantMode.OTHER_INPUT,
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(),
         ),
         (
             "RA R       ",
             aqt_dg_full_lr_diff(
-                config.DequantMode.THIS_INPUT,
-                config.DequantMode.OTHER_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(),
         ),
         (
             "RA fake    ",
             aqt_dg_full(
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(),
         ),
         (
             "RA L fwd   ",
             aqt_dg_raw_lr_diff(
-                config.DequantMode.OTHER_INPUT,
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(test_gradient=False),
         ),
         (
             "RA R fwd  ",
             aqt_dg_raw_lr_diff(
-                config.DequantMode.THIS_INPUT,
-                config.DequantMode.OTHER_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(test_gradient=False),
         ),
         (
             "RA fake fwd",
             aqt_dg_raw(
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(test_gradient=False),
         ),
@@ -785,31 +773,31 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         (
             "RA fake    ",
             aqt_dg_full(
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                local_aqt=config.LocalAqt(2),
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                local_aqt=aqt.LocalAqt(2),
             ),
             dict(),
         ),
         (
             "RA L      ",
             aqt_dg_full_lr_diff(
-                config.DequantMode.OTHER_INPUT,
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
-                local_aqt=config.LocalAqt(2),
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                local_aqt=aqt.LocalAqt(2),
             ),
             dict(),
         ),
         (
             "RA R       ",
             aqt_dg_full_lr_diff(
-                config.DequantMode.THIS_INPUT,
-                config.DequantMode.OTHER_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
-                local_aqt=config.LocalAqt(2),
+                aqt.DequantMode.THIS_INPUT,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                local_aqt=aqt.LocalAqt(2),
             ),
             dict(),
         ),
@@ -827,10 +815,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ".*Unsupported calibration mode.*dequant mode combination.*",
     ):
       _aqt_dg_full_lr_diff(
-          config.DequantMode.THIS_INPUT,
-          config.DequantMode.OTHER_INPUT,
-          config.CalibrationMode.CONTRACTING_AXIS,
-          config.CalibrationMode.CONTRACTING_AXIS,
+          aqt.DequantMode.THIS_INPUT,
+          aqt.DequantMode.OTHER_INPUT,
+          aqt.CalibrationMode.CONTRACTING_AXIS,
+          aqt.CalibrationMode.CONTRACTING_AXIS,
           readonly_cfg=copy.deepcopy(cfg),
           dims=dims,
       )(lhs, rhs)
@@ -841,10 +829,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ".*Unsupported calibration mode.*dequant mode combination.*",
     ):
       _aqt_dg_full_lr_diff(
-          config.DequantMode.THIS_INPUT,
-          config.DequantMode.OUTPUT,
-          config.CalibrationMode.CONTRACTING_AXIS,
-          config.CalibrationMode.REMAINING_AXIS,
+          aqt.DequantMode.THIS_INPUT,
+          aqt.DequantMode.OUTPUT,
+          aqt.CalibrationMode.CONTRACTING_AXIS,
+          aqt.CalibrationMode.REMAINING_AXIS,
           readonly_cfg=copy.deepcopy(cfg),
           dims=dims,
       )(lhs, rhs)
@@ -864,22 +852,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ".*use_fwd_quant should be set to None.*",
     ):
       _aqt_dg_full_lr_diff(
-          config.DequantMode.THIS_INPUT,
-          config.DequantMode.OTHER_INPUT,
-          config.CalibrationMode.CONTRACTING_AXIS,
-          config.CalibrationMode.REMAINING_AXIS,
+          aqt.DequantMode.THIS_INPUT,
+          aqt.DequantMode.OTHER_INPUT,
+          aqt.CalibrationMode.CONTRACTING_AXIS,
+          aqt.CalibrationMode.REMAINING_AXIS,
           readonly_cfg=copy.deepcopy(cfg),
           dims=dims,
       )(lhs, rhs)
 
   @parameterized.parameters([
       dict(cfg=config.dot_general_make(8, 8)),
-      dict(
-          cfg=config.dot_general_make(8, 8, dlhs_local_aqt=config.LocalAqt(2))
-      ),
-      dict(
-          cfg=config.dot_general_make(8, 8, drhs_local_aqt=config.LocalAqt(2))
-      ),
+      dict(cfg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
+      dict(cfg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
   ])
   def test_dot_general_equality_between_different_calibration_axes(
       self,
@@ -917,42 +901,42 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     check([
         (
             "CA         ",
-            aqt_dg_full(config.DequantMode.OUTPUT, use_fwd_quant=False),
+            aqt_dg_full(aqt.DequantMode.OUTPUT, use_fwd_quant=False),
             dict(),
         ),
         (
             "CA fake    ",
-            aqt_dg_full(config.DequantMode.THIS_INPUT, use_fwd_quant=False),
+            aqt_dg_full(aqt.DequantMode.THIS_INPUT, use_fwd_quant=False),
             dict(),
         ),
         (
             "RA L       ",
             aqt_dg_full_lr_diff(
-                config.DequantMode.OTHER_INPUT,
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(),
         ),
         (
             "RA R       ",
             aqt_dg_full_lr_diff(
-                config.DequantMode.THIS_INPUT,
-                config.DequantMode.OTHER_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.DequantMode.OTHER_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(),
         ),
         (
             "RA fake      ",
             aqt_dg_full(
-                config.DequantMode.THIS_INPUT,
-                config.CalibrationMode.REMAINING_AXIS,
+                aqt.DequantMode.THIS_INPUT,
+                aqt.CalibrationMode.REMAINING_AXIS,
             ),
             dict(),
-        )
+        ),
     ])
 
   def test_dynamic_context(self):
@@ -1050,7 +1034,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         fwd_bits=8,
         bwd_bits=8,
         use_stochastic_rounding=False,
-        drhs_local_aqt=config.LocalAqt(shard_count),
+        drhs_local_aqt=aqt.LocalAqt(shard_count),
     )
     cfg.fwd.lhs.quantizer.numerics = cfg.fwd.lhs.quantizer.numerics.replace(
         preserve_max_val=True
