@@ -343,9 +343,7 @@ def _aqt_dg_raw_lr_diff(
       rhs_calibration_mode=rhs_calibration_mode,
   )
   cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-  return lambda lhs, rhs: aqt._dot_general_raw(
-      lhs, rhs, None, None, dims, cfg=cfg.fwd
-  )[0]
+  return lambda lhs, rhs: cfg.fwd(lhs, rhs, None, None, dims)[0]
 
 
 def _aqt_dg_raw(
@@ -954,13 +952,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     cfg = config.dot_general_raw_make(8, 8)
 
     def dg(lhs, rhs):
-      ret, _ = aqt._dot_general_raw(
+      ret, _ = cfg(
           lhs,
           rhs,
           None,
           None,
           (((1,), (0,)), ((), ())),
-          cfg=cfg,
       )
       return ret
 
