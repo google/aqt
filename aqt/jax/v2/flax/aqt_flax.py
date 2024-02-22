@@ -186,8 +186,6 @@ class AqtDotGeneral(nn.Module):
     key = self.make_rng(prng_name) if prng_name is not None else None
     cfg = config.set_context(cfg, key, train_step=None)
 
-    dg = aqt_dot_general._dot_general_raw_attach_gradient()  # pylint: disable=protected-access
-
     def ret_dg(
         lhs,
         rhs,
@@ -214,8 +212,7 @@ class AqtDotGeneral(nn.Module):
       rhs_apply_quant_mode = self.rhs_apply_quant_mode
       lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
       rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
-
-      out, (out_lhs_qt, out_rhs_qt) = dg(
+      out, (out_lhs_qt, out_rhs_qt) = aqt_dot_general.dg_core(
           lhs=lhs,
           rhs=rhs,
           lhs_qt=lhs_qt,
