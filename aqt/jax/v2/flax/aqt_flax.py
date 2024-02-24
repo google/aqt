@@ -212,13 +212,12 @@ class AqtDotGeneral(nn.Module):
       rhs_apply_quant_mode = self.rhs_apply_quant_mode
       lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
       rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
-      out, (out_lhs_qt, out_rhs_qt) = aqt_dot_general.dg_core(
+      out, (out_lhs_qt, out_rhs_qt) = cfg.dg_core(
           lhs=lhs,
           rhs=rhs,
           lhs_qt=lhs_qt,
           rhs_qt=rhs_qt,
           dimension_numbers=dimension_numbers,
-          cfg=cfg,
       )
 
       # TODO(lew): Ideally all QTensors would be always quantized.

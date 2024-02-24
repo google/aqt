@@ -25,7 +25,7 @@
 
 import enum
 import functools
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Optional, Self, Sequence, Union
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
@@ -77,7 +77,7 @@ class Tensor:
   calibration_mode: CalibrationMode = utils.static_field()
 
   @classmethod
-  def make(cls, *args, **kwargs) -> 'Tensor':
+  def make(cls, *args, **kwargs) -> Self:
     return tensor_make(*args, **kwargs)
 
 
@@ -403,11 +403,11 @@ class DotGeneralRaw:
   jax_scope_name: str = utils.static_field()
 
   @classmethod
-  def make(cls, *args, **kwargs) -> 'DotGeneralRaw':
+  def make(cls, *args, **kwargs) -> Self:
     return dot_general_raw_make(*args, **kwargs)
 
   @classmethod
-  def make_conv_general_dilated(cls, *args, **kwargs) -> 'DotGeneralRaw':
+  def make_conv_general_dilated(cls, *args, **kwargs) -> Self:
     return conv_general_dilated_make(*args, **kwargs)
 
   def __call__(
@@ -658,12 +658,106 @@ class DotGeneral:
   drhs: DotGeneralRaw
 
   @classmethod
-  def make(cls, *args, **kwargs) -> 'DotGeneral':
+  def make(cls, *args, **kwargs) -> Self:
     return dot_general_make(*args, **kwargs)
+
+  def dg_core(
+      self,
+      lhs: jnp.ndarray,
+      rhs: jnp.ndarray,
+      lhs_qt: Optional[aqt_tensor.QTensor],
+      rhs_qt: Optional[aqt_tensor.QTensor],
+      dimension_numbers: lax.DotDimensionNumbers,
+  ):
+    """dot_general function with expanded API."""
+    msg = 'AQT is not yet optimized to accept quantized types directly. '
+    msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
+    assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
+    assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
+
+    self.assert_config_validity()
+    out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self)
+    return out, res
+
+  def __call__(
+      self,
+      lhs,
+      rhs,
+      dimension_numbers,
+      precision=None,
+      preferred_element_type=None,
+  ):
+    del preferred_element_type
+    assert (
+        precision is None
+    ), f'Precision {precision} requested together with quantization.'
+
+    out, _ = self.dg_core(
+        lhs=lhs,
+        rhs=rhs,
+        lhs_qt=None,
+        rhs_qt=None,
+        dimension_numbers=dimension_numbers,
+    )
+    return out
+
+  def assert_config_validity(self: Self):
+    """Asserts if configuration is valid."""
+
+    # use_fwd_quant is not enabled when calibration_axis = remaining_axis.
+    msg_fwd_quant = (
+        'use_fwd_quant should be set to None when remaining axis are used for'
+        ' calibration axis.'
+    )
+
+    if self.fwd.rhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
+      msg_fwd_quant += (
+          f'rhs.calibration_mode: {self.fwd.rhs.calibration_mode},'
+          f' dlhs use_fwd_quant: {self.dlhs.rhs.use_fwd_quant}'
+      )
+      assert self.dlhs.rhs.use_fwd_quant is None, msg_fwd_quant
+
+    if self.fwd.lhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
+      msg_fwd_quant += (
+          f'lhs.calibration_mode: {self.fwd.lhs.calibration_mode},'
+          f' drhs use_fwd_quant: {self.drhs.rhs.use_fwd_quant}'
+      )
+      assert self.drhs.rhs.use_fwd_quant is None, msg_fwd_quant
+
+    # Check valid combination between calibration_mode and dequant_mode
+    unsupported_calibration_dequant_pairs = [
+        (DequantMode.OUTPUT, CalibrationMode.REMAINING_AXIS),
+        (DequantMode.OTHER_INPUT, CalibrationMode.CONTRACTING_AXIS),
+    ]
+    msg_mode_mismatch = (
+        'Unsupported calibration mode - dequant mode combination '
+    )
+    for (
+        dequant_mode,
+        calibration_mode,
+    ) in unsupported_calibration_dequant_pairs:
+      assert not (
+          self.fwd.lhs.calibration_mode == calibration_mode
+          and self.fwd.lhs.dequant_mode == dequant_mode
+      ), (
+          msg_mode_mismatch
+          + ' for lhs. calibration_mode:'
+          f' {self.fwd.lhs.calibration_mode}, dequant_mode:'
+          f' {self.fwd.lhs.dequant_mode}'
+      )
+      assert not (
+          self.fwd.rhs.calibration_mode == calibration_mode
+          and self.fwd.rhs.dequant_mode == dequant_mode
+      ), (
+          msg_mode_mismatch
+          + ' for rhs. calibration_mode:'
+          f' {self.fwd.rhs.calibration_mode}, dequant_mode:'
+          f' {self.fwd.rhs.dequant_mode}'
+      )
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(4,))
-def dg_core(
+def _dg_core(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
     lhs_qt: Optional[aqt_tensor.QTensor],
@@ -671,7 +765,7 @@ def dg_core(
     dimension_numbers: lax.DotDimensionNumbers,
     cfg: DotGeneral,
 ):
-  out, _ = dg_core_vjp_fwd(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg)
+  out, _ = _dg_core_vjp_fwd(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg)
   return out
 
 
@@ -680,7 +774,7 @@ def dg_core(
 # The cfg (DotGeneral) contains the key used for stochastic rounding,
 # which are traceable dynamic variables. It needs to be an input argument
 # to prevent the jax side effect.
-def dg_core_vjp_fwd(
+def _dg_core_vjp_fwd(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
     lhs_qt: Optional[aqt_tensor.QTensor],
@@ -706,7 +800,7 @@ def dg_core_vjp_fwd(
   return ((ret, qret), (res, cfg))
 
 
-def dg_core_vjp_bwd(
+def _dg_core_vjp_bwd(
     fwd_dimension_numbers: lax.DotDimensionNumbers,
     res: tuple[Optional[DotGeneralRes], DotGeneral],
     g,
@@ -771,94 +865,17 @@ def dg_core_vjp_bwd(
   return (dlhs, drhs, None, None, None)
 
 
-dg_core.defvjp(dg_core_vjp_fwd, dg_core_vjp_bwd)
+_dg_core.defvjp(_dg_core_vjp_fwd, _dg_core_vjp_bwd)
 
 
-def make_dot_general(cfg: Optional[DotGeneral]):
-  """Makes quantized lax.dot_general replacement with attached gradients."""
-  if cfg is None:
+def make_dot_general(dg: Optional[DotGeneral]):
+  # TODO(lew): call warnings.warn("Deprecated")
+  if dg is None:
     return jax.lax.dot_general
-
-  def ret_dg(
-      lhs,
-      rhs,
-      dimension_numbers,
-      precision=None,
-      preferred_element_type=None,
-  ):
-    del preferred_element_type
-    assert (
-        precision is None
-    ), f'Precision {precision} requested together with quantization.'
-
-    msg = 'AQT is not yet optimized to accept quantized types directly. '
-    msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
-    assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
-    assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
-
-    assert_config_validity(cfg)
-
-    out, _ = dg_core(
-        lhs=lhs,
-        rhs=rhs,
-        lhs_qt=None,
-        rhs_qt=None,
-        dimension_numbers=dimension_numbers,
-        cfg=cfg,
-    )
-    return out
-
-  return ret_dg
+  else:
+    return dg
 
 
-def assert_config_validity(cfg: DotGeneral):
-  """Asserts if the given config.DotGeneral is valid."""
-
-  # use_fwd_quant is not enabled when calibration_axis = remaining_axis.
-  msg_fwd_quant = (
-      'use_fwd_quant should be set to None when remaining axis are used for'
-      ' calibration axis.'
-  )
-
-  if cfg.fwd.rhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
-    msg_fwd_quant += (
-        f'rhs.calibration_mode: {cfg.fwd.rhs.calibration_mode},'
-        f' dlhs use_fwd_quant: {cfg.dlhs.rhs.use_fwd_quant}'
-    )
-    assert cfg.dlhs.rhs.use_fwd_quant is None, msg_fwd_quant
-
-  if cfg.fwd.lhs.calibration_mode == CalibrationMode.REMAINING_AXIS:
-    msg_fwd_quant += (
-        f'lhs.calibration_mode: {cfg.fwd.lhs.calibration_mode},'
-        f' drhs use_fwd_quant: {cfg.drhs.rhs.use_fwd_quant}'
-    )
-    assert cfg.drhs.rhs.use_fwd_quant is None, msg_fwd_quant
-
-  # Check valid combination between calibration_mode and dequant_mode
-  unsupported_calibration_dequant_pairs = [
-      (DequantMode.OUTPUT, CalibrationMode.REMAINING_AXIS),
-      (DequantMode.OTHER_INPUT, CalibrationMode.CONTRACTING_AXIS),
-  ]
-  msg_mode_mismatch = 'Unsupported calibration mode - dequant mode combination '
-  for (
-      dequant_mode,
-      calibration_mode,
-  ) in unsupported_calibration_dequant_pairs:
-    assert not (
-        cfg.fwd.lhs.calibration_mode == calibration_mode
-        and cfg.fwd.lhs.dequant_mode == dequant_mode
-    ), (
-        msg_mode_mismatch
-        + ' for lhs. calibration_mode:'
-        f' {cfg.fwd.lhs.calibration_mode}, dequant_mode:'
-        f' {cfg.fwd.lhs.dequant_mode}'
-    )
-    assert not (
-        cfg.fwd.rhs.calibration_mode == calibration_mode
-        and cfg.fwd.rhs.dequant_mode == dequant_mode
-    ), (
-        msg_mode_mismatch
-        + ' for rhs. calibration_mode:'
-        f' {cfg.fwd.rhs.calibration_mode}, dequant_mode:'
-        f' {cfg.fwd.rhs.dequant_mode}'
-    )
+def assert_config_validity(cfg):
+  # TODO(lew): call warnings.warn("Deprecated")
+  cfg.assert_config_validity()

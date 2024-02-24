@@ -13,35 +13,35 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
+
 import copy
 from typing import Literal, Optional, TypeAlias, Union
-from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
+
+# Temporary re-export from aqt.jax.v2.aqt_dot_general
+# pylint: disable=g-importing-member
+# pylint: disable=unused-import
+from aqt.jax.v2.aqt_dot_general import assert_config_validity
+from aqt.jax.v2.aqt_dot_general import CalibrationMode
+from aqt.jax.v2.aqt_dot_general import conv_general_dilated_make
+from aqt.jax.v2.aqt_dot_general import DequantMode
+from aqt.jax.v2.aqt_dot_general import dot_general_make
+from aqt.jax.v2.aqt_dot_general import dot_general_raw_make
+from aqt.jax.v2.aqt_dot_general import DotGeneral
+from aqt.jax.v2.aqt_dot_general import DotGeneralRaw
+from aqt.jax.v2.aqt_dot_general import dtypes_allowed_for_int32_accum
+from aqt.jax.v2.aqt_dot_general import LocalAqt
+from aqt.jax.v2.aqt_dot_general import Tensor
+from aqt.jax.v2.aqt_dot_general import tensor_make
+
 from aqt.jax.v2.numerics import fp8_numerics
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
 import jax
 import jax.numpy as jnp
-
-# Temporary re-export.
-
-Tensor = aqt_dot_general.Tensor
-DotGeneral = aqt_dot_general.DotGeneral
-DotGeneralRaw = aqt_dot_general.DotGeneralRaw
-CalibrationMode = aqt_dot_general.CalibrationMode
-DequantMode = aqt_dot_general.DequantMode
-LocalAqt = aqt_dot_general.LocalAqt
-
-dtypes_allowed_for_int32_accum = aqt_dot_general.dtypes_allowed_for_int32_accum
-
-assert_config_validity = aqt_dot_general.assert_config_validity
-tensor_make = aqt_dot_general.tensor_make
-dot_general_raw_make = aqt_dot_general.dot_general_raw_make
-dot_general_make = aqt_dot_general.dot_general_make
-conv_general_dilated_make = aqt_dot_general.conv_general_dilated_make
 
 ################################################################################
 # Functions below are auxiliary config attribute setters.
