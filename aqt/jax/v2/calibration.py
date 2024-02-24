@@ -39,7 +39,14 @@ class ConstantCalibration(Calibration):
 
 @utils.flax_slots_dataclass
 class AbsMaxCalibration(Calibration):
-  """Simple max(abs(x)) calibration."""
+  """Simple max(abs(x)) calibration.
+
+  Attributes:
+    scale: Set it to something like 0.3, 0.1, 0.03. If scale < 1.0, setting
+      IntNumerics.clip_gradient=True is likely to be important.
+  """
+
+  scale: float | None = None
 
   def get_bound(self, x, shared_axes) -> jnp.ndarray:
     """Calibration."""
@@ -53,4 +60,6 @@ class AbsMaxCalibration(Calibration):
     # int_numerics.IntNumerics.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
+    if self.scale is not None:
+      abs_max = abs_max * self.scale
     return abs_max
