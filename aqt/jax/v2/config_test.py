@@ -331,6 +331,26 @@ class AqtConfigTest(parameterized.TestCase):
                               jax_scope_name='aqt_drhs'))"""
     utils.test_pprint_eq(config.config_fwd_fp8(), expected_cfg)
 
+  def test_set_int_numerics_preserve_zero(self):
+    cfg = config.config_v4()
+    self.assertTrue(cfg.fwd.lhs.quantizer.numerics.preserve_zero)
+    self.assertTrue(cfg.fwd.rhs.quantizer.numerics.preserve_zero)
+    self.assertTrue(cfg.dlhs.lhs.quantizer.numerics.preserve_zero)
+    self.assertTrue(cfg.dlhs.rhs.quantizer.numerics.preserve_zero)
+    self.assertEqual(cfg.fwd.lhs.quantizer.numerics.dtype, jnp.int8)
+    self.assertEqual(cfg.fwd.rhs.quantizer.numerics.dtype, jnp.int8)
+    self.assertEqual(cfg.dlhs.lhs.quantizer.numerics.dtype, jnp.int8)
+    self.assertEqual(cfg.dlhs.rhs.quantizer.numerics.dtype, jnp.int8)
+    config.set_int_numerics_preserve_zero(cfg, preserve_zero=False)
+    self.assertFalse(cfg.fwd.lhs.quantizer.numerics.preserve_zero)
+    self.assertFalse(cfg.fwd.rhs.quantizer.numerics.preserve_zero)
+    self.assertFalse(cfg.dlhs.lhs.quantizer.numerics.preserve_zero)
+    self.assertFalse(cfg.dlhs.rhs.quantizer.numerics.preserve_zero)
+    self.assertIsNone(cfg.fwd.lhs.quantizer.numerics.dtype)
+    self.assertIsNone(cfg.fwd.rhs.quantizer.numerics.dtype)
+    self.assertIsNone(cfg.dlhs.lhs.quantizer.numerics.dtype)
+    self.assertIsNone(cfg.dlhs.rhs.quantizer.numerics.dtype)
+
 
 if __name__ == '__main__':
   absltest.main()

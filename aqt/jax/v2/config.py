@@ -247,6 +247,19 @@ def set_use_fwd_quant(
     cfg.drhs.rhs.use_fwd_quant = drhs_use_fwd_quant
 
 
+def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
+  for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+    for tensor in [dot_general_raw.lhs, dot_general_raw.rhs]:
+      if isinstance(tensor.quantizer.numerics, int_numerics.IntNumerics):
+        tensor.quantizer.numerics.preserve_zero = preserve_zero
+        updated_dtype = (
+            infer_dtype_from_bits(tensor.quantizer.numerics.bits)
+            if preserve_zero
+            else None
+        )
+        tensor.quantizer.numerics.dtype = updated_dtype
+
+
 def set_bits(
     cfg: DotGeneral,
     fwd_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
