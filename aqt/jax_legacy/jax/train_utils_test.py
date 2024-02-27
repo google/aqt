@@ -199,22 +199,28 @@ class UpdateUtilsTest(parameterized.TestCase):
 
   @parameterized.parameters(
       {
+          'step': 70,
+          'sparsity_start_step': 10,
+          'sparsity_update_freq': 10,
+          'num_update_sparsity': 6,
+      },
+      {
           'step': 100,
           'sparsity_start_step': 10,
           'sparsity_update_freq': 10,
-          'num_update_sparsity': 9
+          'num_update_sparsity': 8,
       },
       {
           'step': 10,
           'sparsity_start_step': 10,
           'sparsity_update_freq': 10,
-          'num_update_sparsity': 0
+          'num_update_sparsity': 0,
       },
       {
           'step': 100,
           'sparsity_start_step': 10,
           'sparsity_update_freq': 0,
-          'num_update_sparsity': 0
+          'num_update_sparsity': 0,
       },)
   def test_num_update_sparsity(self, step, sparsity_start_step,
                                sparsity_update_freq, num_update_sparsity):

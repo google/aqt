@@ -12,26 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Small-sized unquantized model.
+"""Full-sized unquantized model.
 
-A 'small size' halves each model size parameter of the full model:
-* 3 layers in the encoder and decoder
-* 512 emd_dim
-* 8 heads
-* 512 qkv_dim
-* 2048 mlp_dim
+A 'full size' means
+* 6 layers in the encoder and decoder
+* 1024 emd_dim
+* 16 heads
+* 1024 qkv_dim
+* 4096 mlp_dim
 """
 
 from aqt.jax_legacy.jax.wmt_mlperf.hparams_configs import base_config
 
 
 def get_config(quant_target=base_config.QuantTarget.NONE):
-  """Returns configuration for a small transformer model."""
-  config = base_config.get_config(n_layers=3, quant_target=quant_target)
-  model = config.model_hparams
-  model.emb_dim = 512
-  model.num_heads = 8
-  model.qkv_dim = 512
-  model.mlp_dim = 2048
-  config.metadata.hyper_str = 'small_bfloat16'
+  config = base_config.get_config(n_layers=6, quant_target=quant_target)
+  config.metadata.hyper_str = 'full_bfloat16'
   return config

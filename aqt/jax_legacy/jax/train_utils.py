@@ -122,7 +122,7 @@ def get_dynamic_context_for_step(
       num_update_sparsity = int(
           (step - sparsity_start_step) / sparsity_update_freq)
   # TODO(ayazdan): Relax this parameter to enable more iterations of decaying.
-  num_update_sparsity = min(16, num_update_sparsity)
+  num_update_sparsity = min(8, num_update_sparsity)
   quantize_acts = step >= activation_bound_start_step
   return quant_config.DynamicContext(
       update_bounds=update_bounds,
