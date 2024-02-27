@@ -260,6 +260,23 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
         tensor.quantizer.numerics.dtype = updated_dtype
 
 
+def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
+  """Set AbsMaxCalibration scale and update clip_gradient accordingly."""
+  for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+    for tensor in [dot_general_raw.lhs, dot_general_raw.rhs]:
+      assert isinstance(
+          tensor.quantizer.calibration, calibration.AbsMaxCalibration
+      ), (
+          'scale is only available in AbsMaxCalibration, while'
+          f'{tensor.quantizer.calibration} is used in current config.'
+      )
+      tensor.quantizer.calibration = calibration.AbsMaxCalibration(scale)
+      if scale < 1.0 and isinstance(
+          tensor.quantizer.numerics, int_numerics.IntNumerics
+      ):
+        tensor.quantizer.numerics.clip_gradient = True
+
+
 def set_bits(
     cfg: DotGeneral,
     fwd_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],

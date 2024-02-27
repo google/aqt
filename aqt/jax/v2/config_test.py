@@ -333,23 +333,47 @@ class AqtConfigTest(parameterized.TestCase):
 
   def test_set_int_numerics_preserve_zero(self):
     cfg = config.config_v4()
-    self.assertTrue(cfg.fwd.lhs.quantizer.numerics.preserve_zero)
-    self.assertTrue(cfg.fwd.rhs.quantizer.numerics.preserve_zero)
-    self.assertTrue(cfg.dlhs.lhs.quantizer.numerics.preserve_zero)
-    self.assertTrue(cfg.dlhs.rhs.quantizer.numerics.preserve_zero)
-    self.assertEqual(cfg.fwd.lhs.quantizer.numerics.dtype, jnp.int8)
-    self.assertEqual(cfg.fwd.rhs.quantizer.numerics.dtype, jnp.int8)
-    self.assertEqual(cfg.dlhs.lhs.quantizer.numerics.dtype, jnp.int8)
-    self.assertEqual(cfg.dlhs.rhs.quantizer.numerics.dtype, jnp.int8)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertTrue(tensor.quantizer.numerics.preserve_zero)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertEqual(tensor.quantizer.numerics.dtype, jnp.int8)
+
     config.set_int_numerics_preserve_zero(cfg, preserve_zero=False)
-    self.assertFalse(cfg.fwd.lhs.quantizer.numerics.preserve_zero)
-    self.assertFalse(cfg.fwd.rhs.quantizer.numerics.preserve_zero)
-    self.assertFalse(cfg.dlhs.lhs.quantizer.numerics.preserve_zero)
-    self.assertFalse(cfg.dlhs.rhs.quantizer.numerics.preserve_zero)
-    self.assertIsNone(cfg.fwd.lhs.quantizer.numerics.dtype)
-    self.assertIsNone(cfg.fwd.rhs.quantizer.numerics.dtype)
-    self.assertIsNone(cfg.dlhs.lhs.quantizer.numerics.dtype)
-    self.assertIsNone(cfg.dlhs.rhs.quantizer.numerics.dtype)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertFalse(tensor.quantizer.numerics.preserve_zero)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertIsNone(tensor.quantizer.numerics.dtype)
+
+  def test_set_absmax_calib_scale(self):
+    cfg = config.config_v4()
+    for tensor in [
+        cfg.fwd.lhs,
+        cfg.fwd.rhs,
+        cfg.dlhs.lhs,
+        cfg.dlhs.rhs,
+        cfg.drhs.lhs,
+        cfg.drhs.rhs,
+    ]:
+      self.assertIsNone(tensor.quantizer.calibration.scale)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertFalse(tensor.quantizer.numerics.clip_gradient)
+
+    config.set_absmax_calib_scale(cfg, scale=3)
+    for tensor in [
+        cfg.fwd.lhs,
+        cfg.fwd.rhs,
+        cfg.dlhs.lhs,
+        cfg.dlhs.rhs,
+        cfg.drhs.lhs,
+        cfg.drhs.rhs,
+    ]:
+      self.assertAlmostEqual(tensor.quantizer.calibration.scale, 3)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertFalse(tensor.quantizer.numerics.clip_gradient)
+
+    config.set_absmax_calib_scale(cfg, scale=0.1)
+    for tensor in [cfg.fwd.lhs, cfg.fwd.rhs, cfg.dlhs.lhs, cfg.dlhs.rhs]:
+      self.assertTrue(tensor.quantizer.numerics.clip_gradient)
 
 
 if __name__ == '__main__':
