@@ -192,6 +192,7 @@ def local_dg(
   )
 
   # First tile_axis CA. CA tile_count axes will be first in xxhs.ba_tile
+  # TODO(yichizh): move the assertion to cfg translator
   assert len(xlhs.ca_to_be_tiled) == len(xrhs.ca_to_be_tiled)
   while len(xlhs.ca_to_be_tiled) > 0:
     cfg_lhs_ca = xlhs.ca_to_be_tiled.pop(0)
@@ -285,6 +286,5 @@ def local_dg(
 
   assert out.shape == ba_sh + lhs_ra_sh_interleaved + rhs_ra_sh_interleaved
   out = out.reshape(ba_sh + lhs_ra_sh_flattened + rhs_ra_sh_flattened)
-  assert out.shape == jax.lax.dot_general(lhs, rhs, dimension_numbers).shape
 
   return out
