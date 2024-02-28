@@ -160,7 +160,7 @@ class TiledDotGeneralTest(parameterized.TestCase):
     # Skip some tests since test size is too big
     for i in range(0, len(tiling_cfgs), 40):
       cfg_in = tiling_cfgs[i]
-      output = tiled_dot_general.local_dg(cfg_in, lhs, rhs, dims)
+      output = tiled_dot_general.tiled_dot_general(cfg_in, lhs, rhs, dims)
       msg = (
           'Test failed. Please try the following single test:\n'
           f'lhs_shape = {lhs.shape}\n'
@@ -200,7 +200,7 @@ class TiledDotGeneralTest(parameterized.TestCase):
         ),
     )
     dims = (((2, 1), (1, 2)), ((4, 3), (3, 0)))
-    out = tiled_dot_general.local_dg(cfg, lhs, rhs, dims)
+    out = tiled_dot_general.tiled_dot_general(cfg, lhs, rhs, dims)
     assert out.shape == jax.lax.dot_general(lhs, rhs, dims).shape
 
 

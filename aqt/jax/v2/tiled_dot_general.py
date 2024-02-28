@@ -80,7 +80,90 @@ def sort_ra_cfg(ra_tiling: list[AxisTiling]) -> list[AxisTiling]:
   return [ra_tiling[i] for i in sorted_idx]
 
 
-def local_dg(
+def empty_list():
+  return dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=False, slots=True)
+class _Xhs:
+  """Structure for bookkeeping of AxisIdx while tiling."""
+
+  x: jnp.ndarray
+
+  # Below are axes indices, similar to dimension_numbers
+  # E.g.
+  #   xhs,shape == [10, 20, 30, ...] ca=[0,1,2], ca_tile=[]
+  #   After splitting axis 1 to 2 tiles, sized 10, we get
+  #   xhs,shape == [10, 2, 10, 30, ...], ca=[0,2,3], ca_tile=[1]
+  #   and other axes indices (ra, ra_tile, ba) also can be updated by +1.
+  ca: list[AxisIdx]
+  ra: list[AxisIdx]
+
+  ca_tile: list[AxisIdx] = empty_list()  # to be summed after DG
+  ra_tile: list[AxisIdx] = empty_list()  # to be reshaped after DG
+  ra_tile_other: list[AxisIdx] = empty_list()  # to be reshaped after DG
+  # There is no point in tiling dot_general's batch axes
+  ba: list[AxisIdx] = dataclasses.field(default_factory=list)
+
+  # axes waiting to be slitted
+  # tensor_tiling: TensorTiling # TODO(lew): use this
+  ca_to_be_tiled: list[AxisTiling] = empty_list()
+  ra_to_be_tiled: list[AxisTiling] = empty_list()
+
+  def tile_axis(self, at: AxisTiling, tile_axis_name: Literal['ca', 'ra']):
+    """Tiles (splits) one axis while maintaining all AxisIdx."""
+    shape = list(self.x.shape)
+    msg = f'{shape[at.axis]=}, {at.tile_size=}, {at.tile_count=}'
+    assert shape[at.axis] == at.tile_size * at.tile_count, msg
+    shape[at.axis] = at.tile_size
+    shape.insert(at.axis, at.tile_count)
+    self.x = self.x.reshape(shape)
+
+    def update(axes):
+      for i in range(len(axes)):
+        axes[i] += int(axes[i] >= at.axis)
+
+    def update_tiling(axes):
+      for i in range(len(axes)):
+        axes[i].axis += int(axes[i].axis >= at.axis)
+
+    update(self.ca)
+    update(self.ca_tile)
+    update(self.ra)
+    update(self.ra_tile)
+    update(self.ra_tile_other)
+    update(self.ba)
+
+    update_tiling(self.ca_to_be_tiled)
+    update_tiling(self.ra_to_be_tiled)
+    # Append tile axis index at the beginning. This has to be after the update
+    match tile_axis_name:
+      case 'ca':
+        self.ca_tile.append(at.axis)
+      case 'ra':
+        self.ra_tile.append(at.axis)
+
+  def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
+    """Adds new axes (bcast_shape) on AxisIdx=0."""
+    assert self.ra_tile_other == list(), 'ra_tile_other already set'
+    self.ra_tile_other = list(range(len(bcast_shape)))
+    self.x = jnp.broadcast_to(self.x, bcast_shape + self.x.shape)
+
+    def update(axes):
+      for i in range(len(axes)):
+        axes[i] += len(bcast_shape)
+
+    update(self.ca)
+    update(self.ca_tile)
+    update(self.ra)
+    update(self.ra_tile)
+    update(self.ba)
+
+  def axes_shape(self, axes: list[AxisIdx]) -> tuple[AxisSize, ...]:
+    return tuple(map(lambda a: self.x.shape[a], axes))
+
+
+def tiled_dot_general(
     cfg: Cfg,
     lhs,
     rhs,
@@ -90,91 +173,10 @@ def local_dg(
 ):
   """local dot_general."""
 
-  def empty_list():
-    return dataclasses.field(default_factory=list)
-
-  @dataclasses.dataclass(frozen=False, slots=True)
-  class Xhs:
-    """Structure for bookkeeping of AxisIdx while tiling."""
-
-    x: jnp.ndarray
-
-    # Below are axes indices, similar to dimension_numbers
-    # E.g.
-    #   xhs,shape == [10, 20, 30, ...] ca=[0,1,2], ca_tile=[]
-    #   After splitting axis 1 to 2 tiles, sized 10, we get
-    #   xhs,shape == [10, 2, 10, 30, ...], ca=[0,2,3], ca_tile=[1]
-    #   and other axes indices (ra, ra_tile, ba) also can be updated by +1.
-    ca: list[AxisIdx]
-    ra: list[AxisIdx]
-
-    ca_tile: list[AxisIdx] = empty_list()  # to be summed after DG
-    ra_tile: list[AxisIdx] = empty_list()  # to be reshaped after DG
-    ra_tile_other: list[AxisIdx] = empty_list()  # to be reshaped after DG
-    # There is no point in tiling dot_general's batch axes
-    ba: list[AxisIdx] = dataclasses.field(default_factory=list)
-
-    # axes waiting to be slitted
-    # tensor_tiling: TensorTiling # TODO(lew): use this
-    ca_to_be_tiled: list[AxisTiling] = empty_list()
-    ra_to_be_tiled: list[AxisTiling] = empty_list()
-
-    def tile_axis(self, at: AxisTiling, tile_axis_name: Literal['ca', 'ra']):
-      """Tiles (splits) one axis while maintaining all AxisIdx."""
-      shape = list(self.x.shape)
-      msg = f'{shape[at.axis]=}, {at.tile_size=}, {at.tile_count=}'
-      assert shape[at.axis] == at.tile_size * at.tile_count, msg
-      shape[at.axis] = at.tile_size
-      shape.insert(at.axis, at.tile_count)
-      self.x = self.x.reshape(shape)
-
-      def update(axes):
-        for i in range(len(axes)):
-          axes[i] += int(axes[i] >= at.axis)
-
-      def update_tiling(axes):
-        for i in range(len(axes)):
-          axes[i].axis += int(axes[i].axis >= at.axis)
-
-      update(self.ca)
-      update(self.ca_tile)
-      update(self.ra)
-      update(self.ra_tile)
-      update(self.ra_tile_other)
-      update(self.ba)
-
-      update_tiling(self.ca_to_be_tiled)
-      update_tiling(self.ra_to_be_tiled)
-      # Append tile axis index at the beginning. This has to be after the update
-      match tile_axis_name:
-        case 'ca':
-          self.ca_tile.append(at.axis)
-        case 'ra':
-          self.ra_tile.append(at.axis)
-
-    def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
-      """Adds new axes (bcast_shape) on AxisIdx=0."""
-      assert self.ra_tile_other == list(), 'ra_tile_other already set'
-      self.ra_tile_other = list(range(len(bcast_shape)))
-      self.x = jnp.broadcast_to(self.x, bcast_shape + self.x.shape)
-
-      def update(axes):
-        for i in range(len(axes)):
-          axes[i] += len(bcast_shape)
-
-      update(self.ca)
-      update(self.ca_tile)
-      update(self.ra)
-      update(self.ra_tile)
-      update(self.ba)
-
-    def axes_shape(self, axes: list[AxisIdx]) -> tuple[AxisSize, ...]:
-      return tuple(map(lambda a: self.x.shape[a], axes))
-
   cfg = copy.deepcopy(cfg)
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
-  xlhs = Xhs(
+  xlhs = _Xhs(
       x=lhs,
       ca=list(lhs_ca),
       ra=get_ra(lhs.ndim, lhs_ca, lhs_ba),
@@ -182,7 +184,7 @@ def local_dg(
       ca_to_be_tiled=cfg.lhs.contraction_axes,
       ra_to_be_tiled=sort_ra_cfg(cfg.lhs.remaining_axes),
   )
-  xrhs = Xhs(
+  xrhs = _Xhs(
       x=rhs,
       ca=list(rhs_ca),
       ra=get_ra(rhs.ndim, rhs_ca, rhs_ba),
