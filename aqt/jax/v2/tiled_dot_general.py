@@ -163,17 +163,8 @@ class _Xhs:
     return tuple(map(lambda a: self.x.shape[a], axes))
 
 
-def tiled_dot_general(
-    cfg: Cfg,
-    lhs,
-    rhs,
-    dimension_numbers,
-    precision=None,
-    preferred_element_type=None,
-):
-  """local dot_general."""
-
-  cfg = copy.deepcopy(cfg)
+def tile(cfg, lhs, rhs, dimension_numbers):
+  """Tile (split) contraction and remaining axes of lhs and rhs to dg."""
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
   xlhs = _Xhs(
@@ -218,6 +209,23 @@ def tiled_dot_general(
       xrhs.ca_tile + xrhs.ba + xrhs.ra_tile_other + xrhs.ra_tile,
   )
   new_dimension_numbers = (tiled_ca, tiled_ba)
+  return new_dimension_numbers, xlhs, xrhs
+
+
+def tiled_dot_general(
+    cfg: Cfg,
+    lhs,
+    rhs,
+    dimension_numbers,
+    precision=None,
+    preferred_element_type=None,
+):
+  """local dot_general."""
+
+  cfg = copy.deepcopy(cfg)
+  new_dimension_numbers, xlhs, xrhs = tile(cfg, lhs, rhs, dimension_numbers)
+
+  # Core dot general call that can be replaced by dg injection
   out = jax.lax.dot_general(
       xlhs.x, xrhs.x, new_dimension_numbers, precision, preferred_element_type
   )
