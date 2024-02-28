@@ -23,31 +23,16 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
+import copy
 import dataclasses
 from typing import Literal
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 AxisIdx = int
 AxisSize = int
-
-
-def interleave(ls, rs):
-  assert len(ls) == len(rs)
-  ret = []
-  for l, r in zip(ls, rs):
-    ret.append(l)
-    ret.append(r)
-  return ret
-
-
-def zip_product(l, r):
-  return map(lambda x, y: x * y, l, r)
-
-
-def get_ra(rank, ca, ba) -> list[AxisIdx]:
-  return list(a for a in range(rank) if a not in ca + ba)
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
@@ -70,6 +55,29 @@ class Cfg:
   # has to be the same lenght as both ca in dimension_numbers[0]
   lhs: TensorTiling
   rhs: TensorTiling
+
+
+def interleave(ls, rs):
+  assert len(ls) == len(rs)
+  ret = []
+  for l, r in zip(ls, rs):
+    ret.append(l)
+    ret.append(r)
+  return ret
+
+
+def zip_product(l, r):
+  return map(lambda x, y: x * y, l, r)
+
+
+def get_ra(rank, ca, ba) -> list[AxisIdx]:
+  return list(a for a in range(rank) if a not in ca + ba)
+
+
+def sort_ra_cfg(ra_tiling: list[AxisTiling]) -> list[AxisTiling]:
+  ra_axes = [a.axis for a in ra_tiling]
+  sorted_idx = np.argsort(ra_axes).tolist()
+  return [ra_tiling[i] for i in sorted_idx]
 
 
 def local_dg(
@@ -163,6 +171,7 @@ def local_dg(
     def axes_shape(self, axes: list[AxisIdx]) -> tuple[AxisSize, ...]:
       return tuple(map(lambda a: self.x.shape[a], axes))
 
+  cfg = copy.deepcopy(cfg)
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
   xlhs = Xhs(
@@ -171,7 +180,7 @@ def local_dg(
       ra=get_ra(lhs.ndim, lhs_ca, lhs_ba),
       ba=list(lhs_ba),
       ca_to_be_tiled=cfg.lhs.contraction_axes,
-      ra_to_be_tiled=cfg.lhs.remaining_axes,
+      ra_to_be_tiled=sort_ra_cfg(cfg.lhs.remaining_axes),
   )
   xrhs = Xhs(
       x=rhs,
@@ -179,7 +188,7 @@ def local_dg(
       ra=get_ra(rhs.ndim, rhs_ca, rhs_ba),
       ba=list(rhs_ba),
       ca_to_be_tiled=cfg.rhs.contraction_axes,
-      ra_to_be_tiled=cfg.rhs.remaining_axes,
+      ra_to_be_tiled=sort_ra_cfg(cfg.rhs.remaining_axes),
   )
 
   # First tile_axis CA. CA tile_count axes will be first in xxhs.ba_tile
