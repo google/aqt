@@ -25,7 +25,7 @@
 
 import copy
 import dataclasses
-from typing import Literal
+from typing import Literal, Self
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -38,8 +38,9 @@ AxisSize = int
 @dataclasses.dataclass(frozen=False, slots=True)
 class AxisTiling:
   axis: AxisIdx
-  tile_count: AxisSize
-  tile_size: AxisSize
+  # At most one of tile_count, tile_size can be None.
+  tile_count: AxisSize | None
+  tile_size: AxisSize | None
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
@@ -51,10 +52,23 @@ class TensorTiling:
 
 @dataclasses.dataclass(frozen=False, slots=True)
 class Cfg:
-  # Sequence of (lhs, rhs) configurations,
-  # has to be the same lenght as both ca in dimension_numbers[0]
+  """Sequence of (lhs, rhs) configurations."""
   lhs: TensorTiling
   rhs: TensorTiling
+
+  def complete_missing(
+      self,
+      lhs_shape: tuple[AxisSize, ...],
+      rhs_shape: tuple[AxisSize, ...],
+      dimension_numbers: jax.lax.DotDimensionNumbers,
+  ) -> Self:
+    """Makes lhs and rhs to cover all the axes."""
+    del lhs_shape
+    del rhs_shape
+    del dimension_numbers
+    new_cfg = copy.deepcopy(self)
+    # TODO(yichizh): Finish this.
+    return new_cfg
 
 
 def interleave(ls, rs):
@@ -170,6 +184,7 @@ def tiled_dot_general(
     dimension_numbers,
     precision=None,
     preferred_element_type=None,
+    dot_general=jax.lax.dot_general,
 ):
   """local dot_general."""
 
@@ -218,7 +233,7 @@ def tiled_dot_general(
       xrhs.ca_tile + xrhs.ba + xrhs.ra_tile_other + xrhs.ra_tile,
   )
   new_dimension_numbers = (tiled_ca, tiled_ba)
-  out = jax.lax.dot_general(
+  out = dot_general(
       xlhs.x, xrhs.x, new_dimension_numbers, precision, preferred_element_type
   )
 

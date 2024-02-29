@@ -23,6 +23,7 @@ from typing import Optional, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2 import tiled_dot_general
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -120,8 +121,7 @@ class Freezer(nn.Module):
 
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
-
-  cfg: Optional[config.DotGeneral] = None
+  cfg: Optional[aqt_dot_general.DotGeneral] = None
   prng_name: Optional[str] = 'params'
 
   # TODO(lew): split out separate class for each side.
@@ -145,6 +145,7 @@ class AqtDotGeneral(nn.Module):
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
+  tiling_cfg: Optional[tiled_dot_general.Cfg] = None
 
   def make_aqt_dg(
       self,
@@ -263,14 +264,43 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-    aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
-    return aqt_dg(
+
+    def aqt_dg2(
         lhs,
         rhs,
         dimension_numbers,
         precision,
-        preferred_element_type=preferred_element_type,
-    )
+        preferred_element_type=None,
+    ):
+      aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
+      return aqt_dg(
+          lhs,
+          rhs,
+          dimension_numbers,
+          precision,
+          preferred_element_type=preferred_element_type,
+      )
+
+    if self.tiling_cfg is None:
+      return aqt_dg2(
+          lhs,
+          rhs,
+          dimension_numbers,
+          precision,
+          preferred_element_type,
+      )
+    else:
+      # We integrate tiling here and not on Jax level, so that the Freezers
+      # observe tiled shapes.
+      return tiled_dot_general.tiled_dot_general(
+          cfg=self.tiling_cfg,
+          lhs=lhs,
+          rhs=rhs,
+          dimension_numbers=dimension_numbers,
+          precision=precision,
+          preferred_element_type=preferred_element_type,
+          dot_general=aqt_dg2,
+      )
 
 
 class AqtEinsum(nn.Module):
