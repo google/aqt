@@ -118,18 +118,19 @@ def generate_tiling_cfgs(lhs_shape, lhs_ca, lhs_ra, rhs_shape, rhs_ca, rhs_ra):
 
   cfgs = []
   assert len(lhs_contraction_axes_tilings) == len(rhs_contraction_axes_tilings)
-  for i in range(len(lhs_contraction_axes_tilings)):
-    for lhs_ra_t in lhs_remaining_axis_tilings:
-      for rhs_ra_t in rhs_remaining_axis_tilings:
+  # Skip some tests since test size is too big
+  for i in range(0, len(lhs_contraction_axes_tilings), 3):
+    for j in range(0, len(lhs_remaining_axis_tilings), 3):
+      for k in range(0, len(rhs_remaining_axis_tilings), 3):
         cfgs.append(
             tiled_dot_general.Cfg(
                 lhs=tiled_dot_general.TensorTiling(
                     contraction_axes=list(lhs_contraction_axes_tilings[i]),
-                    remaining_axes=list(lhs_ra_t),
+                    remaining_axes=list(lhs_remaining_axis_tilings[j]),
                 ),
                 rhs=tiled_dot_general.TensorTiling(
                     contraction_axes=list(rhs_contraction_axes_tilings[i]),
-                    remaining_axes=list(rhs_ra_t),
+                    remaining_axes=list(rhs_remaining_axis_tilings[k]),
                 ),
             )
         )
@@ -142,10 +143,10 @@ class TiledDotGeneralTest(parameterized.TestCase):
   def test_tiled_dot_general(self):
     num_ca = 2
     num_ba = 2
-    num_lhs_ra = 1
+    num_lhs_ra = 2
     num_rhs_ra = 2
     max_shape_val = 32
-    key = jax.random.PRNGKey(3)
+    key = jax.random.PRNGKey(7)
     lhs, rhs, lhs_axes, rhs_axes = generate_inputs(
         key, num_ca, num_ba, num_lhs_ra, num_rhs_ra, max_shape_val
     )
@@ -157,8 +158,7 @@ class TiledDotGeneralTest(parameterized.TestCase):
     tiling_cfgs = generate_tiling_cfgs(
         lhs.shape, lhs_ca, lhs_ra, rhs.shape, rhs_ca, rhs_ra
     )
-    # Skip some tests since test size is too big
-    for i in range(0, len(tiling_cfgs), 40):
+    for i in range(len(tiling_cfgs)):
       cfg_in = tiling_cfgs[i]
       output = tiled_dot_general.tiled_dot_general(cfg_in, lhs, rhs, dims)
       msg = (
