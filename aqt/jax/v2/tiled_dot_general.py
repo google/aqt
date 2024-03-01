@@ -63,11 +63,38 @@ class Cfg:
       dimension_numbers: jax.lax.DotDimensionNumbers,
   ) -> Self:
     """Makes lhs and rhs to cover all the axes."""
-    del lhs_shape
-    del rhs_shape
-    del dimension_numbers
     new_cfg = copy.deepcopy(self)
-    # TODO(yichizh): Finish this.
+    (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+    lhs_ra = get_ra(len(lhs_shape), lhs_ca, lhs_ba)
+    rhs_ra = get_ra(len(rhs_shape), rhs_ca, rhs_ba)
+
+    def f(axes_cfg, axes, shape):
+      # add missing tile_count
+      for axis_tiling in axes_cfg:
+        tc = axis_tiling.tile_count
+        ts = axis_tiling.tile_size
+        axis_shape = shape[axis_tiling.axis]
+        msg = 'At most one of tile_count and tile_size can be None'
+        assert not (tc is None and ts is None), msg
+        axis_tiling.tile_count = axis_shape // ts if tc is None else tc
+        axis_tiling.tile_size = axis_shape // tc if ts is None else ts
+        msg = (
+            f'Axis {axis_tiling.axis} cannot be split into'
+            f' {axis_tiling.tile_count} tiles.'
+        )
+        assert axis_tiling.tile_size * axis_tiling.tile_count == axis_shape, msg
+      # add missing tiled axis
+      axis_in_cfg = [ax.axis for ax in axes_cfg]
+      for axis in axes:
+        if axis not in axis_in_cfg:
+          axes_cfg.append(
+              AxisTiling(axis=axis, tile_count=1, tile_size=shape[axis])
+          )
+
+    f(new_cfg.lhs.contraction_axes, lhs_ca, lhs_shape)
+    f(new_cfg.lhs.remaining_axes, lhs_ra, lhs_shape)
+    f(new_cfg.rhs.contraction_axes, rhs_ca, rhs_shape)
+    f(new_cfg.rhs.remaining_axes, rhs_ra, rhs_shape)
     return new_cfg
 
 
@@ -189,6 +216,7 @@ def tiled_dot_general(
   """local dot_general."""
 
   cfg = copy.deepcopy(cfg)
+  cfg = cfg.complete_missing(lhs.shape, rhs.shape, dimension_numbers)
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
   xlhs = _Xhs(
