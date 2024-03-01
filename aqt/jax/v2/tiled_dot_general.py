@@ -237,11 +237,17 @@ def tiled_dot_general(
   )
 
   # First tile_axis CA. CA tile_count axes will be first in xxhs.ba_tile
-  # TODO(yichizh): move the assertion to cfg translator
   assert len(xlhs.ca_to_be_tiled) == len(xrhs.ca_to_be_tiled)
   while len(xlhs.ca_to_be_tiled) > 0:
     cfg_lhs_ca = xlhs.ca_to_be_tiled.pop(0)
     cfg_rhs_ca = xrhs.ca_to_be_tiled.pop(0)
+    msg = (
+        'Contraction axis tile counts should be the same, but found lhs axis'
+        f' {cfg_lhs_ca.axis} has a tile count of {cfg_lhs_ca.tile_count}, and'
+        f' rhs axis {cfg_rhs_ca.axis} has a tile count of'
+        f' {cfg_rhs_ca.tile_count}'
+    )
+    assert cfg_lhs_ca.tile_count == cfg_rhs_ca.tile_count, msg
     xlhs.tile_axis(cfg_lhs_ca, 'ca')
     xrhs.tile_axis(cfg_rhs_ca, 'ca')
 

@@ -47,18 +47,18 @@ class MnistTest(parameterized.TestCase):
     aqt_cfg = config.config_v4(**configs)
     target_loss = {
         8: {
-            "cpu": [3.931982755661010742187500000000],
-            "TPU v2": [3.950709819793701171875000000000],
-            "TPU v3": [3.950709819793701171875000000000],
-            "TPU v4": [3.950191974639892578125000000000],
-            "TPU v5 lite": [3.949246168136596679687500000000],
+            "cpu": [3.946577072143554687500000000000],
+            "TPU v2": [3.971278667449951171875000000000],
+            "TPU v3": [3.971278667449951171875000000000],
+            "TPU v4": [3.962583541870117187500000000000],
+            "TPU v5 lite": [3.970901489257812500000000000000],
         },
         4: {
-            "cpu": [2.300473213195800781250000000000],
-            "TPU v2": [2.302628040313720703125000000000],
-            "TPU v3": [2.302628040313720703125000000000],
-            "TPU v4": [2.302628040313720703125000000000],
-            "TPU v5 lite": [2.302628040313720703125000000000],
+            "cpu": [2.321579456329345703125000000000],
+            "TPU v2": [2.302614450454711914062500000000],
+            "TPU v3": [2.302614450454711914062500000000],
+            "TPU v4": [2.302614450454711914062500000000],
+            "TPU v5 lite": [2.302614450454711914062500000000],
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
@@ -126,16 +126,32 @@ class MnistTest(parameterized.TestCase):
             "Dense_0": {
                 "AqtDotGeneral_0": {
                     "qrhs": {
-                        "scale": (dtype("float32"), (1, 256)),
-                        "value": (expected_dtype, (3136, 256)),
+                        # The scale_t shape was (1, 256) before tiling.
+                        # After tiling the scale shape is (1, 2, 1, 1, 256),
+                        # then transposed to (2, 1, 1, 1, 256).
+                        "scale": (dtype("float32"), (2, 1, 1, 1, 256)),
+                        # The weight shape was (3136, 256) before tiling.
+                        # After tiling it is (2, 1568, 1, 256).
+                        # Contraction shape 3136 is tiled to (2, 1568).
+                        # The remaining shape 256 is not tiled, so (1, 256).
+                        # Broadcast to other side adds a leading shape of 1.
+                        "value": (expected_dtype, (1, 2, 1568, 1, 256)),
                     }
                 }
             },
             "Dense_1": {
                 "AqtDotGeneral_0": {
                     "qrhs": {
-                        "scale": (dtype("float32"), (1, 10)),
-                        "value": (expected_dtype, (256, 10)),
+                        # The scale_t shape was (1, 10) before tiling.
+                        # After tiling the scale shape is (1, 2, 1, 1, 10),
+                        # then transposed to (2, 1, 1, 1, 10).
+                        "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
+                        # The weight shape was (256, 10) before tiling.
+                        # After tiling it is (2, 128, 1, 10).
+                        # Contraction shape 256 is tiled to (2, 128).
+                        # The remaining shape 10 is not tiled, so (1, 10).
+                        # Broadcast to other side adds a leading shape of 1.
+                        "value": (expected_dtype, (1, 2, 128, 1, 10)),
                     }
                 }
             },

@@ -17,6 +17,7 @@ import functools
 from typing import Any
 from absl import app
 from aqt.jax.v2 import config as aqt_config
+from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2.flax import aqt_flax
 from flax import linen as nn
 from flax import struct
@@ -36,11 +37,30 @@ class CNN(nn.Module):
 
   @nn.compact
   def __call__(self, x):
+    tiling_cfg = tiled_dot_general.Cfg(
+        lhs=tiled_dot_general.TensorTiling(
+            contraction_axes=[
+                tiled_dot_general.AxisTiling(
+                    axis=1, tile_count=2, tile_size=None
+                ),
+            ],
+            remaining_axes=[],
+        ),
+        rhs=tiled_dot_general.TensorTiling(
+            contraction_axes=[
+                tiled_dot_general.AxisTiling(
+                    axis=0, tile_count=2, tile_size=None
+                ),
+            ],
+            remaining_axes=[],
+        ),
+    )
     aqt_dg = functools.partial(
         aqt_flax.AqtDotGeneral,
         self.aqt_cfg,
         # In nn.Dense, it is RHS that has the kernel.
         rhs_quant_mode=self.quant_mode,
+        tiling_cfg=tiling_cfg,
     )
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
