@@ -106,38 +106,39 @@ class MyTest(parameterized.TestCase):
             "cpu": [
                 # One of them is: milan, rome, haswell
                 # Other is: skylake, cascadelake
-                4.007179260253906250000000000000,
-                4.007178306579589843750000000000,
+                3.164344310760498046875000000000,
+                3.164344310760498046875000000000,
             ],
-            "TPU v2": [4.082183361053466796875000000000],
-            "TPU v3": [4.081401824951171875000000000000],
-            "TPU v4": [4.076036930084228515625000000000],
-            "TPU v5 lite": [4.082053184509277343750000000000],
+            "TPU v2": [3.209973335266113281250000000000],
+            "TPU v3": [3.209973335266113281250000000000],
+            "TPU v4": [3.210477352142333984375000000000],
+            "TPU v5 lite": [3.210477113723754882812500000000],
         },
         "e5m2": {
             "cpu": [
-                4.092152595520019531250000000000,
+                3.087945222854614257812500000000,
             ],
-            "TPU v2": [4.168777942657470703125000000000],
-            "TPU v3": [4.168777942657470703125000000000],
-            "TPU v4": [4.184256553649902343750000000000],
-            "TPU v5 lite": [4.168693542480468750000000000000],
+            "TPU v2": [3.169983625411987304687500000000],
+            "TPU v3": [3.169983625411987304687500000000],
+            "TPU v4": [3.169979095458984375000000000000],
+            "TPU v5 lite": [3.169981479644775390625000000000],
         },
     }
 
     # RNGs
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
-    rng, ds_rng = jax.random.split(rng)
+    rng, image_rng = jax.random.split(rng)
+    rng, label_rng = jax.random.split(rng)
     rng, input_rng = jax.random.split(rng)
     del rng
 
     # Dataset
     ds_size = 8
     ds = {
-        "image": jax.random.uniform(key=ds_rng, shape=(ds_size, 28, 28, 1)),
+        "image": jax.random.uniform(key=image_rng, shape=(ds_size, 28, 28, 1)),
         "label": jax.random.randint(
-            key=ds_rng, shape=(ds_size,), minval=0, maxval=10
+            key=label_rng, shape=(ds_size,), minval=0, maxval=10
         ),
     }
 

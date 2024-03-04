@@ -47,18 +47,18 @@ class MnistTest(parameterized.TestCase):
     aqt_cfg = config.config_v4(**configs)
     target_loss = {
         8: {
-            "cpu": [3.946577072143554687500000000000],
-            "TPU v2": [3.971278667449951171875000000000],
-            "TPU v3": [3.971278667449951171875000000000],
-            "TPU v4": [3.962583541870117187500000000000],
-            "TPU v5 lite": [3.970901489257812500000000000000],
+            "cpu": [3.128560066223144531250000000000],
+            "TPU v2": [3.188687801361083984375000000000],
+            "TPU v3": [3.188687801361083984375000000000],
+            "TPU v4": [3.188877105712890625000000000000],
+            "TPU v5 lite": [3.188893318176269531250000000000],
         },
         4: {
-            "cpu": [2.321579456329345703125000000000],
-            "TPU v2": [2.302614450454711914062500000000],
-            "TPU v3": [2.302614450454711914062500000000],
-            "TPU v4": [2.302614450454711914062500000000],
-            "TPU v5 lite": [2.302614450454711914062500000000],
+            "cpu": [2.263035058975219726562500000000],
+            "TPU v2": [2.302649736404418945312500000000],
+            "TPU v3": [2.302649736404418945312500000000],
+            "TPU v4": [2.302649736404418945312500000000],
+            "TPU v5 lite": [2.302649736404418945312500000000],
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
@@ -77,16 +77,17 @@ class MnistTest(parameterized.TestCase):
     # RNGs
     rng = jax.random.key(0)
     rng, init_rng = jax.random.split(rng)
-    rng, ds_rng = jax.random.split(rng)
+    rng, image_rng = jax.random.split(rng)
+    rng, label_rng = jax.random.split(rng)
     rng, input_rng = jax.random.split(rng)
     del rng
 
     # Dataset
     ds_size = 8
     ds = {
-        "image": jax.random.uniform(key=ds_rng, shape=(ds_size, 28, 28, 1)),
+        "image": jax.random.uniform(key=image_rng, shape=(ds_size, 28, 28, 1)),
         "label": jax.random.randint(
-            key=ds_rng, shape=(ds_size,), minval=0, maxval=10
+            key=label_rng, shape=(ds_size,), minval=0, maxval=10
         ),
     }
 
