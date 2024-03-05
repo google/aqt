@@ -265,24 +265,9 @@ class AqtDotGeneral(nn.Module):
       preferred_element_type=None,
   ):
 
-    def aqt_dg2(
-        lhs,
-        rhs,
-        dimension_numbers,
-        precision,
-        preferred_element_type=None,
-    ):
-      aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
-      return aqt_dg(
-          lhs,
-          rhs,
-          dimension_numbers,
-          precision,
-          preferred_element_type=preferred_element_type,
-      )
-
+    aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
     if self.tiling_cfg is None:
-      return aqt_dg2(
+      return aqt_dg(
           lhs,
           rhs,
           dimension_numbers,
@@ -299,7 +284,7 @@ class AqtDotGeneral(nn.Module):
           dimension_numbers=dimension_numbers,
           precision=precision,
           preferred_element_type=preferred_element_type,
-          dot_general=aqt_dg2,
+          dot_general=aqt_dg,
       )
 
 
