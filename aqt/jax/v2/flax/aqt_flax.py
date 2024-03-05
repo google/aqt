@@ -266,26 +266,21 @@ class AqtDotGeneral(nn.Module):
   ):
 
     aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
-    if self.tiling_cfg is None:
-      return aqt_dg(
-          lhs,
-          rhs,
-          dimension_numbers,
-          precision,
-          preferred_element_type,
-      )
-    else:
+    if self.tiling_cfg is not None:
       # We integrate tiling here and not on Jax level, so that the Freezers
       # observe tiled shapes.
-      return tiled_dot_general.tiled_dot_general(
-          cfg=self.tiling_cfg,
-          lhs=lhs,
-          rhs=rhs,
-          dimension_numbers=dimension_numbers,
-          precision=precision,
-          preferred_element_type=preferred_element_type,
+      aqt_dg = functools.partial(
+          tiled_dot_general.tiled_dot_general,
+          self.tiling_cfg,
           dot_general=aqt_dg,
       )
+    return aqt_dg(
+        lhs,
+        rhs,
+        dimension_numbers,
+        precision,
+        preferred_element_type,
+    )
 
 
 class AqtEinsum(nn.Module):
