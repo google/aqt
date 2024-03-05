@@ -107,7 +107,7 @@ class MyTest(parameterized.TestCase):
                 # One of them is: milan, rome, haswell
                 # Other is: skylake, cascadelake
                 3.164344310760498046875000000000,
-                3.164344310760498046875000000000,
+                3.164344787597656250000000000000,
             ],
             "TPU v2": [3.209973335266113281250000000000],
             "TPU v3": [3.209973335266113281250000000000],
@@ -116,7 +116,10 @@ class MyTest(parameterized.TestCase):
         },
         "e5m2": {
             "cpu": [
+                # One of them is: milan, rome, haswell
+                # Other is: skylake, cascadelake
                 3.087945222854614257812500000000,
+                3.087944984436035156250000000000,
             ],
             "TPU v2": [3.169983625411987304687500000000],
             "TPU v3": [3.169983625411987304687500000000],
