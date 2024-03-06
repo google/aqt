@@ -16,7 +16,6 @@
 # pylint: disable=unnecessary-lambda
 
 import copy
-import enum
 import functools
 from typing import Iterable
 from typing import Optional, Union
@@ -24,99 +23,17 @@ from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2.flax import aqt_flax_constant
+from aqt.jax.v2.flax import aqt_freezer
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
 
-class QuantMode(enum.Enum):
-  TRAIN = 1
-  CONVERT = 2
-  SERVE = 3
-
-
-class Freezer(nn.Module):
-  """Identity function that can freeze its input.
-
-  On default it is an identity function that saves the input in a variable.
-  In 'quant_mode=QuantMode.Serve' mode, ignores the input and returns the frozen
-  value. It is usefult to implement 'constant folding' and put quantized weights
-  and scales in the checkpoint for serving. Specifically:
-
-  self.get() returns None when quant_mode=TRAIN or CONVERT, returns variable
-  when quant_mode=SERVE.
-  self.set() does nothing when quant_mode=TRAIN or SERVE, creates and stores
-  quantized tensor when quant_mode=CONVERT.
-  """
-
-  quant_collection: str
-  quant_mode: QuantMode
-  q_shape: Iterable[int]
-  q_dtype: jnp.dtype
-  q_init: nn.initializers.Initializer
-  s_shape: Iterable[int]
-  s_init: nn.initializers.Initializer
-
-  def setup(self):
-    mode = self.quant_mode
-    if mode == QuantMode.SERVE or mode == QuantMode.CONVERT:
-      collection = self.quant_collection
-      q_init = self.q_init
-      q_shape = self.q_shape
-      q_dtype = self.q_dtype
-      s_init = self.s_init
-      s_shape = self.s_shape
-      # TODO(lew): Store whole QTensor?
-      # We could have created one self.variable whose value is a QTensor,
-      # but we are unsure how this would complicate the init function,
-      # which could potentially be used by adding metadata such as
-      # sharding axises, etc.
-      self.qvalue = self.variable(collection, 'value', q_init, q_shape, q_dtype)
-      self.scale_t = self.variable(collection, 'scale', s_init, s_shape)
-
-  def get(self) -> Optional[aqt_tensor.QTensor]:
-    if self.quant_mode == QuantMode.TRAIN:
-      return None
-    elif self.quant_mode == QuantMode.CONVERT:
-      return None
-    elif self.quant_mode == QuantMode.SERVE:
-      qvalue = self.qvalue.value
-      # TODO(b/325626080): Remove the optional logic.
-      if self.q_dtype == jnp.int4:
-        qvalue = qvalue.astype(jnp.int4)
-      return aqt_tensor.QTensor(
-          qvalue,
-          scale=None,
-          scale_t=[self.scale_t.value],
-          dequant_dtype=None,  # Rely on dg output dtype for dequant
-      )
-    else:
-      assert False, 'Unknown quant mode.'
-
-  def set(self, inputs: aqt_tensor.QTensor) -> None:
-    # TODO(b/325626080): Uncomment the assert.
-    # assert inputs.qvalue.dtype == self.q_dtype, (
-    #     f'Freezer got a QTensor of type {inputs.qvalue.dtype} but expected'
-    #     f' {self.q_dtype}.'
-    # )
-    if self.quant_mode == QuantMode.TRAIN:
-      pass
-    elif self.quant_mode == QuantMode.CONVERT:
-      qvalue = inputs.qvalue
-      # TODO(b/325626080): Remove the optional logic.
-      if self.q_dtype == jnp.int4:
-        assert qvalue.dtype == jnp.int4
-        qvalue = qvalue.astype(jnp.int8)
-
-      self.qvalue.value = qvalue
-      assert inputs.scale_t is not None and len(inputs.scale_t) == 1
-      self.scale_t.value = inputs.scale_t[0]
-    elif self.quant_mode == QuantMode.SERVE:
-      # TODO(lew): Optionally compare stored and served value.
-      pass
-    else:
-      assert False, 'Unknown quant mode.'
-    return None
+# Temporarily remain this for backward compatibility.
+# TODO(dhchoi): Make this invisible from aqt_flax.py, after GeMAX side
+# refactoring.
+QuantMode = aqt_flax_constant.QuantMode
 
 
 class AqtDotGeneral(nn.Module):
@@ -147,6 +64,10 @@ class AqtDotGeneral(nn.Module):
   quant_collection: str = 'aqt'
   tiling_cfg: Optional[tiled_dot_general.Cfg] = None
 
+  # Freezer.
+  lhs_freezer: type[aqt_freezer.AbstractFreezer] = aqt_freezer.Freezer
+  rhs_freezer: type[aqt_freezer.AbstractFreezer] = aqt_freezer.Freezer
+
   def make_aqt_dg(
       self,
       lhs_shape,
@@ -176,7 +97,8 @@ class AqtDotGeneral(nn.Module):
     rhs_qm = self.rhs_quant_mode
     lhs_qm = self.lhs_quant_mode
 
-    lhs_freezer = Freezer(
+    # Initialize Injected Freezers.
+    lhs_freezer = self.lhs_freezer(
         name=self.lhs_var_name,
         quant_mode=lhs_qm,
         q_shape=lhs_shape,
@@ -187,7 +109,7 @@ class AqtDotGeneral(nn.Module):
         quant_collection=self.quant_collection,
     )
 
-    rhs_freezer = Freezer(
+    rhs_freezer = self.rhs_freezer(
         name=self.rhs_var_name,
         quant_mode=rhs_qm,
         q_shape=rhs_shape,
