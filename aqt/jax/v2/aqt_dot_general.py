@@ -440,10 +440,13 @@ class DotGeneralRaw:
         assert fwd_quantized == expect_fwd_quantized, msg
         if self.rhs.use_fwd_quant:
           assert fwd_quantized, msg
-          # TODO(lew): Investigate why _rhs_scale_transpose_for_lhs_input is not
-          # needed here.
-          lhs = lhs * rhs.qx.scale_t[0]  # pytype: disable=attribute-error
-          rhs = rhs.qx.qvalue  # pytype: disable=attribute-error
+          # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
+          # avoid an unexpected upcast when rhs is float32 but lhs is float16.
+          lhs = lhs * rhs.qx.scale_t[0].astype(lhs.dtype)  # pytype: disable=attribute-error
+          # rhs qvalue may be integer. It will be quantized again later, so cast
+          # its dtype back to dequant dtype.
+          # TODO(yichizh): avoid double quantization and evaluate model quality.
+          rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)  # pytype: disable=attribute-error
         else:
           rhs = rhs.x  # pytype: disable=attribute-error
       else:
@@ -576,24 +579,18 @@ def _qtensor_dot_general(
 ) -> aqt_tensor.QTensor:
   """QTensor lax.dot_general replacement."""
 
-  def _cast_dtype(
+  def _maybe_dequant(
       input_qtensor: aqt_tensor.QTensor, tensor_cfg: Tensor
   ) -> jnp.ndarray:
-    dtype = tensor_cfg.quantizer.numerics.get_dtype()
-    msg = "Can't cast dtype in DequantMode.THIS_INPUT (fake quant) mode."
     if tensor_cfg.dequant_mode == DequantMode.THIS_INPUT:
-      assert dtype is None, msg
       output = input_qtensor.dequant()
     else:
-      # TODO(yichizh): replace rounding in numerics with casting to dtype.
-      # So fake quant becomes casting to dtype first, then casting to bfloat.
-      # This is because FP8 numerics relies on this cast to do the rounding.
-      qvalue = input_qtensor.qvalue
-      output = qvalue if dtype is None else qvalue.astype(dtype)
+      output = input_qtensor.qvalue
     return output
 
-  lhs_qin = _cast_dtype(lhs_qt, cfg.lhs)
-  rhs_qin = _cast_dtype(rhs_qt, cfg.rhs)
+  # Dequantize before the lax dg call if in fake quant mode
+  lhs_qin = _maybe_dequant(lhs_qt, cfg.lhs)
+  rhs_qin = _maybe_dequant(rhs_qt, cfg.rhs)
 
   dtype_ms = (
       f'Found {cfg.dg_accumulator_dtype=}, {lhs_qin.dtype=} and'

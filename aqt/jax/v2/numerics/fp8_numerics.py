@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for fp8."""
 
-from typing import Any, Literal, Optional, TypeAlias
+from typing import Literal, Optional, TypeAlias
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -29,7 +29,7 @@ fp8_map = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 
-  dtype: Any
+  dtype: Literal[jnp.float8_e4m3fn, jnp.float8_e5m2]
   exponent_bits: int = 4
   mantissa_bits: int = 3
   noise_fn: Optional[stochastic_rounding.NoiseFn] = None
@@ -78,9 +78,8 @@ class Fp8Numerics(numerics.AqtNumerics):
 
 
 def round_to_nearest_even(x: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
-  original_dtype = x.dtype
   x = x.astype(dtype)
   # bitcast_convert to uint8 to avoid allow_excess_precision set in XLA
   x = jax.lax.bitcast_convert_type(x, jnp.uint8)
   x = jax.lax.bitcast_convert_type(x, dtype)
-  return x.astype(original_dtype)
+  return x

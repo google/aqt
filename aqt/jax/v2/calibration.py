@@ -34,7 +34,8 @@ class ConstantCalibration(Calibration):
     """Calibration."""
     del shared_axes
     assert self.bound > 0, 'Bound should be positive.'
-    return jnp.asarray(self.bound).reshape((1,) * len(x.shape))
+    # TODO(yichizh): hardcode bf16 for the scales, subject to quality evaluation
+    return jnp.asarray(self.bound).reshape((1,) * len(x.shape)).astype(x.dtype)
 
 
 @utils.flax_slots_dataclass
@@ -62,4 +63,4 @@ class AbsMaxCalibration(Calibration):
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     if self.scale is not None:
       abs_max = abs_max * self.scale
-    return abs_max
+    return abs_max.astype(x.dtype)

@@ -73,6 +73,12 @@ However if there is any other use, we will drop that assumption."""
     lhs_qt, _ = cfg.lhs.quantizer.quant(lhs, calibration_axes=None)
     rhs_qt, _ = cfg.rhs.quantizer.quant(rhs, calibration_axes=None)
 
+    # lax.conv_general_dilated does not support int8 * float.
+    # Therefore, cast qvalue back to its original data dtype.
+    # Delete the following two lines when the constraint is lifted.
+    lhs_qt = lhs_qt.qvalue_astype(lhs.dtype)
+    rhs_qt = rhs_qt.qvalue_astype(rhs.dtype)
+
     out = lax.conv_general_dilated(
         lhs=lhs_qt.qvalue,
         rhs=rhs_qt.qvalue,

@@ -79,6 +79,7 @@ class IntNumerics(numerics.AqtNumerics):
   def vjp_fwd(self, x, context):
     """Forward pass."""
     res = (x,)
+    input_dtype = x.dtype
     assert self.bits <= 22, 'Too many bits, float32 has less precision.'
 
     # Maybe noise
@@ -87,7 +88,7 @@ class IntNumerics(numerics.AqtNumerics):
           'noise_fn is set, requestic stochastic rounding, but RNG was not '
           'passed in Context.key'
       )
-      x = (x + self.noise_fn(x.shape, context.key)).astype(x.dtype)
+      x = (x + self.noise_fn(x.shape, context.key)).astype(input_dtype)
 
     if self.clip:
       fwd_clip_bound = self._get_fwd_clip_bound()
@@ -102,6 +103,9 @@ class IntNumerics(numerics.AqtNumerics):
       else:
         x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
 
+    # Maybe cast: return dtype is either int or the input dtype
+    dtype = self.get_dtype()
+    x = x.astype(dtype if dtype is not None else input_dtype)
     return x, res
 
   def vjp_bwd(self, res, grad):

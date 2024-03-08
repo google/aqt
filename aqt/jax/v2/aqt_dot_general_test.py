@@ -379,9 +379,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     key = jax.random.PRNGKey(seed)
     cfg = config.tensor_make(prec)
     if isinstance(cfg.quantizer.numerics, int_numerics.IntNumerics):
-      cfg.quantizer.numerics = cfg.quantizer.numerics.replace(
-          preserve_zero=preserve_zero
-      )
+      cfg.quantizer.numerics.preserve_zero = preserve_zero
+      if not preserve_zero:
+        cfg.quantizer.numerics.dtype = None
     cfg.quantizer.calib_shared_axes = (0,)
     sample_size = 10000
     shape = (sample_size,)

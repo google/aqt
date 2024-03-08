@@ -107,7 +107,6 @@ class Freezer(nn.Module):
       if self.q_dtype == jnp.int4:
         assert qvalue.dtype == jnp.int4
         qvalue = qvalue.astype(jnp.int8)
-
       self.qvalue.value = qvalue
       assert inputs.scale_t is not None and len(inputs.scale_t) == 1
       self.scale_t.value = inputs.scale_t[0]
@@ -235,21 +234,11 @@ class AqtDotGeneral(nn.Module):
           rhs_qt=rhs_qt,
           dimension_numbers=dimension_numbers,
       )
-
-      # TODO(lew): Ideally all QTensors would be always quantized.
-      #   Move cast as early as possible.
-      def cast(qt: aqt_tensor.QTensor, dtype) -> aqt_tensor.QTensor:
-        return qt.replace(qvalue=qt.qvalue.astype(dtype))
-
       # Setter
       if self.lhs_apply_quant_mode:
-        lhs_freezer.set(
-            cast(out_lhs_qt, cfg.fwd.lhs.quantizer.numerics.get_dtype())
-        )
+        lhs_freezer.set(out_lhs_qt)
       if self.rhs_apply_quant_mode:
-        rhs_freezer.set(
-            cast(out_rhs_qt, cfg.fwd.rhs.quantizer.numerics.get_dtype())
-        )
+        rhs_freezer.set(out_rhs_qt)
 
       return out
 

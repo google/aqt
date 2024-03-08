@@ -93,8 +93,8 @@ class MyTest(parameterized.TestCase):
         jnp.array([1], dtype=jnp.float32), jnp.float8_e4m3fn
     )
 
-    self.assertEqual(result_f32.dtype, jnp.float32)
-    self.assertEqual(result_f16.dtype, jnp.bfloat16)
+    self.assertEqual(result_f32.dtype, jnp.float8_e4m3fn)
+    self.assertEqual(result_f16.dtype, jnp.float8_e5m2)
 
   @parameterized.parameters([
       dict(fwd_bits="e4m3"),
