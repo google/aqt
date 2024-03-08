@@ -83,6 +83,11 @@ the reader with some example links:
 
 We will try extend a documentation whenever questions appear on AQT Users chat.
 
+
+## How to use AQT in Gemax
+
+[Gemax quantization documentation](https://g3doc.corp.google.com/learning/gemini/gemax/g3doc/quantization.md?cl=head)
+
 ## Research with AQT
 
 We are constantly working to make AQTv2 a modular library.
