@@ -30,12 +30,12 @@ flax_slots_dataclass = functools.partial(
 )
 
 
-def static_field():
-  return flax.struct.field(pytree_node=False)
+def static_field(**kwargs):
+  return flax.struct.field(pytree_node=False, **kwargs)
 
 
-def dynamic_field():
-  return flax.struct.field(pytree_node=True)
+def dynamic_field(**kwargs):
+  return flax.struct.field(pytree_node=True, **kwargs)
 
 
 def print_diff(str_a: str, str_b: str):

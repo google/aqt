@@ -402,6 +402,11 @@ class DotGeneralRaw:
   local_aqt: Optional[LocalAqt] = utils.static_field()
   jax_scope_name: str = utils.static_field()
 
+  # Set it to true in order to train with non-None lhs_qt or rhs_qt.
+  # Gradient will still flow into lhs_qt and/or rhs_qt, but it may be incorrect.
+  # It is a caller responsibility to NOT update these QTensors
+  allow_dummy_gradient_into_qtensor: bool = utils.static_field(default=False)
+
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
     return dot_general_raw_make(*args, **kwargs)
@@ -502,7 +507,18 @@ class DotGeneralRaw:
             )
 
         if input_qtensor is not None:
-          quant_grad = 'Poison. Not needed in serving'
+          if self.allow_dummy_gradient_into_qtensor:
+            # quant_grad might be incorrect here, and should not be used.
+            _, quant_grad = tensor_cfg.quantizer.quant(
+                inputs, calibration_axes=calibration_axes
+            )
+          else:
+            quant_grad = (
+                'Poison. '
+                + 'Gradients are not generally expected in serving. '
+                + 'Please set allow_dummy_gradient_into_qtensor to True '
+                + 'if this is the intended behavior.'
+            )
           output_qtensor = input_qtensor
         else:
           output_qtensor, quant_grad = tensor_cfg.quantizer.quant(
