@@ -14,9 +14,8 @@
 """Flax layer for AQT injection."""
 
 # pylint: disable=unnecessary-lambda
-
+# pylint: disable=g-importing-member
 import copy
-import enum
 import functools
 from typing import Iterable
 from typing import Optional, Union
@@ -24,15 +23,10 @@ from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2.flax.utils import QuantMode
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-
-
-class QuantMode(enum.Enum):
-  TRAIN = 1
-  CONVERT = 2
-  SERVE = 3
 
 
 class Freezer(nn.Module):
