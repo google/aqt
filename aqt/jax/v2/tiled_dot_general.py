@@ -25,10 +25,11 @@
 
 import copy
 import dataclasses
-from typing import Literal, Self
+from typing import Literal
 import jax
 import jax.numpy as jnp
 import numpy as np
+from typing_extensions import Self  # for python version < 3.11
 
 
 AxisIdx = int

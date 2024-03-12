@@ -25,7 +25,7 @@
 
 import enum
 import functools
-from typing import Any, Optional, Self, Sequence, Union
+from typing import Any, Optional, Sequence, Union
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
@@ -37,6 +37,7 @@ from jax import lax
 from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 import numpy as onp
+from typing_extensions import Self  # for python version < 3.11
 
 dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
 
