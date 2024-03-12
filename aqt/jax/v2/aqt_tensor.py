@@ -33,7 +33,10 @@ import jax.typing as jax_typing
 from typing_extensions import Self  # for python version < 3.11
 
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
-
+_MSG_NO_QVALUE = (
+    'QTensor does not have qvalue, but it is asked to access the qvalue.'
+    ' Call QTensor.quant() before using the qvalue.'
+)
 
 if typing.TYPE_CHECKING:
   # These are needed to avoid static typing complaints for sharding.
@@ -51,7 +54,7 @@ class QTensor:
 
   # Quantized (compressed) representation of tensor.
   # Use dequant() method to "decompress" to the original tensor.
-  qvalue: ArrayT
+  qvalue: Optional[ArrayT]
 
   # (scale == None) means that scale is unknown/invalid;
   # Otherwise, check dequant(self) for semantics.
@@ -71,24 +74,40 @@ class QTensor:
       pytree_node=False, default=None
   )
 
+  def quant(self, x):
+    assert self.qvalue is None, 'Already quantized QTensor.'
+    assert self.scale is not None, 'Missing scales to be used for quantization.'
+
+    qvalue = x
+    for s in self.scale:
+      qvalue = qvalue * jax.lax.reciprocal(s)
+
+    # TODO(lew): We should apply numerics here, so that 'quant' function
+    # Can be considered a part of API.
+    return self.replace(qvalue=qvalue)  # pytype: disable=attribute-error
+
   def dequant(self) -> jnp.ndarray:
+    """Dequantizes the QTensor."""
     assert self.scale is not None, 'Missing scales when dequantizing a QTensor.'
     msg = (
         'QTensor is manually created without setting a dequant_detype. It can'
         ' be used in dot_general, but to dequantize you need to set its dtype.'
     )
     assert self.dequant_dtype is not None, msg
+    assert self.qvalue is not None, _MSG_NO_QVALUE
     ret = self.qvalue
     for scale in self.scale:
-      ret = ret.astype(self.dequant_dtype) * scale.astype(self.dequant_dtype)
-    return ret
+      ret = ret.astype(self.dequant_dtype) * scale.astype(self.dequant_dtype)  # pytype: disable=attribute-error
+    return ret  # pytype: disable=bad-return-type
 
   def qvalue_astype(self, dtype) -> Self:
+    assert self.qvalue is not None, _MSG_NO_QVALUE
     return self.replace(qvalue=self.qvalue.astype(dtype))  # pytype: disable=attribute-error
 
   def __getitem__(self, idx: jax_typing.ArrayLike) -> Self:
     """Returns the indexed subtensor on the first axis."""
     assert self.scale_t is None, 'scale_t is not supported in __getitem__'
+    assert self.qvalue is not None, _MSG_NO_QVALUE
     qvalue = self.qvalue[idx]
     scale = [s[idx] for s in self.scale]
     return QTensor(
@@ -100,11 +119,13 @@ class QTensor:
 
   @property
   def ndim(self) -> int:
-    return self.qvalue.ndim
+    assert self.qvalue is not None, _MSG_NO_QVALUE
+    return self.qvalue.ndim  # pytype: disable=attribute-error
 
   @property
   def shape(self) -> Sequence[int]:
-    return self.qvalue.shape
+    assert self.qvalue is not None, _MSG_NO_QVALUE
+    return self.qvalue.shape  # pytype: disable=attribute-error
 
 
 def zeros(

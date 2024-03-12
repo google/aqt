@@ -58,53 +58,67 @@ class Quantizer:
       calibration_axes,
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """The core quantizing function."""
+    if isinstance(self.numerics, no_numerics.NoNumerics):
+      qt = aqt_tensor.QTensor(
+          qvalue=x, scale=[], scale_t=[], dequant_dtype=x.dtype
+      )
+      return qt, None
+
+    qt = self.calculate_scale(x, calibration_axes=calibration_axes)
+    qt, quant_grad = self.calculate_qvalue(x, qt)
+    return qt, quant_grad
+
+  def calculate_scale(
+      self,
+      x,
+      *,
+      calibration_axes,
+  ) -> aqt_tensor.QTensor:
+    """Create incomplete QTensor with only quantization parameters."""
     dequant_dtype = x.dtype
     # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
     # TODO(lew): After we implement optimization to not double-quantize,
     #   what would happen if we pass fq value (xhs_q2) in residual?
-
-    if isinstance(self.numerics, no_numerics.NoNumerics):
-      qt = aqt_tensor.QTensor(
-          qvalue=x, scale=[], scale_t=[], dequant_dtype=dequant_dtype
-      )
-      return qt, None
     if self.calib_shared_axes == "per_tensor":
       shared_axes = list(range(x.ndim))
     else:
       shared_axes = self.calib_shared_axes or calibration_axes
     bound = self.calibration.get_bound(x, shared_axes)
     abs_max_mapped_to = self.numerics.abs_val_mapped_to()
-    scale = abs_max_mapped_to / bound
+    scale = bound / abs_max_mapped_to
 
     if self.po2_scale:
       # With floor the biggest value (we are using jnp.max) is in the range of
       # clipping and therefore have a correct gradinet.
-      scale = 2 ** jnp.floor(jnp.log2(scale))
+      scale = 2 ** jnp.floor(jnp.log2(jax.lax.reciprocal(scale)))
+      scale = jax.lax.reciprocal(scale)
     if self.scale_stop_grad:
       # TODO(lew): Does not matter in DG, because we are using custom gradient.
       #   We should take that into account somehow.
       scale = jax.lax.stop_gradient(scale)
 
-    x_s = x * scale
-
-    x_q, res = self.numerics.vjp_fwd(x_s, self.context)
-    quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
-    # We are passing quant_grad (and not more) ot the backward pass.
-    # That is equivalent to having:
-    # scale = stop_gradient(scale)
-    #
-    # This is not the only choice and we intend to allow experimentation.
-    # However for today we hardcoded this choice.
-    #
-    # In order to achevie no-stop-gradiend solution, we should take vjp
-    # of a larger piece of code like the whole _scale_quant.
-    #
-    # TODO(lew): Implement configuration of stop-gradient.
-    scale = jax.lax.reciprocal(scale)
-
     qt = aqt_tensor.QTensor(
-        qvalue=x_q, scale=[scale], scale_t=None, dequant_dtype=dequant_dtype
+        qvalue=None,
+        scale=[scale],
+        scale_t=None,
+        dequant_dtype=dequant_dtype,
     )
+    return qt
+
+  def calculate_qvalue(
+      self,
+      x,
+      qt: aqt_tensor.QTensor
+  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
+    """Uses the quantization parameters in qt to quantize x."""
+    qt = qt.quant(x)
+
+    # TODO(lew): A logical thing would be if this call was part of
+    # QTensor.quant.
+    x_q, res = self.numerics.vjp_fwd(qt.qvalue, self.context)
+    quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
+
+    qt = qt.replace(qvalue=x_q)
     return qt, quant_grad
 
 
