@@ -68,6 +68,13 @@ update all of google3 code. If you'd like your project to be officially supporte
 
 If that recipe is infeasible for some reason, please contact `lew@`.
 
+When submitting code to AQT that is not a pure refactoring, flaky test is encouraged
+to run in order to update the training loss in flax e2e example. The command is
+
+```
+blaze  test --test_filter=MnistTest --test_output=errors //third_party/py/aqt/jax/v2/examples:flax_e2e_model_test --runs_per_test_detects_flakes --runs_per_test=50
+```
+
 
 ## How to use AQT in Pax
 
@@ -132,6 +139,10 @@ calibration and numerics linked in [section above](#research-with-aqt).
 This is fairly small amount of code, making AQT easy to use for researchers.
 The added benefit is being able to easily try new algorithms on
 production models that adopted AQT.
+
+## AQT Development
+
+Please refer to [this page](./aqt_development.md)
 
 ## AQT Catalyst team
 
