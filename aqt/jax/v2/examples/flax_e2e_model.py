@@ -19,6 +19,7 @@ from absl import app
 from aqt.jax.v2 import config as aqt_config
 from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2.flax import aqt_flax
+from aqt.jax.v2.flax import utils as aqt_flax_utils
 from flax import linen as nn
 from flax import struct
 from flax.metrics import tensorboard
@@ -33,7 +34,7 @@ class CNN(nn.Module):
   """A simple CNN model."""
   bn_use_stats: bool
   aqt_cfg: aqt_config.DotGeneral
-  quant_mode: aqt_flax.QuantMode = aqt_flax.QuantMode.TRAIN
+  quant_mode: aqt_flax_utils.QuantMode = aqt_flax_utils.QuantMode.TRAIN
 
   @nn.compact
   def __call__(self, x):
@@ -238,7 +239,7 @@ def serving_conversion(train_state):
   cnn_freeze = CNN(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
-      quant_mode=aqt_flax.QuantMode.CONVERT,
+      quant_mode=aqt_flax_utils.QuantMode.CONVERT,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -249,7 +250,7 @@ def serving_conversion(train_state):
   cnn_serve = CNN(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
-      quant_mode=aqt_flax.QuantMode.SERVE,
+      quant_mode=aqt_flax_utils.QuantMode.SERVE,
   )
 
   return cnn_serve.apply, model_serving
