@@ -19,6 +19,7 @@ promote them to dedicated files.
 """
 
 import difflib
+import enum
 import functools
 import pprint
 from typing import Any, Sequence
@@ -49,6 +50,13 @@ def assert_eq(value: Any, expected: Any, value_name: str):
 flax_slots_dataclass = functools.partial(
     flax.struct.dataclass, frozen=False, slots=True
 )
+
+
+class QuantMode(enum.Enum):
+  TRAIN = 1
+  CALIBRATE = 2
+  CONVERT = 3
+  SERVE = 4
 
 
 def static_field(**kwargs):
@@ -94,3 +102,11 @@ def infer_dtype_from_bits(bits: int) -> jnp.dtype | None:
       return jnp.int8
     else:
       return None
+
+
+@flax_slots_dataclass
+class Context:
+  key: jax.Array | None = dynamic_field()
+  train_step: int | None = dynamic_field()
+  quant_mode: QuantMode = static_field(default=QuantMode.TRAIN)
+

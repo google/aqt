@@ -146,7 +146,7 @@ class MyTest(parameterized.TestCase):
     }
 
     aqt_cfg = config.config_fwd_fp8(fwd_bits)
-    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg, aqt_cfg)
 
     _, train_loss, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size=ds_size // 2, rng=input_rng

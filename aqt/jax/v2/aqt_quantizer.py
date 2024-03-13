@@ -28,12 +28,6 @@ AbstractAqtCalibration = calibration.Calibration
 
 
 @utils.flax_slots_dataclass
-class Context:
-  key: jax.Array | None = utils.dynamic_field()
-  train_step: int | None = utils.dynamic_field()
-
-
-@utils.flax_slots_dataclass
 class Quantizer:
   """Configuration of quantization of one tensor."""
 
@@ -44,11 +38,11 @@ class Quantizer:
   scale_stop_grad: bool = utils.static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
-  calibration: AbstractAqtCalibration = utils.static_field()
+  calibration: type[AbstractAqtCalibration] = utils.static_field()
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool = utils.static_field()
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
-  context: Context
+  context: utils.Context
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(
@@ -83,7 +77,9 @@ class Quantizer:
       shared_axes = list(range(x.ndim))
     else:
       shared_axes = self.calib_shared_axes or calibration_axes
-    bound = self.calibration.get_bound(x, shared_axes)
+
+    calibrator = self.calibration()
+    bound = calibrator.get_bound(x, shared_axes, self.context)
     abs_max_mapped_to = self.numerics.abs_val_mapped_to()
     scale = bound / abs_max_mapped_to
 

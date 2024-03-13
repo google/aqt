@@ -138,9 +138,9 @@ def quantizer_make(
       numerics=_get_effective_numerics(n_bits, preserve_max_val),
       calib_shared_axes=None,
       scale_stop_grad=True,
-      calibration=calibration.AbsMaxCalibration(),
+      calibration=calibration.AbsMaxCalibration,
       po2_scale=False,
-      context=aqt_quantizer.Context(key=None, train_step=None),
+      context=utils.Context(key=None, train_step=None),
   )
 
 
@@ -456,8 +456,8 @@ class DotGeneralQuantizer(abc.ABC):
   @abc.abstractmethod
   def set_context(
       self,
-      lhs_context: aqt_quantizer.Context,
-      rhs_context: aqt_quantizer.Context,
+      lhs_context: utils.Context,
+      rhs_context: utils.Context,
   ) -> None:
     """Sets context for lhs and rhs."""
     pass
@@ -499,8 +499,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def set_context(
       self,
-      lhs_context: aqt_quantizer.Context,
-      rhs_context: aqt_quantizer.Context,
+      lhs_context: utils.Context,
+      rhs_context: utils.Context,
   ) -> None:
     self.lhs.context = lhs_context
     self.rhs.context = rhs_context
