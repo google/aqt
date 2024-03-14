@@ -49,12 +49,19 @@ DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING = False
 # 'vector unit'.
 SCALE_DTYPE = jnp.float32
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (
+    flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+)
 
 # ActBounds can be an Jax array of floats with a shape that is broadcastable to
 # the shape of activation tensors.
-ActsBoundT = Union[float, jnp.ndarray, get_bounds.GetBounds.Hyper,
-                   get_bounds.DynamicBounds.Hyper, None]
+ActsBoundT = Union[
+    float,
+    jnp.ndarray,
+    get_bounds.GetBounds.Hyper,
+    get_bounds.DynamicBounds.Hyper,
+    None,
+]
 
 
 @dataclass
@@ -86,6 +93,7 @@ class _FloatQuant:
   @dataclass
   class FloatPrec:
     """Parameters for specifying a custom precision floating-point type."""
+
     # The minimum exponent value of the quantized floating-point format.
     exp_min: int
     # The maximum exponent value of the quantized floating-point format.
@@ -146,6 +154,7 @@ class QuantOps:
   @dataclass
   class WeightParams:
     """Parameters for weight quantization."""
+
     prec: _PrecT  # expected precision for weight quantization.
     # enable all available values during quantization
     half_shift: bool
@@ -180,7 +189,8 @@ class QuantOps:
       scale: Optional[jnp.ndarray],
       symmetric: bool,
       bounds: Optional[jnp.ndarray],
-      half_shift: bool):
+      half_shift: bool,
+  ):
     """Default constructor, use of named constructors is strongly encoraged.
 
     Args:
@@ -224,13 +234,15 @@ class QuantOps:
     if bounds is None:
       if fp_quant.is_scaled:
         raise ValueError(
-            'bounds can only be None if fp_quant.is_scaled is False.')
+            'bounds can only be None if fp_quant.is_scaled is False.'
+        )
       return cls(
           prec=fp_quant,
           scale=None,
           symmetric=True,
           bounds=None,
-          half_shift=False)  # disable half_shift for fp quantization
+          half_shift=False,
+      )  # disable half_shift for fp quantization
     else:
       initial_bounds = bounds
       # We set bounds = -1 to indicate no quantization.
@@ -250,11 +262,13 @@ class QuantOps:
           scale=scale,
           symmetric=True,
           bounds=initial_bounds,
-          half_shift=False)  # disable half_shift for fp quantization
+          half_shift=False,
+      )  # disable half_shift for fp quantization
 
   @classmethod
-  def create_symmetric(cls, *, bounds: primitives.BoundsT, prec: int,
-                       half_shift: bool) -> 'QuantOps':
+  def create_symmetric(
+      cls, *, bounds: primitives.BoundsT, prec: int, half_shift: bool
+  ) -> 'QuantOps':
     """Create QuantOps for symmetric activations clipped to [-bounds, bounds].
 
     Args:
@@ -269,8 +283,9 @@ class QuantOps:
     bounds = jnp.asarray(bounds, SCALE_DTYPE)
     if not DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING:
       bounds += jnp.finfo(SCALE_DTYPE).eps  # to avoid div by 0
-    scale = primitives.signed_int_bound(
-        prec=prec, half_shift=half_shift) / bounds
+    scale = (
+        primitives.signed_int_bound(prec=prec, half_shift=half_shift) / bounds
+    )
     # NOTE: stop_gradient is needed here to prevent gradient flow through scale
     # when scale is not a constant, but computed as a function of activations or
     # weights.
@@ -280,11 +295,13 @@ class QuantOps:
         scale=scale,
         symmetric=True,
         bounds=initial_bounds,
-        half_shift=half_shift)
+        half_shift=half_shift,
+    )
 
   @classmethod
-  def create_positive(cls, *, bounds: primitives.BoundsT,
-                      prec: int) -> 'QuantOps':
+  def create_positive(
+      cls, *, bounds: primitives.BoundsT, prec: int
+  ) -> 'QuantOps':
     """Create QuantOps for positive activations clipped to [0, bounds].
 
     Args:
@@ -307,17 +324,24 @@ class QuantOps:
         scale=scale,
         symmetric=False,
         bounds=initial_bounds,
-        half_shift=False)  # disable half_shift for positive distribution
+        half_shift=False,
+    )  # disable half_shift for positive distribution
 
   def assert_scale_shape_is(self, *, shape: Union[int, Tuple[int, ...]]):
+    if self._scale is None:
+      raise ValueError('scale is None')
     # TODO(shivaniagrawal): add option for float scale for fixed bound acts
     # quantization.
-    assert self._scale.shape == shape, (
-        'scale shape is unexpected, should be %s but got %s' %
-        (shape, self._scale.shape))
+    assert (
+        self._scale.shape == shape
+    ), 'scale shape is unexpected, should be %s but got %s' % (
+        shape,
+        self._scale.shape,
+    )
 
-  def to_quantized(self, x: jnp.ndarray, *,
-                   dtype: primitives.jnp_dtype) -> jnp.ndarray:
+  def to_quantized(
+      self, x: jnp.ndarray, *, dtype: primitives.jnp_dtype
+  ) -> jnp.ndarray:
     """Quantizes the argument to the target format.
 
     integer: "upscales", rounds or floors and clips.
@@ -352,11 +376,13 @@ class QuantOps:
         quantize = primitives.floor_and_clip_to_unsigned_int
       scaled_x = jnp.multiply(x, self._scale)
       return quantize(
-          scaled_x, prec=self._prec, dtype=dtype, half_shift=self._half_shift)
+          scaled_x, prec=self._prec, dtype=dtype, half_shift=self._half_shift
+      )
 
   # Same as to_quantized but it just "downscales" using the same scale.
-  def from_quantized(self, x: jnp.ndarray, *,
-                     dtype: primitives.jnp_dtype) -> jnp.ndarray:
+  def from_quantized(
+      self, x: jnp.ndarray, *, dtype: primitives.jnp_dtype
+  ) -> jnp.ndarray:
     """'Rescales' the quantized value.
 
     Args:
@@ -367,17 +393,19 @@ class QuantOps:
       Rescaled x cast to type dtype
     """
 
-    if (isinstance(self._prec, _FloatQuant) and not self._prec.is_scaled):
+    if isinstance(self._prec, _FloatQuant) and not self._prec.is_scaled:
       return x
     rescaled_x = jnp.divide(x, self._scale)
     return rescaled_x.astype(dtype)
 
   # Helper fake quantization
-  def fake_quant(self,
-                 x: jnp.ndarray,
-                 *,
-                 quantized_type: primitives.jnp_dtype,
-                 fake_dependency: Optional[jnp.ndarray] = None) -> jnp.ndarray:
+  def fake_quant(
+      self,
+      x: jnp.ndarray,
+      *,
+      quantized_type: primitives.jnp_dtype,
+      fake_dependency: Optional[jnp.ndarray] = None,
+  ) -> jnp.ndarray:
     del fake_dependency  # unused; this was a remnant of pre-omnistaging JAX.
     x_dtype = x.dtype
     quantized_x = self.to_quantized(x, dtype=quantized_type)
@@ -407,7 +435,8 @@ class QuantOps:
       ops = cls.create_symmetric_fp(bounds=weight_bounds, fp_quant=prec)
     else:
       ops = cls.create_symmetric(
-          bounds=weight_bounds, prec=prec, half_shift=half_shift)
+          bounds=weight_bounds, prec=prec, half_shift=half_shift
+      )
 
 
     if weight_params.expected_scale_shape is not None:
@@ -455,7 +484,8 @@ class QuantOps:
 
     ops = cls.create_weights_ops(w, weight_params=weight_params)
     weight_rescaled = ops.fake_quant(
-        w, quantized_type=quantized_type, fake_dependency=fake_dependency)
+        w, quantized_type=quantized_type, fake_dependency=fake_dependency
+    )
 
 
     return weight_rescaled
@@ -463,9 +493,13 @@ class QuantOps:
   # TODO(malmaud): rename 'input' to activation here and elsewhere in this file.
   @classmethod
   def create_input_ops(
-      cls, inputs: jnp.ndarray, *, hparams: ActHParams,
-      bounds_params: Union[get_bounds.GetBounds.Params,
-                           get_bounds.DynamicBounds.Params, None]
+      cls,
+      inputs: jnp.ndarray,
+      *,
+      hparams: ActHParams,
+      bounds_params: Union[
+          get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params, None
+      ],
   ) -> 'QuantOps':
     """Create a QuantOps that can quantize and dequantize an activation tensor.
 
@@ -501,42 +535,56 @@ class QuantOps:
     # activation statistics to avoid the need to rely on special bounds values
     # when disabling quantization.
     if isinstance(hparams.bounds, get_bounds.GetBounds.Hyper):
-      if not bounds_params and not isinstance(bounds_params,
-                                              get_bounds.GetBounds.Params):
+      if not bounds_params and not isinstance(
+          bounds_params, get_bounds.GetBounds.Params
+      ):
         raise ValueError(
             'act_hparams.bounds is of type GetBounds.Hyper, user must '
-            'provide bounds_params, parameters for GetBounds.')
+            'provide bounds_params, parameters for GetBounds.'
+        )
+      assert bounds_params is not None
       clip_bounds = get_bounds.GetBounds(
-          hyper=hparams.bounds, name=bounds_params.module_name)(
-              inputs,
-              bounds_params=bounds_params,
-          )
+          hyper=hparams.bounds, name=bounds_params.module_name
+      )(
+          inputs,
+          bounds_params=bounds_params,
+      )
     elif isinstance(hparams.bounds, get_bounds.DynamicBounds.Hyper):
-      if not bounds_params and not isinstance(bounds_params,
-                                              get_bounds.DynamicBounds.Params):
+      if not bounds_params and not isinstance(
+          bounds_params, get_bounds.DynamicBounds.Params
+      ):
         raise ValueError(
             'act_hparams.bounds is of type DynamicBounds.Hyper, user must '
-            'provide bounds_params, parameters for DynamicBounds.')
+            'provide bounds_params, parameters for DynamicBounds.'
+        )
+      assert bounds_params is not None
       clip_bounds = get_bounds.DynamicBounds(
-          hyper=hparams.bounds, name=bounds_params.module_name)(
-              inputs,
-              bounds_params=bounds_params,
-          )
+          hyper=hparams.bounds, name=bounds_params.module_name
+      )(
+          inputs,
+          bounds_params=bounds_params,
+      )
 
     elif isinstance(hparams.bounds, (float, jnp.ndarray)):
       clip_bounds = hparams.bounds
     else:
       assert False, (
           '%s is not a valid type for hparams.bounds, should be float, a list '
-          'of floats, DynamicBounds.Hyper or GetBounds.Hyper.' %
-          (type(hparams.bounds)))
+          'of floats, DynamicBounds.Hyper or GetBounds.Hyper.'
+          % (type(hparams.bounds))
+      )
 
     if isinstance(hparams.prec, _FloatQuant):
       ops = cls.create_symmetric_fp(bounds=clip_bounds, fp_quant=hparams.prec)
-    elif hparams.input_distribution == cls.ActHParams.InputDistribution.SYMMETRIC:
+    elif (
+        hparams.input_distribution == cls.ActHParams.InputDistribution.SYMMETRIC
+    ):
       ops = cls.create_symmetric(
-          bounds=clip_bounds, prec=hparams.prec, half_shift=hparams.half_shift)
-    elif hparams.input_distribution == cls.ActHParams.InputDistribution.POSITIVE:
+          bounds=clip_bounds, prec=hparams.prec, half_shift=hparams.half_shift
+      )
+    elif (
+        hparams.input_distribution == cls.ActHParams.InputDistribution.POSITIVE
+    ):
       ops = cls.create_positive(bounds=clip_bounds, prec=hparams.prec)
     else:
       assert False, "can't happen."
@@ -547,14 +595,19 @@ class QuantOps:
       else:
         logging.info(
             'Ignoring value of argument expected_scale_shape. Scale for fixed '
-            'bounds would be scalar.')
+            'bounds would be scalar.'
+        )
     return ops
 
   @classmethod
   def create_inputs_fake_quant(
-      cls, inputs: jnp.ndarray, *, hparams: ActHParams,
-      bounds_params: Union[None, get_bounds.GetBounds.Params,
-                           get_bounds.DynamicBounds.Params]
+      cls,
+      inputs: jnp.ndarray,
+      *,
+      hparams: ActHParams,
+      bounds_params: Union[
+          None, get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params
+      ],
   ) -> jnp.ndarray:
     """Quantize input with fake quant approach.
 
@@ -572,11 +625,16 @@ class QuantOps:
       return inputs
 
     ops = cls.create_input_ops(
-        inputs, hparams=hparams, bounds_params=bounds_params)
+        inputs, hparams=hparams, bounds_params=bounds_params
+    )
 
     quantized_inputs = ops.fake_quant(inputs, quantized_type=SCALE_DTYPE)
-    return lax.cond(ops.should_quantize(), lambda _: quantized_inputs,
-                    lambda _: inputs, None)
+    return lax.cond(
+        ops.should_quantize(),
+        lambda _: quantized_inputs,
+        lambda _: inputs,
+        None,
+    )
 
   # When using GetBounds quantization (if hparams.bounds is an instance of
   # GetBounds.Hyper), if we want to disable quantization but continue to
@@ -612,6 +670,8 @@ class QuantOps:
     """
 
     scale = self._scale
+    if scale is None:
+      raise ValueError('scale is None.')
 
     # If 'scale' is a 1x1x...x1 matrix (ie, only has one element), we
     # canonicalize it to a scalar to simplify the shape-handling code in the AQT
@@ -627,16 +687,19 @@ class QuantOps:
 PrecisionType = typing.Any
 
 
-def quantized_dot(*,
-                  w: jnp.ndarray,
-                  act: jnp.ndarray,
-                  quant_type: QuantType,
-                  weight_params: QuantOps.WeightParams,
-                  act_hparams: Optional[QuantOps.ActHParams],
-                  bounds_params: Union[get_bounds.GetBounds.Params,
-                                       get_bounds.DynamicBounds.Params, None],
-                  prefer_int8_to_int32_dot: bool,
-                  dot_precision: Optional[PrecisionType] = None) -> jnp.ndarray:
+def quantized_dot(
+    *,
+    w: jnp.ndarray,
+    act: jnp.ndarray,
+    quant_type: QuantType,
+    weight_params: QuantOps.WeightParams,
+    act_hparams: Optional[QuantOps.ActHParams],
+    bounds_params: Union[
+        get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params, None
+    ],
+    prefer_int8_to_int32_dot: bool,
+    dot_precision: Optional[PrecisionType] = None,
+) -> jnp.ndarray:
   """LAX dot with optionally quantized weights and activations.
 
   Wraps LAX's `Dot
@@ -651,8 +714,8 @@ def quantized_dot(*,
       quantization.
     act_hparams: Optional activation quantization hyperparamers; instance of
       QuantOps.ActHParams. None would mean no activation quantization.
-    bounds_params: Optional bounds params for auto activation
-      quantization; instance of GetBounds.Params or DynamicBounds.Params.
+    bounds_params: Optional bounds params for auto activation quantization;
+      instance of GetBounds.Params or DynamicBounds.Params.
     prefer_int8_to_int32_dot:  Whether to feed lax.dot inputs with an int8 dtype
       and accumulate to int32 dtype if quantizing to 8bits or 4bits. If False,
       inputs are always foating-point.
@@ -681,10 +744,12 @@ def quantized_dot(*,
   # types, we could update quantized_dot accordingly to take a dtype argument to
   # control the return value type. This applies equally to
   # quantized_dynamic_dot_general.
-  if not (1 <= act.ndim <= 2 and 1 <= w.ndim <= 2 and
-          act.shape[-1] == w.shape[0]):
-    raise ValueError('Incompatible shapes for dot: got {} and {}.'.format(
-        act.shape, w.shape))
+  if not (
+      1 <= act.ndim <= 2 and 1 <= w.ndim <= 2 and act.shape[-1] == w.shape[0]
+  ):
+    raise ValueError(
+        'Incompatible shapes for dot: got {} and {}.'.format(act.shape, w.shape)
+    )
   dot_dimension_numbers = (((act.ndim - 1,), (0,)), ((), ()))
   return quantized_dot_general(
       w=w,
@@ -695,25 +760,29 @@ def quantized_dot(*,
       bounds_params=bounds_params,
       prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,
       dimension_numbers=dot_dimension_numbers,
-      dot_precision=dot_precision)
+      dot_precision=dot_precision,
+  )
 
 
-def _canonicalize_feature_axes(axis: Union[int, Tuple[int, ...]],
-                               ndims: int) -> Tuple[int, ...]:
+def _canonicalize_feature_axes(
+    axis: Union[int, Tuple[int, ...]], ndims: int
+) -> Tuple[int, ...]:
   """Returns feature axes from reduction axes."""
   if not isinstance(axis, tuple):
     axis = (axis,)
   if not all([dim < ndims and dim >= -ndims for dim in axis]):
-    raise ValueError(f'Axis {axis} should correspond to dimensions '
-                     f'of the weight.')
+    raise ValueError(
+        f'Axis {axis} should correspond to dimensions of the weight.'
+    )
   axis = tuple(sorted([(ndims + dim) % ndims for dim in axis]))
   # Feature axes must be either first len(Feature_axis) consecutive
   # dimensions of weight or last len(axis) consecutive axes.
-  is_first_consecutive_dims = (axis == tuple(range(len(axis))))
+  is_first_consecutive_dims = axis == tuple(range(len(axis)))
   if not is_first_consecutive_dims:
     raise ValueError(
         f'Reduction axis {axis} should be consecutive first dimensions '
-        f'of the weight.')
+        'of the weight.'
+    )
   return axis
 
 
@@ -723,28 +792,32 @@ class QuantW:
   scale: jnp.ndarray
 
 
-def flaxformer_dot_general(*,
-                           act: jnp.ndarray,
-                           w: Optional[jnp.ndarray],
-                           dimension_numbers: lax.DotDimensionNumbers,
-                           weight_params: QuantOps.WeightParams,
-                           act_hparams: Optional[QuantOps.ActHParams],
-                           bounds_params: Union[None,
-                                                get_bounds.DynamicBounds.Params,
-                                                get_bounds.GetBounds.Params],
-                           dot_precision: Optional[PrecisionType] = None,
-                           prefer_int8_to_int32_dot: bool = True,
-                           quant_w: Optional[QuantW] = None) -> jnp.ndarray:
+def flaxformer_dot_general(
+    *,
+    act: jnp.ndarray,
+    w: Optional[jnp.ndarray],
+    dimension_numbers: lax.DotDimensionNumbers,
+    weight_params: QuantOps.WeightParams,
+    act_hparams: Optional[QuantOps.ActHParams],
+    bounds_params: Union[
+        None, get_bounds.DynamicBounds.Params, get_bounds.GetBounds.Params
+    ],
+    dot_precision: Optional[PrecisionType] = None,
+    prefer_int8_to_int32_dot: bool = True,
+    quant_w: Optional[QuantW] = None,
+) -> jnp.ndarray:
   """Flaxformer dot general with optionally quantized weights and activations."""
   input_dtype = act.dtype
   is_weight_quantized = False
   is_act_quantized = False
   (axis, _), (_, _) = dimension_numbers
   act_scale_shape = tuple(
-      [act.shape[dim] if dim not in axis else 1 for dim in range(0, act.ndim)])
+      [act.shape[dim] if dim not in axis else 1 for dim in range(0, act.ndim)]
+  )
   if w is not None:
     weight_scale_shape = (1,) * len(axis) + tuple(
-        [w.shape[dim] for dim in range(len(axis), w.ndim)])
+        [w.shape[dim] for dim in range(len(axis), w.ndim)]
+    )
   elif quant_w is not None:
     weight_scale_shape = (1,) * len(axis) + tuple([
         quant_w.quantized_w.shape[dim]
@@ -757,7 +830,9 @@ def flaxformer_dot_general(*,
     is_act_quantized = True
     # Calculate 's', the per-column scale factor on activations.
     act_op = QuantOps.create_input_ops(
-        act, hparams=act_hparams, bounds_params=bounds_params)
+        act, hparams=act_hparams, bounds_params=bounds_params
+    )
+    assert act_op._scale is not None  # pylint: disable=protected-access
     act_quantized = act_op.to_quantized(act, dtype=input_dtype)
 
     # Now calculate s^-1.  First we extract s, the activation scale factor,
@@ -785,16 +860,18 @@ def flaxformer_dot_general(*,
       weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access
 
       if weight_params.expected_scale_shape:
-        shape_utils.assert_shapes_equal(weight_scale.shape,
-                                        weight_params.expected_scale_shape)
+        shape_utils.assert_shapes_equal(
+            weight_scale.shape, weight_params.expected_scale_shape
+        )
 
       # Quantize weight matrix by calculating RoundAndClip(s^-1 * w * t)
       # TODO(malmaud): See comment on 'act_op.to_quantized' above, which
       # applies here as well.
       weight_quantized = weight_op.to_quantized(w, dtype=input_dtype)
   else:
-    assert w is not None, ('w can not be None if weight quantization is not '
-                           'specified.')
+    assert (
+        w is not None
+    ), 'w can not be None if weight quantization is not specified.'
     weight_quantized = w
     weight_scale = jnp.ones(weight_scale_shape, w.dtype)
 
@@ -802,7 +879,8 @@ def flaxformer_dot_general(*,
   metadata_context = contextlib.suppress()
   if flags.FLAGS.metadata_enabled:
     metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-        lhs_prec=None, rhs_prec=weight_prec, rhs_is_weight=True)
+        lhs_prec=None, rhs_prec=weight_prec, rhs_is_weight=True
+    )
   # Use metadata context to annotate op metadata with quantization info
 
   # TODO(shivaniagrawal): this is duplicated code with quantized_dot that can
@@ -822,7 +900,8 @@ def flaxformer_dot_general(*,
   act_prec = None if act_hparams is None else act_hparams.prec
   act_has_symm_distribution = act_hparams is not None and (
       act_hparams.input_distribution
-      == QuantOps.ActHParams.InputDistribution.SYMMETRIC)
+      == QuantOps.ActHParams.InputDistribution.SYMMETRIC
+  )
   weight_prec = None if weight_params is None else weight_params.prec
 
   # To decide whether to use an integer-domain dot operation, we first check
@@ -836,15 +915,19 @@ def flaxformer_dot_general(*,
   # int8.
   # TODO(shivaniagrawal): A proper solution for this would be to have mixed
   # dot(uint8, int8) -> int32 in XLA.
-  weight_fits_in_int8 = is_weight_quantized and (weight_prec is not None and
-                                                 weight_prec <= 8)
+  weight_fits_in_int8 = is_weight_quantized and (
+      weight_prec is not None and weight_prec <= 8
+  )
   # is_act_quantized might be an instance of a Jax tracer instead of a
   # Python boolean since it is generally computed from a dynamic input to a
   # JITted Jax function. Thus we use '&' instead of 'and'.
   act_prec_fits_int8 = act_prec is not None and (
-      (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8))
+      (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8)
+  )
   act_fits_in_int8 = is_act_quantized & act_prec_fits_int8
-  use_int8_to_int32_dot = prefer_int8_to_int32_dot & weight_fits_in_int8 & act_fits_in_int8
+  use_int8_to_int32_dot = (
+      prefer_int8_to_int32_dot & weight_fits_in_int8 & act_fits_in_int8
+  )
 
   with metadata_context:
     # Calculate matmul(...)
@@ -854,7 +937,8 @@ def flaxformer_dot_general(*,
         weight_quantized,
         dimension_numbers=dimension_numbers,
         dot_precision=dot_precision,
-        use_int8_to_int32_dot=use_int8_to_int32_dot)
+        use_int8_to_int32_dot=use_int8_to_int32_dot,
+    )
 
   if is_weight_quantized or is_act_quantized:
 
@@ -869,19 +953,21 @@ def flaxformer_dot_general(*,
 
 
 # TODO(shivaniagrawal): extend it for generic dot_dimenson_numbers
-def quantized_dot_general(*,
-                          w: Optional[jnp.ndarray],
-                          act: jnp.ndarray,
-                          quant_type: QuantType,
-                          weight_params: QuantOps.WeightParams,
-                          act_hparams: Optional[QuantOps.ActHParams],
-                          bounds_params: Union[None,
-                                               get_bounds.GetBounds.Params,
-                                               get_bounds.DynamicBounds.Params],
-                          prefer_int8_to_int32_dot: bool,
-                          dimension_numbers: lax.DotDimensionNumbers,
-                          dot_precision: Optional[PrecisionType] = None,
-                          quant_w: Optional[QuantW] = None) -> jnp.ndarray:
+def quantized_dot_general(
+    *,
+    w: Optional[jnp.ndarray],
+    act: jnp.ndarray,
+    quant_type: QuantType,
+    weight_params: QuantOps.WeightParams,
+    act_hparams: Optional[QuantOps.ActHParams],
+    bounds_params: Union[
+        None, get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params
+    ],
+    prefer_int8_to_int32_dot: bool,
+    dimension_numbers: lax.DotDimensionNumbers,
+    dot_precision: Optional[PrecisionType] = None,
+    quant_w: Optional[QuantW] = None,
+) -> jnp.ndarray:
   """LAX dot general with optionally quantized weights and activations.
 
   Wraps LAX's `Dot General
@@ -895,8 +981,8 @@ def quantized_dot_general(*,
       quantization.
     act_hparams: Optional activation quantization hyperparamers; instance of
       QuantOps.ActHParams. None would mean no activation quantization.
-    bounds_params: Optional bounds params for auto activation
-      quantization; instance of GetBounds.Params or DynamicBounds.Params.
+    bounds_params: Optional bounds params for auto activation quantization;
+      instance of GetBounds.Params or DynamicBounds.Params.
     prefer_int8_to_int32_dot:  Whether to feed lax.dot inputs with an int8 dtype
       and accumulate to int32 dtype if quantizing to 8bits or 4bits. If False,
       inputs are always foating-point.
@@ -918,11 +1004,14 @@ def quantized_dot_general(*,
   """
   supported_contracting_dims = ((act.ndim - 1,), (0,))
   # (lhs_contracting_dims, rhs_contracting_dims)
-  if dimension_numbers != (supported_contracting_dims,
-                           ((), ())):  # (lhs_batch_dims, rhs_batch_dims)):
+  if dimension_numbers != (
+      supported_contracting_dims,
+      ((), ()),
+  ):  # (lhs_batch_dims, rhs_batch_dims)):
     raise ValueError(
         'Quantization is only supported for contracting dimension to be last '
-        'dimension of lhs and first dimension of rhs.')
+        'dimension of lhs and first dimension of rhs.'
+    )
   if quant_type == QuantType.AQT:
     # Let 's' be activation scales and 't' be weight scales. We implement
     # matmul(RoundAndClip(act*s), RoundAndClip(s^-1 * w * t)) *t^-1. In the
@@ -933,7 +1022,8 @@ def quantized_dot_general(*,
     if w is not None:
       if act.shape[-1] != w.shape[0]:
         raise ValueError(
-            'AQT is currently only implemented for matrix*matrix operations')
+            'AQT is currently only implemented for matrix*matrix operations'
+        )
       num_input_channels = act.shape[-1]
 
       if weight_params.axis is None:
@@ -941,7 +1031,8 @@ def quantized_dot_general(*,
       else:
         axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)
         out_channel_shape = tuple(
-            [w.shape[i] for i in range(w.ndim) if i not in axes])
+            [w.shape[i] for i in range(w.ndim) if i not in axes]
+        )
 
       # The ValueError raised in the guard at the beginning of this function
       # should have already checked that the weight matrix has a number of rows
@@ -954,7 +1045,8 @@ def quantized_dot_general(*,
       # dtype being fp32.
       if act.dtype != w.dtype:
         raise TypeError(
-            f'Activations and weight must have the same dtype, but got {act.dtype} and {w.dtype}'
+            'Activations and weight must have the same dtype, but got'
+            f' {act.dtype} and {w.dtype}'
         )
     else:
       assert quant_w is not None
@@ -968,7 +1060,8 @@ def quantized_dot_general(*,
     if act_hparams is not None and act_hparams.prec is not None:
       # Calculate 's', the per-column scale factor on activations.
       act_op = QuantOps.create_input_ops(
-          act, hparams=act_hparams, bounds_params=bounds_params)
+          act, hparams=act_hparams, bounds_params=bounds_params
+      )
       is_act_quantized = act_op.should_quantize()
       # Quantize activation matrix by computing RoundAndClip(w*s)
 
@@ -989,9 +1082,9 @@ def quantized_dot_general(*,
       # quantization, or a matrix with shape (1,.., 1, num_input_channels),
       # corresponding to per-activation-channel scale factors.
       if act_scale.ndim != 0:
-        shape_utils.assert_shapes_equal(act_scale.shape,
-                                        (1,) * (act_scale.ndim - 1) +
-                                        (num_input_channels,))
+        shape_utils.assert_shapes_equal(
+            act_scale.shape, (1,) * (act_scale.ndim - 1) + (num_input_channels,)
+        )
         # 'w' has one row per column of 'act_scale'. To scale each row of 'w' by
         # the inverse of the corresponding column in 'act_scale', we first have
         # to reshape 'act_scale' from (1, ...,  num_input_channels) to
@@ -1009,9 +1102,12 @@ def quantized_dot_general(*,
       act_quantized, act_scale = lax.cond(
           is_act_quantized,
           lambda _: (act_quantized, act_scale),
-          lambda _:  # pylint: disable=g-long-lambda
-          (act, jnp.ones_like(act_scale)),
-          None)
+          lambda _: (  # pylint: disable=g-long-lambda
+              act,
+              jnp.ones_like(act_scale),
+          ),
+          None,
+      )
     else:
       # In this case, activations are not being quantized; only weights. There
       # is no need to absorb activation scales into the rows of the weight
@@ -1029,16 +1125,19 @@ def quantized_dot_general(*,
         # Calculate 'r' from (s^-1) * w
         w_scaled_rows = ((1 / act_scale) * w).astype(input_dtype)
         weight_op = QuantOps.create_weights_ops(
-            w_scaled_rows, weight_params=weight_params)
+            w_scaled_rows, weight_params=weight_params
+        )
         weight_scale = weight_op.get_scale_for_aqt(
-            allow_per_channel_scales=True)
+            allow_per_channel_scales=True
+        )
         # Similar to 'act_scale' above, the weight_scale can either be a single
         # scalar or be a matrix with shape (1, out_channel_shape), corresponding
         # to a per-channel scale factor for the weight matrix. We verify it
         # here.
         if weight_scale.ndim != 0:
-          shape_utils.assert_shapes_equal(weight_scale.shape,
-                                          (1,) + out_channel_shape)
+          shape_utils.assert_shapes_equal(
+              weight_scale.shape, (1,) + out_channel_shape
+          )
           if act.ndim != 0:
             weight_scale_shape = (1,) * (act.ndim - 1) + out_channel_shape
             weight_scale = weight_scale.reshape(weight_scale_shape)
@@ -1047,10 +1146,12 @@ def quantized_dot_general(*,
         # TODO(malmaud): See comment on 'act_op.to_quantized' above, which
         # applies here as well.
         weight_quantized = weight_op.to_quantized(
-            w_scaled_rows, dtype=input_dtype)
+            w_scaled_rows, dtype=input_dtype
+        )
     else:
-      assert w is not None, ('w can not be None if weight quantization is not '
-                             'specified.')
+      assert (
+          w is not None
+      ), 'w can not be None if weight quantization is not specified.'
       weight_quantized = ((1 / act_scale) * w).astype(input_dtype)
       weight_scale = jnp.array(1.0, dtype=SCALE_DTYPE)
 
@@ -1058,7 +1159,8 @@ def quantized_dot_general(*,
     act_prec = None if act_hparams is None else act_hparams.prec
     act_has_symm_distribution = act_hparams is not None and (
         act_hparams.input_distribution
-        == QuantOps.ActHParams.InputDistribution.SYMMETRIC)
+        == QuantOps.ActHParams.InputDistribution.SYMMETRIC
+    )
     weight_prec = None if weight_params is None else weight_params.prec
 
     # To decide whether to use an integer-domain dot operation, we first check
@@ -1072,20 +1174,25 @@ def quantized_dot_general(*,
     # int8.
     # TODO(shivaniagrawal): A proper solution for this would be to have mixed
     # dot(uint8, int8) -> int32 in XLA.
-    weight_fits_in_int8 = is_weight_quantized and (weight_prec is not None and
-                                                   weight_prec <= 8)
+    weight_fits_in_int8 = is_weight_quantized and (
+        weight_prec is not None and weight_prec <= 8
+    )
     # is_act_quantized might be an instance of a Jax tracer instead of a
     # Python boolean since it is generally computed from a dynamic input to a
     # JITted Jax function. Thus we use '&' instead of 'and'.
     act_prec_fits_int8 = act_prec is not None and (
-        (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8))
+        (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8)
+    )
     act_fits_in_int8 = is_act_quantized & act_prec_fits_int8
-    use_int8_to_int32_dot = prefer_int8_to_int32_dot & weight_fits_in_int8 & act_fits_in_int8
+    use_int8_to_int32_dot = (
+        prefer_int8_to_int32_dot & weight_fits_in_int8 & act_fits_in_int8
+    )
 
     metadata_context = contextlib.suppress()
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True)
+          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True
+      )
 
     with metadata_context:
       # Calculate matmul(...)
@@ -1094,7 +1201,8 @@ def quantized_dot_general(*,
           weight_quantized,
           dimension_numbers=dimension_numbers,
           dot_precision=dot_precision,
-          use_int8_to_int32_dot=use_int8_to_int32_dot)
+          use_int8_to_int32_dot=use_int8_to_int32_dot,
+      )
 
     # Scale the columns of the matmul output by computing `matmul(...) * t^-1`
     # TODO(malmaud): Make it possible to return an unquantized matmul to support
@@ -1125,7 +1233,8 @@ def quantized_dot_general(*,
         w,
         weight_params=weight_params,
         quantized_type=quantized_type,
-        fake_dependency=fake_dependency)
+        fake_dependency=fake_dependency,
+    )
 
     # TODO(shivaniagrawal): HParams currently allows act_hparams to be NONE.
     # Going forward we can change act_hparams to be required field where if
@@ -1133,7 +1242,8 @@ def quantized_dot_general(*,
     # quantization.
     if act_hparams:
       act = QuantOps.create_inputs_fake_quant(
-          act, hparams=act_hparams, bounds_params=bounds_params)
+          act, hparams=act_hparams, bounds_params=bounds_params
+      )
 
     metadata_context = contextlib.suppress()
     # Use metadata context to annotate op metadata with quantization info
@@ -1142,10 +1252,12 @@ def quantized_dot_general(*,
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True)
+          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True
+      )
     with metadata_context:
       out_quantized = lax.dot_general(
-          act, w, dimension_numbers=dimension_numbers, precision=dot_precision)
+          act, w, dimension_numbers=dimension_numbers, precision=dot_precision
+      )
     return out_quantized
   else:
     raise RuntimeError(f'Unsupported quant_type {quant_type}')
@@ -1165,9 +1277,12 @@ class QuantizedDot(nn.Module):
   # only the padding mask will be passed as an argumen to '__call__'.
   @nn.compact
   def __call__(
-      self, w: jnp.ndarray, act: jnp.ndarray,
-      bounds_params: Union[None, get_bounds.GetBounds.Params,
-                           get_bounds.DynamicBounds.Params]
+      self,
+      w: jnp.ndarray,
+      act: jnp.ndarray,
+      bounds_params: Union[
+          None, get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params
+      ],
   ) -> jnp.ndarray:
     return quantized_dot(
         w=w,
@@ -1177,7 +1292,8 @@ class QuantizedDot(nn.Module):
         weight_params=self.weight_params,
         act_hparams=self.act_hparams,
         dot_precision=self.dot_precision,
-        prefer_int8_to_int32_dot=self.prefer_int8_to_int32_dot)
+        prefer_int8_to_int32_dot=self.prefer_int8_to_int32_dot,
+    )
 
 
 def quantized_dynamic_dot_general(
@@ -1186,13 +1302,16 @@ def quantized_dynamic_dot_general(
     rhs_act: jnp.ndarray,
     quant_type: QuantType,
     lhs_act_hparams: Optional[QuantOps.ActHParams],
-    lhs_bounds_params: Union[None, get_bounds.GetBounds.Params,
-                             get_bounds.DynamicBounds.Params],
+    lhs_bounds_params: Union[
+        None, get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params
+    ],
     rhs_act_hparams: Optional[QuantOps.ActHParams],
-    rhs_bounds_params: Union[None, get_bounds.GetBounds.Params,
-                             get_bounds.DynamicBounds.Params],
+    rhs_bounds_params: Union[
+        None, get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params
+    ],
     dot_dimension_numbers: lax.DotDimensionNumbers,
-    dot_precision: Optional[PrecisionType] = None) -> jnp.ndarray:
+    dot_precision: Optional[PrecisionType] = None,
+) -> jnp.ndarray:
   """LAX dot general with optionally quantized dynamic inputs.
 
   Wraps LAX's `DotGeneral
@@ -1205,12 +1324,12 @@ def quantized_dynamic_dot_general(
     quant_type: quantization strategy
     lhs_act_hparams: Optional activation quantization hyperparamers for lhs act;
       instance of QuantOps.ActHParams. None means no quantization.
-    lhs_bounds_params: Optional get bounds params for lhs act auto
-      quantization; instance of GetBounds.Params.
+    lhs_bounds_params: Optional get bounds params for lhs act auto quantization;
+      instance of GetBounds.Params.
     rhs_act_hparams: Optional activation quantization hyperparamers for rhs act;
       instance of QuantOps.ActHParams. None means no quantization.
-    rhs_bounds_params: Optional get bounds params for rhs act auto
-      quantization; instance of GetBounds.Params.
+    rhs_bounds_params: Optional get bounds params for rhs act auto quantization;
+      instance of GetBounds.Params.
     dot_dimension_numbers: a tuple of tuples of the form
       `((lhs_contracting_dims, rhs_contracting_dims), (lhs_batch_dims,
       rhs_batch_dims)).
@@ -1238,14 +1357,18 @@ def quantized_dynamic_dot_general(
 
     # See comment on 'input_dtype' in 'quantized_dot'.
     if lhs_act.dtype != rhs_act.dtype:
-      raise TypeError('Both activations must have the same dtypes, but got '
-                      f'{lhs_act.dtype} and {rhs_act.dtype}')
+      raise TypeError(
+          'Both activations must have the same dtypes, but got '
+          f'{lhs_act.dtype} and {rhs_act.dtype}'
+      )
     input_dtype = lhs_act.dtype
 
     def get_tensor_and_scale_for_act(
-        act: jnp.ndarray, hparams: Optional[QuantOps.ActHParams],
-        bounds_params: Union[None, get_bounds.GetBounds.Params,
-                             get_bounds.DynamicBounds.Params]
+        act: jnp.ndarray,
+        hparams: Optional[QuantOps.ActHParams],
+        bounds_params: Union[
+            None, get_bounds.GetBounds.Params, get_bounds.DynamicBounds.Params
+        ],
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
       # We check whether activations should be quantized based on 'hparams'. If
       # so, we quantize it. If not, we return it unchanged. In either case, we
@@ -1253,7 +1376,8 @@ def quantized_dynamic_dot_general(
       # lax.dot_general.
       if hparams is not None and hparams.prec is not None:
         quant_op = QuantOps.create_input_ops(
-            act, hparams=hparams, bounds_params=bounds_params)
+            act, hparams=hparams, bounds_params=bounds_params
+        )
 
         scale = quant_op.get_scale_for_aqt(allow_per_channel_scales=False)
         # Since only per-layer scale factors are supported, we assert that the
@@ -1269,7 +1393,8 @@ def quantized_dynamic_dot_general(
             quant_op.should_quantize(),  #
             lambda _: (act_quantized, scale),  #
             lambda _: (act, jnp.array(1.0, dtype=SCALE_DTYPE)),  #
-            None)
+            None,
+        )
       else:
         # To avoid having a separate code path for every possibility of which of
         # the two input tensors are quantized , we implement not quantizing an
@@ -1278,9 +1403,11 @@ def quantized_dynamic_dot_general(
         return act, jnp.array(1.0, dtype=SCALE_DTYPE)
 
     lhs_quantized, lhs_scale = get_tensor_and_scale_for_act(
-        lhs_act, lhs_act_hparams, lhs_bounds_params)
+        lhs_act, lhs_act_hparams, lhs_bounds_params
+    )
     rhs_quantized, rhs_scale = get_tensor_and_scale_for_act(
-        rhs_act, rhs_act_hparams, rhs_bounds_params)
+        rhs_act, rhs_act_hparams, rhs_bounds_params
+    )
 
     metadata_context = contextlib.suppress()
     # Use metadata context to annotate op metadata with quantization info
@@ -1289,13 +1416,15 @@ def quantized_dynamic_dot_general(
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False)
+          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False
+      )
     with metadata_context:
       out_quantized = lax.dot_general(
           lhs_quantized,
           rhs_quantized,
           dimension_numbers=dot_dimension_numbers,
-          precision=dot_precision)
+          precision=dot_precision,
+      )
 
     # TODO(malmaud): There is an asymmetry here: when we scale the activations
     # to quantize them, the scaling happens in QuantOps.to_quantized. But here,
@@ -1310,11 +1439,13 @@ def quantized_dynamic_dot_general(
     # quantization.
     if lhs_act_hparams:
       lhs_act = QuantOps.create_inputs_fake_quant(
-          lhs_act, hparams=lhs_act_hparams, bounds_params=lhs_bounds_params)
+          lhs_act, hparams=lhs_act_hparams, bounds_params=lhs_bounds_params
+      )
 
     if rhs_act_hparams:
       rhs_act = QuantOps.create_inputs_fake_quant(
-          rhs_act, hparams=rhs_act_hparams, bounds_params=rhs_bounds_params)
+          rhs_act, hparams=rhs_act_hparams, bounds_params=rhs_bounds_params
+      )
 
     metadata_context = contextlib.suppress()
     # Use metadata context to annotate op metadata with quantization info
@@ -1323,13 +1454,15 @@ def quantized_dynamic_dot_general(
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False)
+          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False
+      )
     with metadata_context:
       out = lax.dot_general(
           lhs_act,
           rhs_act,
           dimension_numbers=dot_dimension_numbers,
-          precision=dot_precision)
+          precision=dot_precision,
+      )
   else:
     raise RuntimeError(f'Unknown quant_type {quant_type}')
   return out
@@ -1340,7 +1473,8 @@ def quantized_sum(
     x: jnp.ndarray,  #
     axis: Union[int, Tuple[int, ...]],
     keepdims: bool,
-    prec: Optional[QuantOps.FloatQuant.FloatPrec]) -> jnp.ndarray:
+    prec: Optional[QuantOps.FloatQuant.FloatPrec],
+) -> jnp.ndarray:
   """Sums a tensor while quantizing intermediate accumulations.
 
   This is almost a drop-in replacement for jnp.sum. It only differs in that it
@@ -1358,7 +1492,6 @@ def quantized_sum(
 
   Returns:
     A Jax array with the quantized sum of 'x'.
-
   """
 
   # Don't quantize. In this case, this function just wraps jnp.sum.
@@ -1383,7 +1516,8 @@ def quantized_sum(
       x,
       init_values=zero,
       computation=lambda a, b: quant_ops.to_quantized(a + b, dtype=dtype),
-      dimensions=axis)
+      dimensions=axis,
+  )
 
   if keepdims:
     x_quantized_sum = jnp.expand_dims(x_quantized_sum, axis)
@@ -1398,14 +1532,16 @@ def _quantized_sum_jvp(axis, keepdims, prec, primals, tangents):
   # We calculate the JVP based on the JVP of the original jnp.sum function. That
   # corresponds to using a straight-through-estimator for the quantization
   # operators in 'quantized_sum'.
-  _, y_dot = jax.jvp(lambda x: jnp.sum(x, keepdims=keepdims, axis=axis), (x,),
-                     (x_dot,))
+  _, y_dot = jax.jvp(
+      lambda x: jnp.sum(x, keepdims=keepdims, axis=axis), (x,), (x_dot,)
+  )
   return y, y_dot
 
 
 @functools.partial(jax.custom_jvp, nondiff_argnums=(2, 3, 4))
-def dot_general_aqt(lhs, rhs, dimension_numbers, dot_precision,
-                    use_int8_to_int32_dot):
+def dot_general_aqt(
+    lhs, rhs, dimension_numbers, dot_precision, use_int8_to_int32_dot
+):
   """Wrapper around lax.dot_general, but with option to use integer dot.
 
   This function comes equipped with a custom gradient that defines the
@@ -1436,10 +1572,8 @@ def dot_general_aqt(lhs, rhs, dimension_numbers, dot_precision,
   def dot_general_fp(ops):
     lhs_, rhs_ = ops
     return lax.dot_general(
-        lhs_,
-        rhs_,
-        dimension_numbers=dimension_numbers,
-        precision=dot_precision)
+        lhs_, rhs_, dimension_numbers=dimension_numbers, precision=dot_precision
+    )
 
   def dot_general_int(ops):
     lhs_, rhs_ = ops
@@ -1451,15 +1585,18 @@ def dot_general_aqt(lhs, rhs, dimension_numbers, dot_precision,
         rhs_int,
         dimension_numbers=dimension_numbers,
         precision=dot_precision,
-        preferred_element_type=jnp.int32).astype(input_dtype)
+        preferred_element_type=jnp.int32,
+    ).astype(input_dtype)
 
-  return lax.cond(use_int8_to_int32_dot, dot_general_int, dot_general_fp,
-                  (lhs, rhs))
+  return lax.cond(
+      use_int8_to_int32_dot, dot_general_int, dot_general_fp, (lhs, rhs)
+  )
 
 
 @dot_general_aqt.defjvp
-def _dot_general_aqt_jvp(dimension_numbers, dot_precision,
-                         use_int8_to_int32_dot, primals, tangents):
+def _dot_general_aqt_jvp(
+    dimension_numbers, dot_precision, use_int8_to_int32_dot, primals, tangents
+):
   """Custom gradient for dot_general_aqt that ignores integer casts."""
   lhs, rhs = primals
   lhs_dot, rhs_dot = tangents
@@ -1468,15 +1605,15 @@ def _dot_general_aqt_jvp(dimension_numbers, dot_precision,
       rhs,
       dimension_numbers=dimension_numbers,
       dot_precision=dot_precision,
-      use_int8_to_int32_dot=use_int8_to_int32_dot)
+      use_int8_to_int32_dot=use_int8_to_int32_dot,
+  )
 
   def differentiable_dot_general(lhs_, rhs_):
     return lax.dot_general(
-        lhs_,
-        rhs_,
-        dimension_numbers=dimension_numbers,
-        precision=dot_precision)
+        lhs_, rhs_, dimension_numbers=dimension_numbers, precision=dot_precision
+    )
 
-  _, y_tangent = jax.jvp(differentiable_dot_general, (lhs, rhs),
-                         (lhs_dot, rhs_dot))
+  _, y_tangent = jax.jvp(
+      differentiable_dot_general, (lhs, rhs), (lhs_dot, rhs_dot)
+  )
   return y, y_tangent
