@@ -25,6 +25,7 @@
 
 import copy
 import dataclasses
+import pprint
 from typing import Literal
 import jax
 import jax.numpy as jnp
@@ -219,11 +220,19 @@ def tiled_dot_general(
   cfg = copy.deepcopy(cfg)
   cfg = cfg.complete_missing(lhs.shape, rhs.shape, dimension_numbers)
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  lhs_ra = get_ra(lhs.ndim, lhs_ca, lhs_ba)
+  rhs_ra = get_ra(rhs.ndim, rhs_ca, rhs_ba)
+  g_msg = (
+      'Before tiling: \n'
+      f'lhs: {lhs.shape=}, {lhs_ca=}, {lhs_ba=}, {lhs_ra=} \n'
+      f'rhs: {rhs.shape=}, {rhs_ca=}, {rhs_ba=}, {rhs_ra=} \n'
+      f'tiling cfg: {pprint.pformat(cfg)} \n'
+  )
 
   xlhs = _Xhs(
       x=lhs,
       ca=list(lhs_ca),
-      ra=get_ra(lhs.ndim, lhs_ca, lhs_ba),
+      ra=lhs_ra,
       ba=list(lhs_ba),
       ca_to_be_tiled=cfg.lhs.contraction_axes,
       ra_to_be_tiled=sort_ra_cfg(cfg.lhs.remaining_axes),
@@ -231,14 +240,14 @@ def tiled_dot_general(
   xrhs = _Xhs(
       x=rhs,
       ca=list(rhs_ca),
-      ra=get_ra(rhs.ndim, rhs_ca, rhs_ba),
+      ra=rhs_ra,
       ba=list(rhs_ba),
       ca_to_be_tiled=cfg.rhs.contraction_axes,
       ra_to_be_tiled=sort_ra_cfg(cfg.rhs.remaining_axes),
   )
 
   # First tile_axis CA. CA tile_count axes will be first in xxhs.ba_tile
-  assert len(xlhs.ca_to_be_tiled) == len(xrhs.ca_to_be_tiled)
+  assert len(xlhs.ca_to_be_tiled) == len(xrhs.ca_to_be_tiled), g_msg
   while len(xlhs.ca_to_be_tiled) > 0:
     cfg_lhs_ca = xlhs.ca_to_be_tiled.pop(0)
     cfg_rhs_ca = xrhs.ca_to_be_tiled.pop(0)
@@ -267,27 +276,45 @@ def tiled_dot_general(
       xlhs.ca_tile + xlhs.ba + xlhs.ra_tile + xlhs.ra_tile_other,
       xrhs.ca_tile + xrhs.ba + xrhs.ra_tile_other + xrhs.ra_tile,
   )
-  new_dimension_numbers = (tiled_ca, tiled_ba)
+  tiled_dimension_numbers = (tiled_ca, tiled_ba)
+  tiled_lhs_ra = get_ra(xlhs.x.ndim, tiled_ca[0], tiled_ba[0])
+  tiled_rhs_ra = get_ra(xrhs.x.ndim, tiled_ca[1], tiled_ba[1])
+  g_msg += (
+      'After tiling: \n'
+      f' lhs: lhs.shape={xlhs.x.shape}, lhs_ca={tiled_ca[0]},'
+      f' lhs_ba={tiled_ba[0]}, lhs_ra={tiled_lhs_ra} \n'
+      f' rhs: rhs.shape={xrhs.x.shape}, rhs_ca={tiled_ca[1]},'
+      f' rhs_ba={tiled_ba[1]}, rhs_ra={tiled_rhs_ra} \n'
+  )
+  for axis in tiled_ca[0] + tiled_ba[0]:
+    assert axis >= 0 and axis < xlhs.x.ndim, g_msg
+  for axis in tiled_ca[1] + tiled_ba[1]:
+    assert axis >= 0 and axis < xrhs.x.ndim, g_msg
   out = dot_general(
-      xlhs.x, xrhs.x, new_dimension_numbers, precision, preferred_element_type
+      xlhs.x, xrhs.x, tiled_dimension_numbers, precision, preferred_element_type
   )
 
   # Some assertions
-  assert xlhs.axes_shape(xlhs.ca_tile) == xrhs.axes_shape(xrhs.ca_tile)
+  assert xlhs.axes_shape(xlhs.ca_tile) == xrhs.axes_shape(xrhs.ca_tile), g_msg
   ca_tile_sh = xlhs.axes_shape(xlhs.ca_tile)
 
-  assert xlhs.axes_shape(xlhs.ba) == xrhs.axes_shape(xrhs.ba)
+  assert xlhs.axes_shape(xlhs.ba) == xrhs.axes_shape(xrhs.ba), g_msg
   ba_sh = xlhs.axes_shape(xlhs.ba)
 
-  assert xlhs.axes_shape(xlhs.ra_tile) == xrhs.axes_shape(xrhs.ra_tile_other)
+  assert xlhs.axes_shape(xlhs.ra_tile) == xrhs.axes_shape(
+      xrhs.ra_tile_other
+  ), g_msg
   lhs_ra_tile_sh = xlhs.axes_shape(xlhs.ra_tile)
 
-  assert xlhs.axes_shape(xlhs.ra_tile_other) == xrhs.axes_shape(xrhs.ra_tile)
+  assert xlhs.axes_shape(xlhs.ra_tile_other) == xrhs.axes_shape(
+      xrhs.ra_tile
+  ), g_msg
   rhs_ra_tile_sh = xlhs.axes_shape(xlhs.ra_tile_other)
 
   lhs_ra_sh = xlhs.axes_shape(xlhs.ra)
   rhs_ra_sh = xrhs.axes_shape(xrhs.ra)
 
+  g_msg += f'Tiled dg {out.shape=} \n'
   assert (
       out.shape
       == ca_tile_sh
@@ -296,17 +323,18 @@ def tiled_dot_general(
       + rhs_ra_tile_sh
       + lhs_ra_sh
       + rhs_ra_sh
-  )
+  ), g_msg
 
   # Sum over ca_tile now.
-  # all_ba() returs ca_tile as the first axes in ba.
+  # all_ba() returns ca_tile as the first axes in ba.
   assert len(xlhs.ca_tile) == len(xrhs.ca_tile)
   out = out.sum(axis=range(len(xlhs.ca_tile)))
 
+  g_msg += f'After sum over tiles {out.shape=} \n'
   assert (
       out.shape
       == ba_sh + lhs_ra_tile_sh + rhs_ra_tile_sh + lhs_ra_sh + rhs_ra_sh
-  )
+  ), g_msg
 
   # Transpose tile and tile size together
   # Axis tracking is obsolete here. Only the length is the same.
@@ -336,7 +364,10 @@ def tiled_dot_general(
   lhs_ra_sh_flattened = tuple(zip_product(lhs_ra_tile_sh, lhs_ra_sh))
   rhs_ra_sh_flattened = tuple(zip_product(rhs_ra_tile_sh, rhs_ra_sh))
 
-  assert out.shape == ba_sh + lhs_ra_sh_interleaved + rhs_ra_sh_interleaved
+  g_msg += f'After transpose {out.shape=} \n'
+  assert (
+      out.shape == ba_sh + lhs_ra_sh_interleaved + rhs_ra_sh_interleaved
+  ), g_msg
   out = out.reshape(ba_sh + lhs_ra_sh_flattened + rhs_ra_sh_flattened)
 
   return out
