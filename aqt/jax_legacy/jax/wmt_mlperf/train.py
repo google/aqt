@@ -208,10 +208,10 @@ def cross_entropy_with_logits(logits, targets):
   exp_shifted = jnp.exp(shifted)
   sum_exp = jnp.sum(exp_shifted, axis=-1, keepdims=True)
   log_softmax = shifted - jnp.log(sum_exp)
-  loss = -jnp.sum(targets * log_softmax, axis=-1)
+  loss = - targets * log_softmax
 
   def grad_fn(g):
-    return jnp.expand_dims(g, axis=-1) * (exp_shifted / sum_exp - targets), g
+    return g * (exp_shifted / sum_exp - targets), g
 
   return loss, grad_fn
 
@@ -246,7 +246,7 @@ def compute_weighted_cross_entropy(logits,
   soft_targets = common_utils.onehot(
       targets, vocab_size, on_value=confidence, off_value=low_confidence)
 
-  loss = cross_entropy_with_logits(logits, soft_targets)
+  loss = jnp.sum(cross_entropy_with_logits(logits, soft_targets), axis=-1)
 
   loss = loss - normalizing_constant
 
