@@ -122,9 +122,9 @@ class Quantizer:
     return qt, quant_grad
 
 
-def make_fake_quant(cfg, calibration_axes=None):
+def make_fake_quant(quantizer: Quantizer, calibration_axes=None):
   def fake_quant(x):
-    x_q, _ = cfg.quantizer.quant(x, calibration_axes=calibration_axes)
+    x_q, _ = quantizer.quant(x, calibration_axes=calibration_axes)
     return x_q.dequant()
 
   return fake_quant

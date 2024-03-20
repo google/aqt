@@ -16,11 +16,14 @@
 
 import copy
 from typing import Literal, Optional, TypeAlias, Union
+from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import utils
 
 # Temporary re-export from aqt.jax.v2.aqt_dot_general
+# TODO(lew): Remove these imports, use setters instead
 # pylint: disable=g-importing-member
 # pylint: disable=unused-import
 from aqt.jax.v2.aqt_dot_general import assert_config_validity
@@ -33,6 +36,7 @@ from aqt.jax.v2.aqt_dot_general import DotGeneral
 from aqt.jax.v2.aqt_dot_general import DotGeneralRaw
 from aqt.jax.v2.aqt_dot_general import dtypes_allowed_for_int32_accum
 from aqt.jax.v2.aqt_dot_general import LocalAqt
+from aqt.jax.v2.aqt_dot_general import quantizer_make
 from aqt.jax.v2.aqt_dot_general import Tensor
 from aqt.jax.v2.aqt_dot_general import tensor_make
 
@@ -52,31 +56,6 @@ SKIP = 'skip'
 SkipT: TypeAlias = Literal[SKIP]
 
 
-def infer_dtype_from_bits(bits: int) -> jnp.dtype | None:
-  """Get the dtype for the number of bits provided.
-
-  Args:
-    bits: number of bits for the dtype.
-
-  Returns:
-    The corresponding container dtype for the number of bits provided.
-  """
-  if bits == 4:
-    # this branch should return jnp.int4 directly but
-    # lax.dot_general(int4, int4) is illegal on cpu.
-    # TODO(aqt): Remove this platform check once
-    # https://github.com/google/jax/issues/19682 is fixed.
-    if jax.local_devices()[0].platform != 'cpu':
-      return jnp.int4
-    else:
-      return jnp.int8
-  else:
-    if bits <= 8 and bits >= 2:
-      return jnp.int8
-    else:
-      return None
-
-
 def _split_key(key: Optional[jax.Array], num_splits: int):
   default = (None,) * num_splits
   return default if key is None else jax.random.split(key, num_splits)
@@ -89,12 +68,9 @@ def set_context(
 
   def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
     key1, key2 = _split_key(key, num_splits=2)
-    cfg_raw.lhs.quantizer.context = aqt_quantizer.Context(
-        key=key1, train_step=train_step
-    )
-    cfg_raw.rhs.quantizer.context = aqt_quantizer.Context(
-        key=key2, train_step=train_step
-    )
+    lhs_context = aqt_quantizer.Context(key=key1, train_step=train_step)
+    rhs_context = aqt_quantizer.Context(key=key2, train_step=train_step)
+    cfg_raw.dg_quantizer.set_context(lhs_context, rhs_context)
 
   key_fwd, key_dlhs, key_drhs = _split_key(key, num_splits=3)
   ret_cfg = copy.deepcopy(cfg)
@@ -134,8 +110,11 @@ def set_numerics(
     rhs_numerics: numerics.AqtNumerics,
 ):
   """Set numerics for DotGeneralRaw config."""
-  cfg.lhs.quantizer.numerics = lhs_numerics
-  cfg.rhs.quantizer.numerics = rhs_numerics
+  assert isinstance(
+      cfg.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  cfg.dg_quantizer.lhs.numerics = lhs_numerics
+  cfg.dg_quantizer.rhs.numerics = rhs_numerics
   if (
       lhs_numerics.get_dtype() in dtypes_allowed_for_int32_accum
       and rhs_numerics.get_dtype() in dtypes_allowed_for_int32_accum
@@ -181,45 +160,53 @@ def set_stochastic_rounding(
   msg = f'{implementation} not supported.'
   assert implementation in noise_implementations.keys(), msg
   noise_fn = noise_implementations[implementation]
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
 
-  if vjp_lhs_stochastic_rounding:
-    cfg.dlhs.lhs.quantizer.numerics = cfg.dlhs.lhs.quantizer.numerics.replace(
-        noise_fn=noise_fn
+  lhs_noise_fn = noise_fn if vjp_lhs_stochastic_rounding else None
+  rhs_noise_fn = noise_fn if vjp_rhs_stochastic_rounding else None
+
+  def _set_numerics_noise_fn(
+      dg_quantizer: aqt_dot_general.DefaultDotGeneralQuantizer,
+      lhs_noise_fn: stochastic_rounding.NoiseFn,
+      rhs_noise_fn: stochastic_rounding.NoiseFn,
+  ) -> None:
+    dg_quantizer.lhs.numerics = dg_quantizer.lhs.numerics.replace(
+        noise_fn=lhs_noise_fn
     )
-    cfg.drhs.lhs.quantizer.numerics = cfg.drhs.lhs.quantizer.numerics.replace(
-        noise_fn=noise_fn
-    )
-  else:
-    cfg.dlhs.lhs.quantizer.numerics = cfg.dlhs.lhs.quantizer.numerics.replace(
-        noise_fn=None
-    )
-    cfg.drhs.lhs.quantizer.numerics = cfg.drhs.lhs.quantizer.numerics.replace(
-        noise_fn=None
+    dg_quantizer.rhs.numerics = dg_quantizer.rhs.numerics.replace(
+        noise_fn=rhs_noise_fn
     )
 
-  if vjp_rhs_stochastic_rounding:
-    cfg.dlhs.rhs.quantizer.numerics = cfg.dlhs.rhs.quantizer.numerics.replace(
-        noise_fn=noise_fn
-    )
-    cfg.drhs.rhs.quantizer.numerics = cfg.drhs.rhs.quantizer.numerics.replace(
-        noise_fn=noise_fn
-    )
-  else:
-    cfg.dlhs.rhs.quantizer.numerics = cfg.dlhs.rhs.quantizer.numerics.replace(
-        noise_fn=None
-    )
-    cfg.drhs.rhs.quantizer.numerics = cfg.drhs.rhs.quantizer.numerics.replace(
-        noise_fn=None
-    )
+  _set_numerics_noise_fn(cfg.dlhs.dg_quantizer, lhs_noise_fn, rhs_noise_fn)
+  _set_numerics_noise_fn(cfg.drhs.dg_quantizer, lhs_noise_fn, rhs_noise_fn)
 
 
 def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
-  cfg.fwd.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
-  cfg.fwd.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
-  cfg.drhs.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
-  cfg.drhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
-  cfg.dlhs.lhs.quantizer.calibration = calibration.ConstantCalibration(bound)
-  cfg.dlhs.rhs.quantizer.calibration = calibration.ConstantCalibration(bound)
+  """Sets the static bound for calibration."""
+  def _get_calibration():
+    return calibration.ConstantCalibration(bound)
+
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+
+  cfg.fwd.dg_quantizer.lhs.calibration = _get_calibration()
+  cfg.fwd.dg_quantizer.rhs.calibration = _get_calibration()
+  cfg.dlhs.dg_quantizer.lhs.calibration = _get_calibration()
+  cfg.dlhs.dg_quantizer.rhs.calibration = _get_calibration()
+  cfg.drhs.dg_quantizer.lhs.calibration = _get_calibration()
+  cfg.drhs.dg_quantizer.rhs.calibration = _get_calibration()
 
 
 def set_local_aqt(
@@ -248,33 +235,54 @@ def set_use_fwd_quant(
 
 
 def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
+  """Set preserve_zero for int_numerics."""
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
-    for tensor in [dot_general_raw.lhs, dot_general_raw.rhs]:
-      if isinstance(tensor.quantizer.numerics, int_numerics.IntNumerics):
-        tensor.quantizer.numerics.preserve_zero = preserve_zero
+    dg_quantizer = dot_general_raw.dg_quantizer
+    for q_numerics in [dg_quantizer.lhs.numerics, dg_quantizer.rhs.numerics]:
+      if isinstance(q_numerics, int_numerics.IntNumerics):
+        q_numerics.preserve_zero = preserve_zero
         updated_dtype = (
-            infer_dtype_from_bits(tensor.quantizer.numerics.bits)
+            utils.infer_dtype_from_bits(q_numerics.bits)  # pytype: disable=attribute-error
             if preserve_zero
             else None
         )
-        tensor.quantizer.numerics.dtype = updated_dtype
+        q_numerics.dtype = updated_dtype
 
 
 def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
   """Set AbsMaxCalibration scale and update clip_gradient accordingly."""
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
-    for tensor in [dot_general_raw.lhs, dot_general_raw.rhs]:
-      assert isinstance(
-          tensor.quantizer.calibration, calibration.AbsMaxCalibration
-      ), (
+    dg_quantizer = dot_general_raw.dg_quantizer
+    for quantizer in [dg_quantizer.lhs, dg_quantizer.rhs]:
+      assert isinstance(quantizer.calibration, calibration.AbsMaxCalibration), (
           'scale is only available in AbsMaxCalibration, while'
-          f'{tensor.quantizer.calibration} is used in current config.'
+          f' {quantizer.calibration} is used in current config.'
       )
-      tensor.quantizer.calibration = calibration.AbsMaxCalibration(scale)
+      quantizer.calibration = calibration.AbsMaxCalibration(scale)
       if scale < 1.0 and isinstance(
-          tensor.quantizer.numerics, int_numerics.IntNumerics
+          quantizer.numerics, int_numerics.IntNumerics
       ):
-        tensor.quantizer.numerics.clip_gradient = True
+        quantizer.numerics.clip_gradient = True
 
 
 def set_bits(
@@ -301,7 +309,7 @@ def set_bits(
       )
     else:
       pz = False if bits == 1 else True
-      dtype = infer_dtype_from_bits(bits) if pz else None
+      dtype = utils.infer_dtype_from_bits(bits) if pz else None
       effective_numerics = int_numerics.IntNumerics(
           bits=bits,
           preserve_zero=pz,
@@ -335,7 +343,15 @@ def default_unquantized_config() -> DotGeneral:
   """Aqt config for floating-point dot general."""
 
   def tensor_cfg() -> Tensor:
-    quantizer = aqt_quantizer.Quantizer(
+    cfg = Tensor(
+        use_fwd_quant=None,
+        dequant_mode=DequantMode.OUTPUT,
+        calibration_mode=CalibrationMode.CONTRACTING_AXIS,
+    )
+    return cfg
+
+  def quantizer() -> aqt_quantizer.Quantizer:
+    return aqt_quantizer.Quantizer(
         numerics=no_numerics.NoNumerics(),
         calib_shared_axes=None,
         scale_stop_grad=True,
@@ -343,18 +359,14 @@ def default_unquantized_config() -> DotGeneral:
         po2_scale=False,
         context=aqt_quantizer.Context(key=None, train_step=None),
     )
-    cfg = Tensor(
-        quantizer=quantizer,
-        use_fwd_quant=None,
-        dequant_mode=DequantMode.OUTPUT,
-        calibration_mode=CalibrationMode.CONTRACTING_AXIS,
-    )
-    return cfg
 
   def dg_raw_cfg(jax_scope_name: str) -> DotGeneralRaw:
     return DotGeneralRaw(
         lhs=tensor_cfg(),
         rhs=tensor_cfg(),
+        dg_quantizer=aqt_dot_general.DefaultDotGeneralQuantizer(
+            lhs=quantizer(), rhs=quantizer()
+        ),
         dg_accumulator_dtype=None,
         local_aqt=None,
         jax_scope_name=jax_scope_name,

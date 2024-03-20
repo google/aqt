@@ -169,11 +169,16 @@ class AqtDotGeneral(nn.Module):
     rhs_qm = self.rhs_quant_mode
     lhs_qm = self.lhs_quant_mode
 
+    assert isinstance(
+        cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+    )
+    lhs_q_dtype = cfg.fwd.dg_quantizer.lhs.numerics.get_dtype()
+    rhs_q_dtype = cfg.fwd.dg_quantizer.rhs.numerics.get_dtype()
     lhs_freezer = Freezer(
         name=self.lhs_var_name,
         quant_mode=lhs_qm,
         q_shape=lhs_shape,
-        q_dtype=cfg.fwd.lhs.quantizer.numerics.get_dtype(),
+        q_dtype=lhs_q_dtype,
         q_init=self.lhs_init,
         s_shape=lhs_scale_shape,
         s_init=self.lhs_scale_init,
@@ -184,7 +189,7 @@ class AqtDotGeneral(nn.Module):
         name=self.rhs_var_name,
         quant_mode=rhs_qm,
         q_shape=rhs_shape,
-        q_dtype=cfg.fwd.rhs.quantizer.numerics.get_dtype(),
+        q_dtype=rhs_q_dtype,
         q_init=self.rhs_init,
         s_shape=rhs_scale_shape,
         s_init=self.rhs_scale_init,
@@ -342,6 +347,7 @@ class AqtEinsum(nn.Module):
       if cfg is not None:
         cfg = copy.deepcopy(cfg)
         cfg.fwd.lhs, cfg.fwd.rhs = cfg.fwd.rhs, cfg.fwd.lhs
+        cfg.fwd.dg_quantizer.swap_lhs_and_rhs()
         cfg.dlhs, cfg.drhs = cfg.drhs, cfg.dlhs
       lhs_quant_mode, rhs_quant_mode = rhs_quant_mode, lhs_quant_mode
       lhs_init, rhs_init = rhs_init, lhs_init

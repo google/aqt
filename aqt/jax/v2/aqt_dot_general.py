@@ -23,21 +23,25 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 
+import abc
 import enum
 import functools
 from typing import Any, Optional, Sequence, Union
+
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
+from aqt.jax.v2.numerics import numerics as aqt_numerics
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 import numpy as onp
 from typing_extensions import Self  # for python version < 3.11
+
 
 dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
 
@@ -68,7 +72,6 @@ class DequantMode(enum.Enum):
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
-  quantizer: aqt_quantizer.Quantizer
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
   use_fwd_quant: Optional[bool] = utils.static_field()
@@ -87,10 +90,10 @@ class LocalAqt:
   contraction_axis_shard_count: int = utils.static_field()
 
 
-def tensor_make(
+def _get_effective_numerics(
     bits: Optional[int], preserve_max_val: bool = False
-) -> 'Tensor':
-  """Makes config.Tensor."""
+) -> aqt_numerics.AqtNumerics:
+  """Retrieves effective numerics for the given args."""
   if bits is None:
     effective_numerics = no_numerics.NoNumerics()
   else:
@@ -116,21 +119,43 @@ def tensor_make(
         clip_gradient=False,  # This can be disabled when using abs-max scaling.
         dtype=dtype,
     )
-  quantizer = aqt_quantizer.Quantizer(
-      numerics=effective_numerics,
+  return effective_numerics
+
+
+def tensor_make() -> 'Tensor':
+  """Makes config.Tensor."""
+  return Tensor(
+      use_fwd_quant=None,
+      dequant_mode=DequantMode.OUTPUT,
+      calibration_mode=CalibrationMode.CONTRACTING_AXIS,
+  )
+
+
+def quantizer_make(
+    n_bits: int | None, preserve_max_val: bool = False
+) -> aqt_quantizer.Quantizer:
+  """Makes aqt_quantizer.Quantizer."""
+  return aqt_quantizer.Quantizer(
+      numerics=_get_effective_numerics(n_bits, preserve_max_val),
       calib_shared_axes=None,
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
       po2_scale=False,
       context=aqt_quantizer.Context(key=None, train_step=None),
   )
-  return Tensor(
-      quantizer=quantizer,
-      # dtype_x=dtype,
-      use_fwd_quant=None,
-      dequant_mode=DequantMode.OUTPUT,
-      calibration_mode=CalibrationMode.CONTRACTING_AXIS,
-  )
+
+
+def _default_dg_quantizer_make(
+    lhs_bits: int | None = None,
+    rhs_bits: int | None = None,
+    lhs_preserve_max_val: bool = False,
+    rhs_preserve_max_val: bool = False,
+) -> 'DefaultDotGeneralQuantizer':
+  """Makes config.DotGeneralQuantizer."""
+  lhs = quantizer_make(lhs_bits, lhs_preserve_max_val)
+  rhs = quantizer_make(rhs_bits, rhs_preserve_max_val)
+
+  return DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
 
 
 def dot_general_raw_make(
@@ -140,8 +165,8 @@ def dot_general_raw_make(
     jax_scope_name='aqt',
 ) -> 'DotGeneralRaw':
   """Create quantization configs for input matrices to a matmul."""
-  lhs_cfg = tensor_make(lhs_bits)
-  rhs_cfg = tensor_make(rhs_bits)
+  lhs_cfg = tensor_make()
+  rhs_cfg = tensor_make()
 
   # Binary uses 0.5 right now.
   if (
@@ -154,9 +179,12 @@ def dot_general_raw_make(
   else:
     dg_accumulator_dtype = None
 
+  dg_quantizer = _default_dg_quantizer_make(lhs_bits, rhs_bits)
+
   return DotGeneralRaw(
       lhs=lhs_cfg,
       rhs=rhs_cfg,
+      dg_quantizer=dg_quantizer,
       dg_accumulator_dtype=dg_accumulator_dtype,
       local_aqt=local_aqt,
       jax_scope_name=jax_scope_name,
@@ -171,14 +199,17 @@ def conv_general_dilated_make(
   """Create quantization config conv_general_dilated."""
   config = dot_general_raw_make(lhs_bits, rhs_bits)
   # Hardcoding flax assumptions.
-  if config.lhs:
-    config.lhs.quantizer.calib_shared_axes = list(
-        range(1, spatial_dimensions + 2)
-    )
-  if config.rhs:
-    config.rhs.quantizer.calib_shared_axes = list(
-        range(0, spatial_dimensions + 2 - 1)
-    )
+  lhs_calib_shared_axes = (
+      list(range(1, spatial_dimensions + 2)) if config.lhs else None
+  )
+  rhs_calib_shared_axes = (
+      list(range(0, spatial_dimensions + 2 - 1)) if config.rhs else None
+  )
+
+  assert isinstance(config.dg_quantizer, DefaultDotGeneralQuantizer)
+  config.dg_quantizer.lhs.calib_shared_axes = lhs_calib_shared_axes
+  config.dg_quantizer.rhs.calib_shared_axes = rhs_calib_shared_axes
+
   return config
 
 
@@ -394,11 +425,95 @@ def _get_scale_t(
 
 
 @utils.flax_slots_dataclass
+class DotGeneralQuantizer(abc.ABC):
+  """Abstract class for dot_general quantizer."""
+
+  @abc.abstractmethod
+  def __call__(
+      self,
+      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+  ) -> tuple[
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+  ]:
+    pass
+
+  @abc.abstractmethod
+  def swap_lhs_and_rhs(self) -> None:
+    """Swaps lhs and rhs configuration."""
+    pass
+
+  @abc.abstractmethod
+  def assert_calib_shared_axes_value(
+      self,
+      lhs_val: Sequence[int] | None,
+      rhs_val: Sequence[int] | None,
+      msg: str,
+  ) -> None:
+    """Asserts if calib_shared_axes have certain values."""
+    pass
+
+  @abc.abstractmethod
+  def set_context(
+      self,
+      lhs_context: aqt_quantizer.Context,
+      rhs_context: aqt_quantizer.Context,
+  ) -> None:
+    """Sets context for lhs and rhs."""
+    pass
+
+
+@utils.flax_slots_dataclass
+class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
+  """Default dot_general quantizer."""
+
+  lhs: aqt_quantizer.Quantizer
+  rhs: aqt_quantizer.Quantizer
+
+  def __call__(
+      self,
+      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+  ) -> tuple[
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+  ]:
+    lhs_input, lhs_ca = lhs_quantization_info
+    rhs_input, rhs_ca = rhs_quantization_info
+    lhs_qt, lhs_quant_grad = self.lhs.quant(lhs_input, calibration_axes=lhs_ca)
+    rhs_qt, rhs_quant_grad = self.rhs.quant(rhs_input, calibration_axes=rhs_ca)
+
+    return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)
+
+  def swap_lhs_and_rhs(self) -> None:
+    self.lhs, self.rhs = self.rhs, self.lhs
+
+  def assert_calib_shared_axes_value(
+      self,
+      lhs_val: Sequence[int] | None,
+      rhs_val: Sequence[int] | None,
+      msg: str,
+  ) -> None:
+    assert self.lhs.calib_shared_axes == lhs_val, msg
+    assert self.rhs.calib_shared_axes == rhs_val, msg
+
+  def set_context(
+      self,
+      lhs_context: aqt_quantizer.Context,
+      rhs_context: aqt_quantizer.Context,
+  ) -> None:
+    self.lhs.context = lhs_context
+    self.rhs.context = rhs_context
+
+
+@utils.flax_slots_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
 
   lhs: Tensor
   rhs: Tensor
+  dg_quantizer: DotGeneralQuantizer
   dg_accumulator_dtype: Optional[jnp.dtype] = utils.static_field()
   local_aqt: Optional[LocalAqt] = utils.static_field()
   jax_scope_name: str = utils.static_field()
@@ -462,8 +577,8 @@ class DotGeneralRaw:
         local_aqt = self.local_aqt
         factor = local_aqt.contraction_axis_shard_count  # pytype: disable=attribute-error
         msg = 'Custom calib_shared_axes not implemented for local AQT.'
-        assert self.lhs.quantizer.calib_shared_axes is None, msg
-        assert self.rhs.quantizer.calib_shared_axes is None, msg
+        if isinstance(self.dg_quantizer, DefaultDotGeneralQuantizer):
+          self.dg_quantizer.assert_calib_shared_axes_value(None, None, msg)
 
         def factor_reshape(x, ca, ba):
           assert factor is not None
@@ -487,16 +602,13 @@ class DotGeneralRaw:
 
       assert isinstance(rhs, jnp.ndarray)
 
-      def _compute_qtensor(
-          inputs: jnp.ndarray,
-          input_qtensor: aqt_tensor.QTensor,
+      def _get_calibration_axes(
           tensor_cfg: Tensor,
           ndim: int,
           ca: Sequence[int],
           ba: Sequence[int],
-          transpose_fn: Any,
-      ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
-        """Compute qtensor from input or input_qtensor."""
+      ) -> Sequence[int]:
+        """Computes calibration axes for the given Tensor."""
         match tensor_cfg.calibration_mode:
           case CalibrationMode.REMAINING_AXIS:
             calibration_axes = _get_ra(ndim, ca, ba)
@@ -506,14 +618,18 @@ class DotGeneralRaw:
             raise ValueError(
                 f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
             )
+        return calibration_axes
 
+      def _postprocess_qtensor(
+          input_qtensor: Optional[aqt_tensor.QTensor],
+          calculated_qtensor: aqt_tensor.QTensor,
+          quant_grad: aqt_tensor.GradientFn,
+          tensor_cfg: Tensor,
+          transpose_fn: Any,
+      ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
+        """Compute qtensor from input or input_qtensor."""
         if input_qtensor is not None:
-          if self.allow_dummy_gradient_into_qtensor:
-            # quant_grad might be incorrect here, and should not be used.
-            _, quant_grad = tensor_cfg.quantizer.quant(
-                inputs, calibration_axes=calibration_axes
-            )
-          else:
+          if not self.allow_dummy_gradient_into_qtensor:
             quant_grad = (
                 'Poison. '
                 + 'Gradients are not generally expected in serving. '
@@ -522,9 +638,7 @@ class DotGeneralRaw:
             )
           output_qtensor = input_qtensor
         else:
-          output_qtensor, quant_grad = tensor_cfg.quantizer.quant(
-              inputs, calibration_axes=calibration_axes
-          )
+          output_qtensor = calculated_qtensor
         mode = tensor_cfg.calibration_mode
         if (
             output_qtensor.scale_t is None
@@ -541,25 +655,30 @@ class DotGeneralRaw:
           )
         return output_qtensor, quant_grad
 
-      lhs_qt, lhs_quant_grad = _compute_qtensor(
-          lhs,
+      lhs_calib_axes = _get_calibration_axes(self.lhs, lhs.ndim, lhs_ca, lhs_ba)
+      rhs_calib_axes = _get_calibration_axes(self.rhs, rhs.ndim, rhs_ca, rhs_ba)
+
+      lhs_quantized, rhs_quantized = (
+          self.dg_quantizer((lhs, lhs_calib_axes), (rhs, rhs_calib_axes))
+      )
+      lhs_qt_calculated, lhs_quant_grad = lhs_quantized
+      rhs_qt_calculated, rhs_quant_grad = rhs_quantized
+
+      lhs_qt, lhs_quant_grad = _postprocess_qtensor(
           lhs_qt,
+          lhs_qt_calculated,
+          lhs_quant_grad,
           self.lhs,
-          lhs.ndim,
-          lhs_ca,
-          lhs_ba,
           _lhs_scale_transpose_to_output,
       )
       lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
       lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
-      rhs_qt, rhs_quant_grad = _compute_qtensor(
-          rhs,
+      rhs_qt, rhs_quant_grad = _postprocess_qtensor(
           rhs_qt,
+          rhs_qt_calculated,
+          rhs_quant_grad,
           self.rhs,
-          rhs.ndim,
-          rhs_ca,
-          rhs_ba,
           _rhs_scale_transpose_to_output,
       )
       rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)

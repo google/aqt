@@ -33,24 +33,23 @@ class AqtFlaxTest(parameterized.TestCase):
 
       @nn.compact
       def __call__(self, lhs, rhs):
-        lhs_in = lhs
+        lhs_in, rhs_in = lhs, rhs
         assert not (
             (self.lhs_qt_external or self.rhs_qt_external)
             and (self.aqt_cfg is None)
         ), 'aqt_cfg cannot be None when providing qtensor as inputs to einsum'
-        if self.lhs_qt_external:
-          lhs_in, _ = self.aqt_cfg.fwd.lhs.quantizer.quant(
-              lhs, calibration_axes=(2, 3)
+        if self.lhs_qt_external or self.rhs_qt_external:
+          (lhs_q, _), (rhs_q, _) = self.aqt_cfg.fwd.dg_quantizer(
+              (lhs, (2, 3)), (rhs, (1, 2))
           )
-          lhs_dtype = self.aqt_cfg.fwd.lhs.quantizer.numerics.get_dtype()
-          lhs_in = lhs_in.qvalue_astype(lhs_dtype)
-        rhs_in = rhs
-        if self.rhs_qt_external:
-          rhs_in, _ = self.aqt_cfg.fwd.rhs.quantizer.quant(
-              rhs, calibration_axes=(1, 2)
-          )
-          rhs_dtype = self.aqt_cfg.fwd.rhs.quantizer.numerics.get_dtype()
-          rhs_in = rhs_in.qvalue_astype(rhs_dtype)
+
+          lhs_dtype = self.aqt_cfg.fwd.dg_quantizer.lhs.numerics.get_dtype()
+          rhs_dtype = self.aqt_cfg.fwd.dg_quantizer.rhs.numerics.get_dtype()
+          if self.lhs_qt_external:
+            lhs_in = lhs_q.qvalue_astype(lhs_dtype)
+          if self.rhs_qt_external:
+            rhs_in = rhs_q.qvalue_astype(rhs_dtype)
+
         einsum = aqt_flax.AqtEinsum(cfg=self.aqt_cfg)
         # xhs_qt can be inputs to AqtEinsum
         # xhs->xhs_qt can happen outside of AqtEinsum, e.g., k/v cache quant

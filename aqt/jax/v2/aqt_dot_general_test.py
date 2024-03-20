@@ -59,12 +59,12 @@ def test_jaxpr_dtype(f, cfgs: list[aqt.DotGeneralRaw], float_dtype):
     def assert_dtype_eq(dtype1, dtype2):
       assert dtype1 == dtype2, f"dtype1 != dtype2: {dtype1=} != {dtype2=}"
 
-    assert_dtype_eq(
-        lhs_sa.dtype, cfg.lhs.quantizer.numerics.get_dtype() or float_dtype
-    )
-    assert_dtype_eq(
-        rhs_sa.dtype, cfg.rhs.quantizer.numerics.get_dtype() or float_dtype
-    )
+    assert isinstance(cfg.dg_quantizer, aqt.DefaultDotGeneralQuantizer)
+
+    lhs_dtype = cfg.dg_quantizer.lhs.numerics.get_dtype()
+    rhs_dtype = cfg.dg_quantizer.rhs.numerics.get_dtype()
+    assert_dtype_eq(lhs_sa.dtype, lhs_dtype or float_dtype)
+    assert_dtype_eq(rhs_sa.dtype, rhs_dtype or float_dtype)
     assert_dtype_eq(out_sa.dtype, cfg.dg_accumulator_dtype or float_dtype)
 
 
@@ -188,7 +188,7 @@ def _modify_cfg(
   cfg = copy.deepcopy(readonly_cfg)
   if fwd_lhs_tricky_clip_and_round:
     # Tricky means that we have zero gradient on x < 0
-    cfg.fwd.lhs.quantizer.numerics = _TrickyNumerics()
+    cfg.fwd.dg_quantizer.lhs.numerics = _TrickyNumerics()
     cfg.fwd.dg_accumulator_dtype = None
 
   # Setting po2_scale is ensuring that fake_quant and full dot_general
@@ -196,24 +196,26 @@ def _modify_cfg(
   # We are passing dims to config so that we can reuse it in fake_quant.
   # Power-of-2 scales allow FQ and AQT to be exactly the same.
   def _apply_po2_scale(c):
-    c.lhs.quantizer.po2_scale = True
-    c.rhs.quantizer.po2_scale = True
+    c.dg_quantizer.lhs.po2_scale = True
+    c.dg_quantizer.rhs.po2_scale = True
 
   def _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode):
     c.lhs.dequant_mode = lhs_dequant_mode
     c.rhs.dequant_mode = rhs_dequant_mode
 
-  def _apply_calibration_mode(
-      c, lhs_calibration_mode, rhs_calibration_mode
-  ):
+  def _apply_calibration_mode(c, lhs_calibration_mode, rhs_calibration_mode):
     c.lhs.calibration_mode = lhs_calibration_mode
     c.rhs.calibration_mode = rhs_calibration_mode
 
   def _disable_quant_types(c, on_lhs=True, on_rhs=True):
     if on_lhs:
-      c.lhs.quantizer.numerics = c.lhs.quantizer.numerics.replace(dtype=None)
+      c.dg_quantizer.lhs.numerics = (
+          c.dg_quantizer.lhs.numerics.replace(dtype=None)
+      )
     if on_rhs:
-      c.rhs.quantizer.numerics = c.rhs.quantizer.numerics.replace(dtype=None)
+      c.dg_quantizer.rhs.numerics = (
+          c.dg_quantizer.rhs.numerics.replace(dtype=None)
+      )
     if on_lhs or on_rhs:
       c.dg_accumulator_dtype = None
 
@@ -233,21 +235,23 @@ def _modify_cfg(
     # that the scales are not too large.
     def disable_quant(c):
       _disable_quant_types(c)
-      if isinstance(c.lhs.quantizer.numerics, int_numerics.IntNumerics):
-        c.lhs.quantizer.numerics = c.lhs.quantizer.numerics.replace(round=False)
-      if isinstance(c.rhs.quantizer.numerics, int_numerics.IntNumerics):
-        c.rhs.quantizer.numerics = c.rhs.quantizer.numerics.replace(round=False)
-      # c.lhs.quantizer.numerics.clip = False
-      # c.rhs.quantizer.numerics.clip = False
+      if isinstance(c.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
+        c.dg_quantizer.lhs.numerics = (
+            c.dg_quantizer.lhs.numerics.replace(round=False)
+        )
+      if isinstance(c.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
+        c.dg_quantizer.rhs.numerics = (
+            c.dg_quantizer.rhs.numerics.replace(round=False)
+        )
 
     disable_quant(cfg.fwd)
     disable_quant(cfg.dlhs)
     disable_quant(cfg.drhs)
     lhs_quant = not isinstance(
-        cfg.fwd.lhs.quantizer.numerics, no_numerics.NoNumerics
+        cfg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics
     )
     rhs_quant = not isinstance(
-        cfg.fwd.rhs.quantizer.numerics, no_numerics.NoNumerics
+        cfg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics
     )
     if lhs_quant:
       cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
@@ -260,13 +264,13 @@ def _modify_cfg(
     cfg.drhs.local_aqt = local_aqt
 
     # When using abs-max scaling, this should be a no-op.
-  if isinstance(cfg.fwd.lhs.quantizer.numerics, int_numerics.IntNumerics):
-    cfg.fwd.lhs.quantizer.numerics = cfg.fwd.lhs.quantizer.numerics.replace(
-        clip_gradient=clip_gradient
+  if isinstance(cfg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
+    cfg.fwd.dg_quantizer.lhs.numerics = (
+        cfg.fwd.dg_quantizer.lhs.numerics.replace(clip_gradient=clip_gradient)
     )
-  if isinstance(cfg.fwd.rhs.quantizer.numerics, int_numerics.IntNumerics):
-    cfg.fwd.rhs.quantizer.numerics = cfg.fwd.rhs.quantizer.numerics.replace(
-        clip_gradient=clip_gradient
+  if isinstance(cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
+    cfg.fwd.dg_quantizer.rhs.numerics = (
+        cfg.fwd.dg_quantizer.rhs.numerics.replace(clip_gradient=clip_gradient)
     )
 
   return cfg
@@ -377,16 +381,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   )
   def test_fq_noise(self, preserve_zero, prec, v, seed):
     key = jax.random.PRNGKey(seed)
-    cfg = config.tensor_make(prec)
-    if isinstance(cfg.quantizer.numerics, int_numerics.IntNumerics):
-      cfg.quantizer.numerics.preserve_zero = preserve_zero
+    quantizer = config.quantizer_make(prec)
+    if isinstance(quantizer.numerics, int_numerics.IntNumerics):
+      quantizer.numerics.preserve_zero = preserve_zero
       if not preserve_zero:
-        cfg.quantizer.numerics.dtype = None
-    cfg.quantizer.calib_shared_axes = (0,)
+        quantizer.numerics.dtype = None
+    quantizer.calib_shared_axes = (0,)
     sample_size = 10000
     shape = (sample_size,)
     a = jax.random.uniform(key, shape, minval=-v, maxval=v)
-    a_fq = aqt_quantizer.make_fake_quant(cfg)(a)
+    a_fq = aqt_quantizer.make_fake_quant(quantizer)(a)
     bucket_noise = a_fq - a  #  ~ U(-bucket_size/2, bucket_size/2)
     bucket_count = (2**prec - 1) if preserve_zero else (2**prec)
     bucket_size = (v * 2) / bucket_count
@@ -425,12 +429,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       maxval=10.0,
       shape=(20, 1),
   ):
-    cfg = config.tensor_make(bits)
-    cfg.quantizer.po2_scale = True
-    cfg.quantizer.calib_shared_axes = (0,)
+    quantizer = config.quantizer_make(bits)
+    quantizer.po2_scale = True
+    quantizer.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
     grad = jnp.ones(shape) * 12345.0
-    x_fq, backprop = jax.vjp(aqt_quantizer.make_fake_quant(cfg), x)
+    x_fq, backprop = jax.vjp(aqt_quantizer.make_fake_quant(quantizer), x)
     gx_fq = backprop(grad)
     # print(f"x     =\n{x}")
     # print(f"x_fq  =\n{x_fq}")
@@ -602,7 +606,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     ])
 
     if isinstance(
-        readonly_cfg.fwd.lhs.quantizer.numerics, int_numerics.IntNumerics
+        readonly_cfg.fwd.dg_quantizer.lhs.numerics,
+        int_numerics.IntNumerics,
     ):
       check([
           (
@@ -964,8 +969,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
     test_jaxpr_dtype(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
-    assert cfg.lhs.quantizer.numerics.get_dtype() == jnp.int8
-    assert cfg.rhs.quantizer.numerics.get_dtype() == jnp.int8
+    assert cfg.dg_quantizer.lhs.numerics.get_dtype() == jnp.int8
+    assert cfg.dg_quantizer.rhs.numerics.get_dtype() == jnp.int8
 
   @parameterized.parameters([
       (1, 1),
@@ -989,9 +994,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     if cfg.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      cfg.lhs.quantizer.po2_scale = True
+      cfg.dg_quantizer.lhs.po2_scale = True
     if cfg.rhs:
-      cfg.rhs.quantizer.po2_scale = True
+      cfg.dg_quantizer.rhs.po2_scale = True
 
     batch_n = 10
     contr_n = 20
@@ -1006,8 +1011,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqt_quantizer.make_fake_quant(cfg.lhs)(lhs)
-    rhs_fq = aqt_quantizer.make_fake_quant(cfg.rhs)(rhs)
+    lhs_fq = aqt_quantizer.make_fake_quant(cfg.dg_quantizer.lhs)(lhs)
+    rhs_fq = aqt_quantizer.make_fake_quant(cfg.dg_quantizer.rhs)(rhs)
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv_fn(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
@@ -1033,17 +1038,17 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         use_stochastic_rounding=False,
         drhs_local_aqt=aqt.LocalAqt(shard_count),
     )
-    cfg.fwd.lhs.quantizer.numerics = cfg.fwd.lhs.quantizer.numerics.replace(
-        preserve_max_val=True
+    cfg.fwd.dg_quantizer.lhs.numerics = (
+        cfg.fwd.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
     )
-    cfg.fwd.rhs.quantizer.numerics = cfg.fwd.rhs.quantizer.numerics.replace(
-        preserve_max_val=True
+    cfg.fwd.dg_quantizer.rhs.numerics = (
+        cfg.fwd.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
     )
-    cfg.drhs.lhs.quantizer.numerics = cfg.drhs.lhs.quantizer.numerics.replace(
-        preserve_max_val=True
+    cfg.drhs.dg_quantizer.lhs.numerics = (
+        cfg.drhs.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
     )
-    cfg.drhs.rhs.quantizer.numerics = cfg.drhs.rhs.quantizer.numerics.replace(
-        preserve_max_val=True
+    cfg.drhs.dg_quantizer.rhs.numerics = (
+        cfg.drhs.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
     )
     dg = lambda lhs, rhs: aqt.make_dot_general(cfg)(
         lhs,
@@ -1117,9 +1122,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         [3, 5, 1, 127.5],
     ])
     cfg = config.dot_general_make(lhs_bits=8, rhs_bits=8)
-    cfg.fwd.lhs.quantizer.calib_shared_axes = "per_tensor"
+    cfg.fwd.dg_quantizer.lhs.calib_shared_axes = "per_tensor"
     # calibration_axes will not be used when cfg.calib_shared_axes is set
-    y, _ = cfg.fwd.lhs.quantizer.quant(x, calibration_axes=None)
+    y, _ = cfg.fwd.dg_quantizer.lhs.quant(x, calibration_axes=None)
     self.assertEqual(y.scale[0], jnp.array([[1.0]]))
 
 

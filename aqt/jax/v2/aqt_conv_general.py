@@ -67,13 +67,13 @@ However if there is any other use, we will drop that assumption."""
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
 
     # Flax assumptions.
-    assert cfg.lhs.quantizer.calib_shared_axes == list(range(1, rank))
-    assert cfg.rhs.quantizer.calib_shared_axes == list(range(0, rank - 1))
-
-    lhs_qt, _ = cfg.lhs.quantizer.quant(lhs, calibration_axes=None)
-    rhs_qt, _ = cfg.rhs.quantizer.quant(rhs, calibration_axes=None)
-
-    # lax.conv_general_dilated does not support int8 * float.
+    msg = "Convolution formula does not follow flax assumption."
+    # TODO(lew): Perhaps we should rely only on passing  passing calib shared
+    # axes value instead of setting it in config. (we pass None below)
+    cfg.dg_quantizer.assert_calib_shared_axes_value(
+        list(range(1, rank)), list(range(0, rank - 1)), msg
+    )
+    (lhs_qt, _), (rhs_qt, _) = cfg.dg_quantizer((lhs, None), (rhs, None))
     # Therefore, cast qvalue back to its original data dtype.
     # Delete the following two lines when the constraint is lifted.
     lhs_qt = lhs_qt.qvalue_astype(lhs.dtype)
