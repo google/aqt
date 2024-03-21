@@ -13,7 +13,9 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
+from collections.abc import Callable
 from typing import Literal
+
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
@@ -49,6 +51,10 @@ class Quantizer:
   po2_scale: bool = utils.static_field()
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   context: Context
+  postprocess_scale: Callable[
+      [jnp.array, aqt_tensor.QTensor],
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]] | None = (
+          utils.static_field(default=None))
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(
@@ -66,6 +72,8 @@ class Quantizer:
 
     qt = self.calculate_scale(x, calibration_axes=calibration_axes)
     qt, quant_grad = self.calculate_qvalue(x, qt)
+    if self.postprocess_scale is not None:
+      qt, quant_grad = self.postprocess_scale(x, qt)
     return qt, quant_grad
 
   def calculate_scale(
@@ -120,6 +128,34 @@ class Quantizer:
 
     qt = qt.replace(qvalue=x_q)
     return qt, quant_grad
+
+
+def postprocess_scale_with_ridge_regression(
+    x, qt, lmd, axis
+) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
+  """Calculate the optimal post processed scale using ridge regression."""
+
+  # Calculate the optimal new scale using ridge regression
+  q = qt.qvalue
+  e_q2 = jnp.mean(jnp.power(q, 2), axis=axis, keepdims=True)
+  e_q = jnp.mean(q, axis=axis, keepdims=True)
+  e_qx = jnp.mean(q * x, axis=axis, keepdims=True)
+  e_x = jnp.mean(x, axis=axis, keepdims=True)
+  var_q = e_q2 - jnp.power(e_q, 2)
+  cov_qx = e_qx - e_q * e_x
+  new_scale = cov_qx / (var_q + lmd)
+  qt = qt.replace(scale=new_scale)
+
+  # Update the gradient to be the ratio of the old and new scales
+  # The reason for this is due to calculating the gradient where the scale
+  # used before the rounding is different that the scale used after the
+  # rounding step.
+  # q'(x) = 1 (as per the STE)
+  # fwd(x)  = q(s1 * x) * (1/s2)       where s2 ~ s1
+  # fwd'(x) = 1 * s1/s2
+  quant_grad = lambda grad: (grad * qt.scale / new_scale, None)
+
+  return qt, quant_grad
 
 
 def make_fake_quant(quantizer: Quantizer, calibration_axes=None):
