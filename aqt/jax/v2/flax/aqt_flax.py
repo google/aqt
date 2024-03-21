@@ -82,7 +82,10 @@ class Freezer(nn.Module):
           qvalue,
           scale=None,
           scale_t=[self.scale_t.value],
-          dequant_dtype=None,  # Rely on dg output dtype for dequant
+          # TODO(lew): Ideal solution: To find out this dequant_dtype one should
+          # use the dtype of inputs of the quant function. We should store it as
+          # a dtype of small-sized scale tensor.
+          dequant_dtype=self.scale_t.value.dtype,
       )
     else:
       assert False, 'Unknown quant mode.'
