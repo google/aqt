@@ -158,6 +158,68 @@ class Tensor:
   use_fwd_quant: Optional[bool]  # use quantized fwd in the bwd pass
 ```
 
+## How to make and use a simple AQT quantizer
+
+This example demonstrates how to make a simple linear AQT quantizer.
+
+```python
+from aqt.jax.v2 import aqt_quantizer
+from aqt.jax.v2 import calibration
+from aqt.jax.v2.numerics import int_numerics
+
+q = aqt_quantizer.Quantizer(
+    numerics=int_numerics.IntNumerics(
+        bits=4,
+        preserve_zero=True,
+        preserve_max_val=True,
+        clip=True,
+        clip_gradient=True,
+        round=True,
+        noise_fn=None,
+    ),
+    calib_shared_axes=-1,
+    scale_stop_grad=True,
+    calibration=calibration.AbsMaxCalibration(),
+    po2_scale=False,
+    context=aqt_quantizer.Context(key=jax.random.PRNGKey(0), train_step=0))
+```
+
+To view the quantized weights created by the quantizer, try quantizing a simple vector like so. Remember that these are the quantized values that are stored in memory for weight quantization.
+
+```python
+x = jnp.linspace(-10, 10, 10)
+x_q, _ = q.quant(x, calibration_axes=-1)
+print(x_q.qvalue)
+```
+
+To view the dequantized values that are used after multiplying the quantized values by the scale, use this code
+
+```python
+print(x_q.dequant())
+```
+
+To view the scales, simply call the scale attribute
+
+```python
+print(x_q.scale)
+```
+
+For a sanity check, we can assert that the scale in this example is simply equal to the dequantized values divided by the quantized values. (Hint: if you get an error check for nan values)
+
+```python
+assert jnp.all(x_q.dequant() / x_q.qvalue == x_q.scale[0])
+```
+
+Finally, we can plot the quantized values like so
+
+```python
+import matplotlib.pyplot as plt
+plt.plot(x, x_q.qvalue)
+```
+
+The specific quantizer parameters here are implemented in this tutorial are just for demonstration purposes and can be easily changed. Try altering the number of bits and see how the number of quantization steps changes accordingly.
+
+
 ## AQT Versions
 
 As of today there are several independent AQT implementations in this package:
