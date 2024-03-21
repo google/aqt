@@ -17,7 +17,6 @@
 import builtins
 
 import jax
-from jax import core
 from jax import lax
 import jax.numpy as jnp
 import numpy as np
@@ -84,13 +83,13 @@ def matmul(a: jnp.ndarray,  #
       idx_b_other.append(i)
     elif bb is None:
       idx_a_other.append(i)
-    elif core.symbolic_equal_dim(ba, 1):
+    elif ba == 1:
       idx_b_other.append(i)
       a_squeeze.append(len(idx_batch) + len(idx_a_other) + len(a_squeeze))
-    elif core.symbolic_equal_dim(bb, 1):
+    elif bb == 1:
       idx_a_other.append(i)
       b_squeeze.append(len(idx_batch) + len(idx_b_other) + len(b_squeeze))
-    elif core.symbolic_equal_dim(ba, bb):
+    elif ba == bb:
       a_batch.append(len(idx_batch) + len(idx_a_other))
       b_batch.append(len(idx_batch) + len(idx_b_other))
       idx_batch.append(i)
