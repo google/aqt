@@ -27,6 +27,7 @@ import copy
 import dataclasses
 import pprint
 from typing import Literal
+from absl import logging
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -206,6 +207,30 @@ class _Xhs:
     return tuple(map(lambda a: self.x.shape[a], axes))
 
 
+def print_dimension_numbers(dimension_numbers, lhs, rhs, label) -> None:
+  """Prints dimension numbers before and/or after tiling.
+
+  Args:
+    dimension_numbers: It contains the left and right hand side contraction axes
+      and batch axes.
+    lhs: left hand side tensor.
+    rhs: right hand side tensor.
+    label: A string tag for logging info.
+  """
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  lhs_ra = get_ra(lhs.ndim, lhs_ca, lhs_ba)
+  rhs_ra = get_ra(rhs.ndim, rhs_ca, rhs_ba)
+  logging.vlog(1, label)
+  logging.vlog(1, f' lhs.shape={lhs.shape}')
+  logging.vlog(1, f' rhs.shape={rhs.shape}')
+  logging.vlog(1, f'lhs_ca={lhs_ca}')
+  logging.vlog(1, f'rhs_ca={rhs_ca}')
+  logging.vlog(1, f'lhs_ba={lhs_ba}')
+  logging.vlog(1, f'rhs_ba={rhs_ba}')
+  logging.vlog(1, f'lhs_ra={lhs_ra}')
+  logging.vlog(1, f'rhs_ra={rhs_ra}')
+
+
 def tiled_dot_general(
     cfg: Cfg,
     lhs,
@@ -216,6 +241,9 @@ def tiled_dot_general(
     dot_general=jax.lax.dot_general,
 ):
   """local dot_general."""
+
+  logging.vlog(1, 'Tiling config cfg: %s', cfg)
+  print_dimension_numbers(dimension_numbers, lhs, rhs, label='before tiling')
 
   cfg = copy.deepcopy(cfg)
   cfg = cfg.complete_missing(lhs.shape, rhs.shape, dimension_numbers)
@@ -292,6 +320,10 @@ def tiled_dot_general(
     assert axis >= 0 and axis < xrhs.x.ndim, g_msg
   out = dot_general(
       xlhs.x, xrhs.x, tiled_dimension_numbers, precision, preferred_element_type
+  )
+
+  print_dimension_numbers(
+      tiled_dimension_numbers, xlhs.x, xrhs.x, label='after tiling'
   )
 
   # Some assertions
