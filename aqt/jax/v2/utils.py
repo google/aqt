@@ -21,7 +21,9 @@ promote them to dedicated files.
 import difflib
 import functools
 import pprint
+import re
 from typing import Any
+
 import flax.struct
 import jax
 from jax import numpy as jnp
@@ -46,9 +48,13 @@ def print_diff(str_a: str, str_b: str):
     print(diff)
 
 
-def test_pprint_eq(input_a: Any, input_b: Any):
+def test_pprint_eq(input_a: Any, input_b: Any,
+                   remove_memory_addresses: bool = False):
   str_input_a = input_a if isinstance(input_a, str) else pprint.pformat(input_a)
   str_input_b = input_b if isinstance(input_b, str) else pprint.pformat(input_b)
+  if remove_memory_addresses:
+    str_input_a = re.sub(r' at 0x.*>', '>', str_input_a, 0, re.MULTILINE)
+    str_input_b = re.sub(r' at 0x.*>', '>', str_input_b, 0, re.MULTILINE)
   assert str_input_a == str_input_b, print_diff(str_input_a, str_input_b)
 
 

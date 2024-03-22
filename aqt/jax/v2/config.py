@@ -15,9 +15,10 @@
 
 
 import copy
-from typing import Literal, Optional, TypeAlias, Union
+from typing import Callable, Literal, Optional, TypeAlias, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
+from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
@@ -232,6 +233,22 @@ def set_use_fwd_quant(
     cfg.dlhs.rhs.use_fwd_quant = dlhs_use_fwd_quant
   if drhs_use_fwd_quant != SKIP:
     cfg.drhs.rhs.use_fwd_quant = drhs_use_fwd_quant
+
+
+def set_postprocess_scale_fn(
+    cfg: DotGeneral,
+    lhs_postprocess_scale_fn: Callable[
+        [jnp.array, aqt_tensor.QTensor],
+        tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]] | None,
+    rhs_postprocess_scale_fn: Callable[
+        [jnp.array, aqt_tensor.QTensor],
+        tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]] | None,
+):
+  """Set postprocess_scale_fn for dot_general config."""
+  if lhs_postprocess_scale_fn is not None:
+    cfg.fwd.dg_quantizer.lhs.postprocess_scale = lhs_postprocess_scale_fn
+  if rhs_postprocess_scale_fn is not None:
+    cfg.fwd.dg_quantizer.rhs.postprocess_scale = rhs_postprocess_scale_fn
 
 
 def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
@@ -570,4 +587,16 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
   )
   set_stochastic_rounding(cfg, False, False, 'jax.uniform')
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
+  return cfg
+
+
+def config_rr(lmd: float = 0.01):
+  """Config for quantization with ridge regression for scale optimization."""
+  cfg = config_v4()
+  func = jax.tree_util.Partial(
+      aqt_quantizer.postprocess_scale_with_ridge_regression, lmd=lmd, axis=-1
+  )
+  set_postprocess_scale_fn(cfg,
+                           lhs_postprocess_scale_fn=func,
+                           rhs_postprocess_scale_fn=func)
   return cfg
