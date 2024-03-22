@@ -104,10 +104,10 @@ class MyTest(parameterized.TestCase):
     target_loss = {
         "e4m3": {
             "cpu": [
-                # One of them is: milan, rome, haswell
-                # Other is: skylake, cascadelake
-                3.164344310760498046875000000000,
-                3.164344787597656250000000000000,
+                # Different CPU models are not bit exact and sometimes produce
+                # different losses under the same training setting.
+                3.164053440093994140625000000000,
+                3.164344787597656250000000000000,  # skylake, cascadelake
             ],
             "TPU v2": [3.209973335266113281250000000000],
             "TPU v3": [3.209973335266113281250000000000],
@@ -116,8 +116,8 @@ class MyTest(parameterized.TestCase):
         },
         "e5m2": {
             "cpu": [
-                # One of them is: milan, rome, haswell
-                # Other is: skylake, cascadelake
+                # Different CPU models are not bit exact and sometimes produce
+                # different losses under the same training setting.
                 3.087945222854614257812500000000,
                 3.087944984436035156250000000000,
             ],
