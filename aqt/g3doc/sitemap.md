@@ -3,6 +3,7 @@
 </g3mark-ph>
 
 *   [Home](/third_party/py/aqt/g3doc)
+*   [FAQ](/third_party/py/aqt/g3doc/faq.md)
 *   [File a bug](http://go/aqt-bug)
 *   Team internal
     *   [Publish pip package](/third_party/py/aqt/g3doc/pip_package.md)
