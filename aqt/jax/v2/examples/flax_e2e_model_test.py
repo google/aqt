@@ -50,6 +50,7 @@ class MnistTest(parameterized.TestCase):
             "cpu": [
                 3.128226041793823242187500000000,
                 3.128226757049560546875000000000,
+                3.128226280212402343750000000000,
             ],
             "TPU v2": [3.179433345794677734375000000000],
             "TPU v3": [3.179433345794677734375000000000],
@@ -122,8 +123,8 @@ class MnistTest(parameterized.TestCase):
             "AqtEinsum_0": {
                 "AqtDotGeneral_0": {
                     "qlhs": {
-                        "scale": (dtype("float32"), (1, 10)),
-                        "value": (expected_dtype, (10, 10)),
+                        "scale": (dtype("float32"), (1, 1, 1, 1, 10)),
+                        "value": (expected_dtype, (1, 1, 10, 1, 10)),
                     }
                 }
             },

@@ -79,7 +79,17 @@ class CNN(nn.Module):
 
     # Simple demonstration of how to quantize einsum.
     identity = jnp.identity(10, dtype=x.dtype)
-    einsum = aqt_flax.AqtEinsum(self.aqt_cfg, lhs_quant_mode=self.quant_mode)
+    einsum = aqt_flax.AqtEinsum(
+        self.aqt_cfg,
+        lhs_quant_mode=self.quant_mode,
+        # These assertions are useful when AqtEinsum definition is far away
+        # from usage spot (through injection).
+        # This is especially useful when specifying tiling.
+        assert_eqn='bc,ab->ac',
+        assert_lhs_shape=(10, 10),
+        assert_rhs_shape=(None, 10),
+        tile_sizes={'b': 10},
+    )
     # Note for AQT developers:
     #   This equation is harder because jnp.einsum and einsum swap lhs and rhs.
     x = einsum('bc,ab->ac', identity, x)

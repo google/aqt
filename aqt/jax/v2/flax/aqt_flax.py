@@ -23,6 +23,7 @@ from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2 import utils
 from aqt.jax.v2.flax.utils import QuantMode
 import flax.linen as nn
 import jax
@@ -295,6 +296,11 @@ class AqtEinsum(nn.Module):
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
+  assert_eqn: Optional[str] = None
+  assert_lhs_shape: Optional[utils.ShapeTemplate] = None
+  assert_rhs_shape: Optional[utils.ShapeTemplate] = None
+  tile_sizes: Optional[tiled_dot_general.EinsumTileSizes] = None
+
   @nn.compact
   def __call__(
       self,
@@ -302,6 +308,13 @@ class AqtEinsum(nn.Module):
       lhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
       rhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
   ):
+    if self.assert_eqn is not None:
+      utils.assert_eq(eqn, self.assert_eqn, 'einsum_eqn')
+    if self.assert_lhs_shape is not None:
+      utils.assert_shape(lhs_g.shape, self.assert_lhs_shape, 'lhs.shape')
+    if self.assert_rhs_shape is not None:
+      utils.assert_shape(rhs_g.shape, self.assert_rhs_shape, 'rhs.shape')
+
     cfg = self.cfg
     lhs_is_qt = isinstance(lhs_g, aqt_tensor.QTensor)
     rhs_is_qt = isinstance(rhs_g, aqt_tensor.QTensor)
@@ -345,6 +358,9 @@ class AqtEinsum(nn.Module):
     rhs_qtensor = rhs_g if rhs_is_qt else None
 
     quant_collection = self.quant_collection
+    tiling_config = None
+    if self.tile_sizes is not None:
+      tiling_config = tiled_dot_general.Cfg.from_einsum(eqn, self.tile_sizes)
 
     if yes_swap:
       if cfg is not None:
@@ -358,6 +374,10 @@ class AqtEinsum(nn.Module):
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
       lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
       lhs_qtensor, rhs_qtensor = rhs_qtensor, lhs_qtensor
+      if tiling_config is not None:
+        tiling_config = tiled_dot_general.Cfg(
+            lhs=tiling_config.rhs, rhs=tiling_config.lhs
+        )
 
     aqt_dg = AqtDotGeneral(
         cfg=cfg,
@@ -378,5 +398,6 @@ class AqtEinsum(nn.Module):
         rhs_var_name=rhs_var_name,
         rhs_qtensor=rhs_qtensor,
         quant_collection=quant_collection,
+        tiling_cfg=tiling_config,
     )
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)

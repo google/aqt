@@ -21,10 +21,29 @@ promote them to dedicated files.
 import difflib
 import functools
 import pprint
-from typing import Any
+from typing import Any, Sequence
 import flax.struct
 import jax
 from jax import numpy as jnp
+
+
+# None means that the template matches any axis size
+ShapeTemplate = Sequence[int | None]
+
+
+def assert_shape(shape: Sequence[int], shape_template: ShapeTemplate, msg: str):
+  shape = list(shape)
+  shape_template = list(shape_template)
+  assert len(shape) == len(shape_template), msg
+  for axis_size, expected_size in zip(shape, shape_template):
+    assert (
+        expected_size is None or axis_size == expected_size
+    ), f'{msg}: {shape} does not match {shape_template}'
+
+
+def assert_eq(value: Any, expected: Any, value_name: str):
+  msg = f'{value_name}={value}, {expected=}'
+  assert value == expected, msg
 
 
 flax_slots_dataclass = functools.partial(

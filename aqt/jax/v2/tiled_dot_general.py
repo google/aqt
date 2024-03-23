@@ -36,6 +36,8 @@ from typing_extensions import Self  # for python version < 3.11
 
 AxisIdx = int
 AxisSize = int
+EinsumEqnLetter = str
+EinsumTileSizes = dict[EinsumEqnLetter, AxisSize]
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
@@ -58,6 +60,51 @@ class Cfg:
   """Sequence of (lhs, rhs) configurations."""
   lhs: TensorTiling
   rhs: TensorTiling
+
+  @classmethod
+  def from_einsum(cls, eqn: str, einsum_tile_sizes: EinsumTileSizes) -> Self:
+    """Creates Cfg based on einsum equation and tile sizes."""
+    args_eqn, ret_eqn1 = eqn.split('->')
+    args_eqn = args_eqn.split(',')
+    assert len(args_eqn) == 2, f'more then 2 arguments are not supported {eqn}'
+    lhs_eqn1, rhs_eqn1 = args_eqn
+    assert lhs_eqn1.isalpha(), f'unsupported lhs: {eqn}'
+    assert rhs_eqn1.isalpha(), f'unsupported rhs: {eqn}'
+    assert ret_eqn1.isalpha(), f'unsupported ret: {eqn}'
+    ret = Cfg(
+        lhs=TensorTiling(contraction_axes=[], remaining_axes=[]),
+        rhs=TensorTiling(contraction_axes=[], remaining_axes=[]),
+    )
+    for einsum_letter, tile_size in einsum_tile_sizes.items():
+      assert einsum_letter.isalpha()
+      assert len(einsum_letter) == 1
+      in_lhs = lhs_eqn1.find(einsum_letter)
+      in_rhs = rhs_eqn1.find(einsum_letter)
+      in_ret = ret_eqn1.find(einsum_letter)
+      found_in_lhs = in_lhs != -1
+      found_in_rhs = in_rhs != -1
+      found_in_ret = in_ret != -1
+
+      def make_tiling(axis, tile_size):
+        return AxisTiling(axis=axis, tile_size=tile_size, tile_count=None)
+
+      msg = (
+          'We support only contraction axes and remaining axes:'
+          f' eqn={eqn} einsum_letter={einsum_letter}'
+      )
+      assert found_in_lhs + found_in_rhs + found_in_ret == 2, msg
+      if found_in_lhs and found_in_rhs:
+        # Contraction axis
+        ret.lhs.contraction_axes.append(make_tiling(in_lhs, tile_size))
+        ret.rhs.contraction_axes.append(make_tiling(in_rhs, tile_size))
+      else:
+        # Remaining axis
+        assert found_in_ret, f'Should not happen. {msg}'
+        if found_in_lhs:
+          ret.lhs.remaining_axes.append(make_tiling(in_lhs, tile_size))
+        if found_in_rhs:
+          ret.rhs.remaining_axes.append(make_tiling(in_rhs, tile_size))
+    return ret
 
   def complete_missing(
       self,
