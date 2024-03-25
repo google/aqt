@@ -280,17 +280,35 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-
-    aqt_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
     if self.tiling_cfg is not None:
+      # Extract tiled input shapes and dimension numbers from jaxpr
+      def dummy_tiled_dg(lhs_in, rhs_in):
+        return tiled_dot_general.tiled_dot_general(
+            self.tiling_cfg, lhs_in, rhs_in, dimension_numbers
+        )
+
+      tiled_dg_jaxpr = jax.make_jaxpr(dummy_tiled_dg)(lhs, rhs)
+      dg_eqn = [eqn for eqn in tiled_dg_jaxpr.eqns if 'dot_general' in str(eqn)]
+      assert len(dg_eqn) == 1, 'Multiple dg calls are found in tiled dg jaxpr.'
+      lhs_invar, rhs_invar = dg_eqn[0].invars
+      tiled_lhs_shape = lhs_invar.aval.shape
+      tiled_rhs_shape = rhs_invar.aval.shape
+      tiled_dimension_numbers = dg_eqn[0].params['dimension_numbers']
+      # Use tiled input shapes and dimension numbers to create aqt_dg that
+      # will be injected to tiled_dot_general
+      aqt_dg = self.make_aqt_dg(
+          tiled_lhs_shape, tiled_rhs_shape, tiled_dimension_numbers
+      )
       # We integrate tiling here and not on Jax level, so that the Freezers
       # observe tiled shapes.
-      aqt_dg = functools.partial(
+      ret_dg = functools.partial(
           tiled_dot_general.tiled_dot_general,
           self.tiling_cfg,
           dot_general=aqt_dg,
       )
-    return aqt_dg(
+    else:
+      ret_dg = self.make_aqt_dg(lhs.shape, rhs.shape, dimension_numbers)
+    return ret_dg(
         lhs,
         rhs,
         dimension_numbers,
