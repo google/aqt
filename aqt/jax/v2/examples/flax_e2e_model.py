@@ -88,7 +88,7 @@ class CNN(nn.Module):
         assert_eqn='bc,ab->ac',
         assert_lhs_shape=(10, 10),
         assert_rhs_shape=(None, 10),
-        tile_sizes={'b': 10},
+        tile_sizes={'b': 5},
     )
     # Note for AQT developers:
     #   This equation is harder because jnp.einsum and einsum swap lhs and rhs.

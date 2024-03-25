@@ -32,9 +32,17 @@ run the test multiple times to enumerate the CPU backend in the TAP server.
 from time to time as the compiler evolves. It is important to update the loss.
 
 When submitting code to AQT that is not a pure refactoring,
-use the following command to run the flax_e2e_model_test on CPU for 50 times.
+use the following command to run tests on CPU for 50 times.
 Usually it is sufficient to capture the flakiness.
+
+For flax_e2e_model_test:
 
 ```
 blaze  test --test_filter=MnistTest --test_output=errors //third_party/py/aqt/jax/v2/examples:flax_e2e_model_test --runs_per_test_detects_flakes --runs_per_test=50
+```
+
+For fp8_numerics_test_cpu:
+
+```
+blaze  test --test_filter=MyTest.test_mnist_training --test_output=errors //third_party/py/aqt/jax/v2/numerics:fp8_numerics_test_cpu --runs_per_test_detects_flakes --runs_per_test=50
 ```
