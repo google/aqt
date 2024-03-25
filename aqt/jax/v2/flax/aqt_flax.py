@@ -24,6 +24,7 @@ from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
+from aqt.jax.v2.flax import freezer as general_freezer
 from aqt.jax.v2.flax.utils import QuantMode
 import flax.linen as nn
 import jax
@@ -144,6 +145,10 @@ class AqtDotGeneral(nn.Module):
   quant_collection: str = 'aqt'
   tiling_cfg: Optional[tiled_dot_general.Cfg] = None
 
+  # If set to True, use the current Freezer. Otherwise, use the new
+  # QuantFreezer.
+  use_legacy_freezer: bool = True
+
   def make_aqt_dg(
       self,
       lhs_shape,
@@ -178,27 +183,46 @@ class AqtDotGeneral(nn.Module):
     )
     lhs_q_dtype = cfg.fwd.dg_quantizer.lhs.numerics.get_dtype()
     rhs_q_dtype = cfg.fwd.dg_quantizer.rhs.numerics.get_dtype()
-    lhs_freezer = Freezer(
-        name=self.lhs_var_name,
-        quant_mode=lhs_qm,
-        q_shape=lhs_shape,
-        q_dtype=lhs_q_dtype,
-        q_init=self.lhs_init,
-        s_shape=lhs_scale_shape,
-        s_init=self.lhs_scale_init,
-        quant_collection=self.quant_collection,
-    )
 
-    rhs_freezer = Freezer(
-        name=self.rhs_var_name,
-        quant_mode=rhs_qm,
-        q_shape=rhs_shape,
-        q_dtype=rhs_q_dtype,
-        q_init=self.rhs_init,
-        s_shape=rhs_scale_shape,
-        s_init=self.rhs_scale_init,
-        quant_collection=self.quant_collection,
-    )
+    if self.use_legacy_freezer:
+      lhs_freezer = Freezer(
+          name=self.lhs_var_name,
+          quant_mode=lhs_qm,
+          q_shape=lhs_shape,
+          q_dtype=lhs_q_dtype,
+          q_init=self.lhs_init,
+          s_shape=lhs_scale_shape,
+          s_init=self.lhs_scale_init,
+          quant_collection=self.quant_collection,
+      )
+
+      rhs_freezer = Freezer(
+          name=self.rhs_var_name,
+          quant_mode=rhs_qm,
+          q_shape=rhs_shape,
+          q_dtype=rhs_q_dtype,
+          q_init=self.rhs_init,
+          s_shape=rhs_scale_shape,
+          s_init=self.rhs_scale_init,
+          quant_collection=self.quant_collection,
+      )
+    else:
+      quant_to_freezer_mode = {
+          QuantMode.TRAIN: general_freezer.FreezerMode.NONE,
+          QuantMode.CONVERT: general_freezer.FreezerMode.WRITE,
+          QuantMode.SERVE: general_freezer.FreezerMode.READ,
+      }
+      lhs_freezer = general_freezer.Freezer(
+          name=self.lhs_var_name,
+          mode=quant_to_freezer_mode[lhs_qm],
+          collection=self.quant_collection,
+      )
+
+      rhs_freezer = general_freezer.Freezer(
+          name=self.rhs_var_name,
+          mode=quant_to_freezer_mode[rhs_qm],
+          collection=self.quant_collection,
+      )
 
     prng_name = self.prng_name
     key = self.make_rng(prng_name) if prng_name is not None else None
@@ -301,6 +325,10 @@ class AqtEinsum(nn.Module):
   assert_rhs_shape: Optional[utils.ShapeTemplate] = None
   tile_sizes: Optional[tiled_dot_general.EinsumTileSizes] = None
 
+  # If set to True, use the current Freezer. Otherwise, use the new
+  # QTensorFreezer.
+  use_legacy_freezer: bool = True
+
   @nn.compact
   def __call__(
       self,
@@ -399,5 +427,6 @@ class AqtEinsum(nn.Module):
         rhs_qtensor=rhs_qtensor,
         quant_collection=quant_collection,
         tiling_cfg=tiling_config,
+        use_legacy_freezer=self.use_legacy_freezer,
     )
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)
