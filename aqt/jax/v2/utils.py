@@ -28,6 +28,12 @@ import jax
 from jax import numpy as jnp
 
 
+# Some common types.
+AxisIdx = int
+AxisSize = int
+EinsumEqnLetter = str
+EinsumTileSizes = dict[EinsumEqnLetter, AxisSize]
+
 # None means that the template matches any axis size
 ShapeTemplate = Sequence[int | None]
 
