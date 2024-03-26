@@ -24,6 +24,7 @@ from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
+from aqt.jax.v2.flax import aqt_flax_dg_core
 from aqt.jax.v2.flax import freezer as general_freezer
 from aqt.jax.v2.flax.utils import QuantMode
 import flax.linen as nn
@@ -254,13 +255,12 @@ class AqtDotGeneral(nn.Module):
       rhs_apply_quant_mode = self.rhs_apply_quant_mode
       lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
       rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
-      out, (out_lhs_qt, out_rhs_qt) = cfg.dg_core(
-          lhs=lhs,
-          rhs=rhs,
-          lhs_qt=lhs_qt,
-          rhs_qt=rhs_qt,
-          dimension_numbers=dimension_numbers,
+
+      cfg.apply_custom_vjp_on_jax = False
+      out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(
+          lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg
       )
+
       # Setter
       if self.lhs_apply_quant_mode:
         lhs_freezer.set(out_lhs_qt)

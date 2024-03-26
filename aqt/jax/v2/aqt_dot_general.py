@@ -25,7 +25,6 @@
 
 import abc
 import enum
-import functools
 from typing import Any, Optional, Sequence, Union
 
 from aqt.jax.v2 import aqt_quantizer
@@ -790,6 +789,8 @@ class DotGeneral:
   dlhs: DotGeneralRaw
   drhs: DotGeneralRaw
 
+  apply_custom_vjp_on_jax: bool = utils.static_field(default=True)
+
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
     return dot_general_make(*args, **kwargs)
@@ -809,7 +810,16 @@ class DotGeneral:
     assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
 
     self.assert_config_validity()
-    out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self)
+    # TODO(dhchoi): Refactor this to make both branches to have the similar
+    # functionality of applying custom_vjp.
+    if self.apply_custom_vjp_on_jax:
+      dg_core_with_custom_grad = jax.custom_vjp(_dg_core, nondiff_argnums=(4,))
+      dg_core_with_custom_grad.defvjp(dg_core_vjp_fwd, dg_core_vjp_bwd)
+      out, res = dg_core_with_custom_grad(
+          lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self
+      )
+    else:
+      out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self)  # pytype: disable=wrong-arg-types
     return out, res
 
   def __call__(
@@ -889,7 +899,6 @@ class DotGeneral:
       )
 
 
-@functools.partial(jax.custom_vjp, nondiff_argnums=(4,))
 def _dg_core(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
@@ -898,7 +907,7 @@ def _dg_core(
     dimension_numbers: lax.DotDimensionNumbers,
     cfg: DotGeneral,
 ):
-  out, _ = _dg_core_vjp_fwd(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg)
+  out, _ = dg_core_vjp_fwd(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg)
   return out
 
 
@@ -907,7 +916,7 @@ def _dg_core(
 # The cfg (DotGeneral) contains the key used for stochastic rounding,
 # which are traceable dynamic variables. It needs to be an input argument
 # to prevent the jax side effect.
-def _dg_core_vjp_fwd(
+def dg_core_vjp_fwd(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
     lhs_qt: Optional[aqt_tensor.QTensor],
@@ -933,7 +942,7 @@ def _dg_core_vjp_fwd(
   return ((ret, qret), (res, cfg))
 
 
-def _dg_core_vjp_bwd(
+def dg_core_vjp_bwd(
     fwd_dimension_numbers: lax.DotDimensionNumbers,
     res: tuple[Optional[DotGeneralRes], DotGeneral],
     g,
@@ -996,9 +1005,6 @@ def _dg_core_vjp_bwd(
   # None as grad to it. This is because it is a tuple of Python integers
   # that cannot be traced by Jax.
   return (dlhs, drhs, None, None, None)
-
-
-_dg_core.defvjp(_dg_core_vjp_fwd, _dg_core_vjp_bwd)
 
 
 def make_dot_general(dg: Optional[DotGeneral]):

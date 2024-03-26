@@ -155,7 +155,8 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=<class 'jax.numpy.int4'>,
                               local_aqt=LocalAqt(contraction_axis_shard_count=3),
                               jax_scope_name='aqt_drhs',
-                              allow_dummy_gradient_into_qtensor=False))"""
+                              allow_dummy_gradient_into_qtensor=False),
+           apply_custom_vjp_on_jax=True)"""
     utils.test_pprint_eq(cfg, expected_cfg_str)
 
   def test_configv4_original(self):
@@ -260,7 +261,8 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_drhs',
-                              allow_dummy_gradient_into_qtensor=False))"""
+                              allow_dummy_gradient_into_qtensor=False),
+           apply_custom_vjp_on_jax=True)"""
     utils.test_pprint_eq(config.config_v4(), expected_cfg_str)
 
   def test_config_fwd_fp8(self):
@@ -345,7 +347,8 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_drhs',
-                              allow_dummy_gradient_into_qtensor=False))"""
+                              allow_dummy_gradient_into_qtensor=False),
+           apply_custom_vjp_on_jax=True)"""
     utils.test_pprint_eq(config.config_fwd_fp8(), expected_cfg)
 
   def test_set_int_numerics_preserve_zero(self):
