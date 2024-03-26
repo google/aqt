@@ -18,7 +18,7 @@
 import copy
 import functools
 from typing import Iterable
-from typing import Optional, Union
+from typing import Optional, Union, Callable, Any
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
@@ -130,14 +130,18 @@ class AqtDotGeneral(nn.Module):
   # apply_quant_mode determines if using Freezer in cfg.get/set_tensor
   lhs_apply_quant_mode: bool = True
   lhs_init: nn.initializers.Initializer = jnp.zeros
+  lhs_wrapper: Optional[Callable[..., Any]] = None
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  lhs_scale_wrapper: Optional[Callable[..., Any]] = None
   lhs_var_name: str = 'qlhs'
   lhs_qtensor: Optional[aqt_tensor.QTensor] = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
   rhs_init: nn.initializers.Initializer = jnp.zeros
+  rhs_wrapper: Optional[Callable[..., Any]] = None
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  rhs_scale_wrapper: Optional[Callable[..., Any]] = None
   rhs_var_name: str = 'qrhs'
   rhs_qtensor: Optional[aqt_tensor.QTensor] = None
 
@@ -213,16 +217,49 @@ class AqtDotGeneral(nn.Module):
           QuantMode.CONVERT: general_freezer.FreezerMode.WRITE,
           QuantMode.SERVE: general_freezer.FreezerMode.READ,
       }
+
+      def init_wrapper(
+          qt: aqt_tensor.QTensor,
+          wrapper: Optional[Callable[..., Any]],
+          scale_wrapper: Optional[Callable[..., Any]],
+      ):
+        if wrapper is not None:
+          if qt.qvalue is not None:
+            qt.qvalue = wrapper(lambda: qt.qvalue)()
+        if scale_wrapper is not None:
+          if qt.scale is not None:
+            qt.scale = jax.tree_map(
+                lambda x: scale_wrapper(lambda: x)(), qt.scale
+            )
+          if qt.scale_t is not None:
+            qt.scale_t = jax.tree_map(
+                lambda x: scale_wrapper(lambda: x)(), qt.scale_t
+            )
+        return qt
+
+      lhs_init_wrapper = functools.partial(
+          init_wrapper,
+          wrapper=self.lhs_wrapper,
+          scale_wrapper=self.lhs_scale_wrapper,
+      )
+      rhs_init_wrapper = functools.partial(
+          init_wrapper,
+          wrapper=self.rhs_wrapper,
+          scale_wrapper=self.rhs_scale_wrapper,
+      )
+
       lhs_freezer = general_freezer.Freezer(
           name=self.lhs_var_name,
           mode=quant_to_freezer_mode[lhs_qm],
           collection=self.quant_collection,
+          init_wrapper=lhs_init_wrapper,
       )
 
       rhs_freezer = general_freezer.Freezer(
           name=self.rhs_var_name,
           mode=quant_to_freezer_mode[rhs_qm],
           collection=self.quant_collection,
+          init_wrapper=rhs_init_wrapper,
       )
 
     prng_name = self.prng_name
@@ -326,12 +363,16 @@ class AqtEinsum(nn.Module):
   # TODO(lew): split out separate class for each side.
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
   lhs_init: nn.initializers.Initializer = jnp.zeros
+  lhs_wrapper: Optional[Callable[..., Any]] = None
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  lhs_scale_wrapper: Optional[Callable[..., Any]] = None
   lhs_var_name: str = 'qlhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
+  rhs_wrapper: Optional[Callable[..., Any]] = None
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+  rhs_scale_wrapper: Optional[Callable[..., Any]] = None
   rhs_var_name: str = 'qrhs'
 
   # If you want use 'params' make sure that there is another mechanism to hide
@@ -393,13 +434,17 @@ class AqtEinsum(nn.Module):
 
     lhs_quant_mode = self.lhs_quant_mode
     lhs_init = self.lhs_init
+    lhs_wrapper = self.lhs_wrapper
     lhs_scale_init = self.lhs_scale_init
+    lhs_scale_wrapper = self.lhs_scale_wrapper
     lhs_var_name = self.lhs_var_name
     lhs_qtensor = lhs_g if lhs_is_qt else None
 
     rhs_quant_mode = self.rhs_quant_mode
     rhs_init = self.rhs_init
+    rhs_wrapper = self.rhs_wrapper
     rhs_scale_init = self.rhs_scale_init
+    rhs_scale_wrapper = self.rhs_scale_wrapper
     rhs_var_name = self.rhs_var_name
     rhs_qtensor = rhs_g if rhs_is_qt else None
 
@@ -420,6 +465,11 @@ class AqtEinsum(nn.Module):
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
       lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
       lhs_qtensor, rhs_qtensor = rhs_qtensor, lhs_qtensor
+      lhs_wrapper, rhs_wrapper = rhs_wrapper, lhs_wrapper
+      lhs_scale_wrapper, rhs_scale_wrapper = (
+          rhs_scale_wrapper,
+          lhs_scale_wrapper,
+      )
       if tiling_config is not None:
         tiling_config = tiled_dot_general.Cfg(
             lhs=tiling_config.rhs, rhs=tiling_config.lhs
@@ -434,13 +484,17 @@ class AqtEinsum(nn.Module):
         # the qtensor passed to dg.
         lhs_apply_quant_mode=not lhs_is_qt,  # Freezer not used if lhs is qt
         lhs_init=lhs_init,
+        lhs_wrapper=lhs_wrapper,
         lhs_scale_init=lhs_scale_init,
+        lhs_scale_wrapper=lhs_scale_wrapper,
         lhs_var_name=lhs_var_name,
         lhs_qtensor=lhs_qtensor,
         rhs_quant_mode=rhs_quant_mode,
         rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
         rhs_init=rhs_init,
+        rhs_wrapper=rhs_wrapper,
         rhs_scale_init=rhs_scale_init,
+        rhs_scale_wrapper=rhs_scale_wrapper,
         rhs_var_name=rhs_var_name,
         rhs_qtensor=rhs_qtensor,
         quant_collection=quant_collection,
