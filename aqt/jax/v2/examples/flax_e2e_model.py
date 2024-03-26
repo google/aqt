@@ -62,6 +62,7 @@ class CNN(nn.Module):
         # In nn.Dense, it is RHS that has the kernel.
         rhs_quant_mode=self.quant_mode,
         tiling_cfg=tiling_cfg,
+        use_legacy_freezer=False
     )
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
@@ -89,6 +90,7 @@ class CNN(nn.Module):
         assert_lhs_shape=(10, 10),
         assert_rhs_shape=(None, 10),
         tile_sizes={'b': 5},
+        use_legacy_freezer=False
     )
     # Note for AQT developers:
     #   This equation is harder because jnp.einsum and einsum swap lhs and rhs.

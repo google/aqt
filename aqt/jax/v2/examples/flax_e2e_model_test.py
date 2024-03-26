@@ -16,6 +16,7 @@
 import copy
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2.examples import flax_e2e_model
 import jax
@@ -116,49 +117,63 @@ class MnistTest(parameterized.TestCase):
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
-    expected_dtype = jnp.int8
+    expected_dtype = (
+        jnp.int4 if device_kind != "cpu" and bits == 4 else jnp.int8
+    )
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
                 "AqtDotGeneral_0": {
                     "qlhs": {
-                        "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
-                        "value": (expected_dtype, (1, 2, 5, 1, 10)),
+                        "frozen": aqt_tensor.QTensor(
+                            qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
+                            scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                            scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                            dequant_dtype=dtype("float32")
+                        )
                     }
                 }
             },
             "Dense_0": {
                 "AqtDotGeneral_0": {
                     "qrhs": {
-                        # The scale_t shape was (1, 256) before tiling.
-                        # After tiling the scale shape is (1, 2, 1, 1, 256),
-                        # then transposed to (2, 1, 1, 1, 256).
-                        "scale": (dtype("float32"), (2, 1, 1, 1, 256)),
-                        # The weight shape was (3136, 256) before tiling.
-                        # After tiling it is (2, 1568, 1, 256).
-                        # Contraction shape 3136 is tiled to (2, 1568).
-                        # The remaining shape 256 is not tiled, so (1, 256).
-                        # Broadcast to other side adds a leading shape of 1.
-                        "value": (expected_dtype, (1, 2, 1568, 1, 256)),
+                        "frozen": aqt_tensor.QTensor(
+                            # The weight shape was (3136, 256) before tiling.
+                            # After tiling it is (2, 1568, 1, 256).
+                            # Contraction shape 3136 is tiled to (2, 1568).
+                            # The remaining shape 256 is not tiled, so (1, 256).
+                            # Broadcast to other side adds a leading shape of 1.
+                            qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
+                            scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                            # The scale_t shape was (1, 256) before tiling.
+                            # After tiling the scale shape is (1, 2, 1, 1, 256),
+                            # then transposed to (2, 1, 1, 1, 256).
+                            scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
+                            dequant_dtype=dtype("float32")
+                        )
                     }
                 }
             },
             "Dense_1": {
                 "AqtDotGeneral_0": {
                     "qrhs": {
-                        # The scale_t shape was (1, 10) before tiling.
-                        # After tiling the scale shape is (1, 2, 1, 1, 10),
-                        # then transposed to (2, 1, 1, 1, 10).
-                        "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
-                        # The weight shape was (256, 10) before tiling.
-                        # After tiling it is (2, 128, 1, 10).
-                        # Contraction shape 256 is tiled to (2, 128).
-                        # The remaining shape 10 is not tiled, so (1, 10).
-                        # Broadcast to other side adds a leading shape of 1.
-                        "value": (expected_dtype, (1, 2, 128, 1, 10)),
+                        "frozen": aqt_tensor.QTensor(
+                            # The weight shape was (256, 10) before tiling.
+                            # After tiling it is (2, 128, 1, 10).
+                            # Contraction shape 256 is tiled to (2, 128).
+                            # The remaining shape 10 is not tiled, so (1, 10).
+                            # Broadcast to other side adds a leading shape of 1.
+                            qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
+                            scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                            # The scale_t shape was (1, 10) before tiling.
+                            # After tiling the scale shape is (1, 2, 1, 1, 10),
+                            # then transposed to (2, 1, 1, 1, 10).
+                            scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                            dequant_dtype=dtype("float32")
+                        )
                     }
                 }
-            },
+            }
         },
         "batch_stats": {
             "BatchNorm_0": {
@@ -229,11 +244,8 @@ class MnistTest(parameterized.TestCase):
 
     # Sanity check 2: Frozen weights are indeed used for inference.
     #   If we zero them out, loss would change.
-    model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"]["value"] = (
-        jnp.zeros_like(
-            model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"]["value"]
-        )
-    )
+    qt = model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"]["frozen"]
+    qt.qvalue = jnp.zeros_like(qt.qvalue)
     bad_logits, _ = forward(model_serving, apply_serving)
     assert not (bad_logits == logits_s3).all()
 
