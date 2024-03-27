@@ -13,7 +13,7 @@
 # limitations under the License.
 """Tests for freezer."""
 
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence, Callable
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -33,9 +33,12 @@ class _CustomStructure:
 
 class TestModel(nn.Module):
   freezer_mode: freezer.FreezerMode
+  init_wrapper: Callable[..., Any] | None = None
 
   def setup(self):
-    self.f = freezer.Freezer('freezer', mode=self.freezer_mode)
+    self.f = freezer.Freezer(
+        'freezer', mode=self.freezer_mode, init_wrapper=self.init_wrapper
+    )
 
   def __call__(self, x):
     """Emulates basic routine on how to use the freezer."""
@@ -141,6 +144,31 @@ class FreezerTest(parameterized.TestCase):
     )
 
     self.assertEqual(cs, get_after_set_read)
+
+  def test_custom_init_wrapper(self):
+    class CustomWrapper(flax.struct.PyTreeNode):
+      value: Any
+      metadata: str
+
+    def init_wrapper(x: _CustomStructure):
+      ret = x.replace(
+          member=CustomWrapper(x.member, 'member metadata'),
+          member_list=CustomWrapper(x.member_list, 'member list metadata'),
+      )
+      return ret
+
+    subkeys = jax.random.split(jax.random.PRNGKey(0), 2)
+    cs = self._create_custom_structure(subkeys[0])
+
+    tm_write = TestModel(
+        freezer_mode=freezer.FreezerMode.WRITE, init_wrapper=init_wrapper
+    )
+    param_init_write = tm_write.init(subkeys[1], cs)
+    cs_frozen = param_init_write['freezer']['f']['frozen']
+    self.assertIsInstance(cs_frozen.member, CustomWrapper)
+    self.assertIsInstance(cs_frozen.member_list, CustomWrapper)
+    self.assertEqual(cs_frozen.member.metadata, 'member metadata')
+    self.assertEqual(cs_frozen.member_list.metadata, 'member list metadata')
 
 
 if __name__ == '__main__':
