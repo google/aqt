@@ -133,6 +133,7 @@ class AqtDotGeneral(nn.Module):
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
   lhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  lhs_store_scale_t: bool = True
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
@@ -140,6 +141,7 @@ class AqtDotGeneral(nn.Module):
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
   rhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  rhs_store_scale_t: bool = True
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -262,9 +264,15 @@ class AqtDotGeneral(nn.Module):
       )
 
       # Setter
+      assert not (self.use_legacy_freezer and not self.lhs_store_scale_t)
+      assert not (self.use_legacy_freezer and not self.rhs_store_scale_t)
       if self.lhs_apply_quant_mode:
+        if not self.lhs_store_scale_t:
+          out_lhs_qt.scale_t = None
         lhs_freezer.set(out_lhs_qt)
       if self.rhs_apply_quant_mode:
+        if not self.rhs_store_scale_t:
+          out_rhs_qt.scale_t = None
         rhs_freezer.set(out_rhs_qt)
 
       return out
@@ -328,11 +336,13 @@ class AqtEinsum(nn.Module):
   lhs_init: nn.initializers.Initializer = jnp.zeros
   lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
+  lhs_store_scale_t: bool = True
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
+  rhs_store_scale_t: bool = True
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -396,12 +406,14 @@ class AqtEinsum(nn.Module):
     lhs_scale_init = self.lhs_scale_init
     lhs_var_name = self.lhs_var_name
     lhs_qtensor = lhs_g if lhs_is_qt else None
+    lhs_store_st = self.lhs_store_scale_t
 
     rhs_quant_mode = self.rhs_quant_mode
     rhs_init = self.rhs_init
     rhs_scale_init = self.rhs_scale_init
     rhs_var_name = self.rhs_var_name
     rhs_qtensor = rhs_g if rhs_is_qt else None
+    rhs_store_st = self.rhs_store_scale_t
 
     quant_collection = self.quant_collection
     tiling_config = None
@@ -420,6 +432,7 @@ class AqtEinsum(nn.Module):
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
       lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
       lhs_qtensor, rhs_qtensor = rhs_qtensor, lhs_qtensor
+      lhs_store_st, rhs_store_st = rhs_store_st, lhs_store_st
       if tiling_config is not None:
         tiling_config = tiled_dot_general.Cfg(
             lhs=tiling_config.rhs, rhs=tiling_config.lhs
@@ -437,12 +450,14 @@ class AqtEinsum(nn.Module):
         lhs_scale_init=lhs_scale_init,
         lhs_var_name=lhs_var_name,
         lhs_qtensor=lhs_qtensor,
+        lhs_store_scale_t=lhs_store_st,
         rhs_quant_mode=rhs_quant_mode,
         rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
         rhs_init=rhs_init,
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
         rhs_qtensor=rhs_qtensor,
+        rhs_store_scale_t=rhs_store_st,
         quant_collection=quant_collection,
         tiling_cfg=tiling_config,
         use_legacy_freezer=self.use_legacy_freezer,
