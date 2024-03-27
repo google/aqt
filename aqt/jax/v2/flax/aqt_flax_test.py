@@ -117,8 +117,9 @@ class AqtFlaxTest(parameterized.TestCase):
 
     train_step(jnp.ones(shape=(1, 10)))
 
-  @parameterized.parameters(True, False)
-  def test_freezer(self, use_legacy_freezer: bool):
+  # When using the legacy freezer, you MUST store scale_t.
+  @parameterized.parameters((True, True), (False, True), (False, False))
+  def test_freezer(self, use_legacy_freezer: bool, store_scale_t: bool):
     class Model(nn.Module):
       aqt_cfg: config.DotGeneral | None
       lhs_quant_mode: aqt_flax.QuantMode
@@ -134,6 +135,8 @@ class AqtFlaxTest(parameterized.TestCase):
             cfg=self.aqt_cfg,
             lhs_quant_mode=self.lhs_quant_mode,
             rhs_quant_mode=self.rhs_quant_mode,
+            lhs_store_scale_t=store_scale_t,
+            rhs_store_scale_t=store_scale_t,
             use_legacy_freezer=self.use_legacy_freezer,
         )
         out = einsum('ijkh,mkh->ijm', lhs, kernel)
@@ -174,11 +177,18 @@ class AqtFlaxTest(parameterized.TestCase):
     w_qtensor = aqt_params['AqtEinsum_0']['AqtDotGeneral_0']['qrhs']
     if use_legacy_freezer:
       w_quant = w_qtensor['value']
+      w_scale_t = w_qtensor['scale']
     else:
       w_quant = w_qtensor['frozen'].qvalue
+      w_scale_t = w_qtensor['frozen'].scale_t
 
     self.assertEqual(w.shape, w_quant.shape)
     self.assertEqual(w_quant.dtype, jnp.int8)
+
+    if not store_scale_t:
+      self.assertIsNone(w_scale_t)
+    else:
+      self.assertLen(container=w_scale_t, expected_len=1)
 
     # Serve test.
     serve_model = Model(
