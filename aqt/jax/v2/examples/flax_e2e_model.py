@@ -14,12 +14,13 @@
 """Mnist example."""
 
 import functools
+import sys
 from typing import Any
 from absl import app
 from aqt.jax.v2 import config as aqt_config
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
-from aqt.jax.v2.flax import utils as aqt_flax_utils
 from flax import linen as nn
 from flax import struct
 from flax.metrics import tensorboard
@@ -33,8 +34,10 @@ import tensorflow_datasets as tfds
 class CNN(nn.Module):
   """A simple CNN model."""
   bn_use_stats: bool
-  aqt_cfg: aqt_config.DotGeneral
-  quant_mode: aqt_flax_utils.QuantMode = aqt_flax_utils.QuantMode.TRAIN
+  aqt_cfg_dot_general: aqt_config.DotGeneral
+  aqt_cfg_einsum: aqt_config.DotGeneral
+  lhs_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
+  rhs_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
 
   @nn.compact
   def __call__(self, x):
@@ -58,9 +61,9 @@ class CNN(nn.Module):
     )
     aqt_dg = functools.partial(
         aqt_flax.AqtDotGeneral,
-        self.aqt_cfg,
-        # In nn.Dense, it is RHS that has the kernel.
-        rhs_quant_mode=self.quant_mode,
+        self.aqt_cfg_dot_general,
+        lhs_quant_mode=self.lhs_quant_mode,
+        rhs_quant_mode=self.rhs_quant_mode,
         tiling_cfg=tiling_cfg,
         use_legacy_freezer=False
     )
@@ -81,8 +84,9 @@ class CNN(nn.Module):
     # Simple demonstration of how to quantize einsum.
     identity = jnp.identity(10, dtype=x.dtype)
     einsum = aqt_flax.AqtEinsum(
-        self.aqt_cfg,
-        lhs_quant_mode=self.quant_mode,
+        self.aqt_cfg_einsum,
+        lhs_quant_mode=self.rhs_quant_mode,
+        rhs_quant_mode=self.lhs_quant_mode,
         # These assertions are useful when AqtEinsum definition is far away
         # from usage spot (through injection).
         # This is especially useful when specifying tiling.
@@ -99,12 +103,11 @@ class CNN(nn.Module):
 
 
 @functools.partial(jax.jit, static_argnums=(3,))
-def apply_model(state, images, labels, train):
+def apply_model(model_params, images, labels, apply_fn):
   """Computes gradients, loss and accuracy for a single batch."""
 
-  cnn = state.cnn_train if train else state.cnn_eval
   def loss_fn(model):
-    logits, updated_var = cnn.apply(
+    logits, updated_var = apply_fn(
         model,
         images,
         rngs={'params': jax.random.PRNGKey(0)},
@@ -115,7 +118,7 @@ def apply_model(state, images, labels, train):
     return loss, (logits, updated_var)
 
   grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
-  aux, grads = grad_fn(state.model)
+  aux, grads = grad_fn(model_params)
   loss, (logits, updated_var) = aux
   accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
   return grads, loss, accuracy, updated_var
@@ -134,14 +137,20 @@ def update_model(state, grads, updated_var):
   )
 
 
+def _prepare_data_perm(ds, batch_size, rng, num_steps=sys.maxsize):
+  ds_size = len(ds['image'])
+  num_steps = min(num_steps, ds_size // batch_size)
+
+  perms = jax.random.permutation(rng, len(ds['image']))
+  perms = perms[: num_steps * batch_size]  # skip incomplete batch
+  perms = perms.reshape((num_steps, batch_size))
+
+  return perms
+
+
 def train_epoch(state, train_ds, batch_size, rng):
   """Train for a single epoch."""
-  train_ds_size = len(train_ds['image'])
-  steps_per_epoch = train_ds_size // batch_size
-
-  perms = jax.random.permutation(rng, len(train_ds['image']))
-  perms = perms[: steps_per_epoch * batch_size]  # skip incomplete batch
-  perms = perms.reshape((steps_per_epoch, batch_size))
+  perms = _prepare_data_perm(train_ds, batch_size, rng)
 
   epoch_loss = []
   epoch_accuracy = []
@@ -150,7 +159,7 @@ def train_epoch(state, train_ds, batch_size, rng):
     batch_images = train_ds['image'][perm, ...]
     batch_labels = train_ds['label'][perm, ...]
     grads, loss, accuracy, updated_var = apply_model(
-        state, batch_images, batch_labels, train=True
+        state.model, batch_images, batch_labels, state.cnn_train.apply
     )
     state = update_model(state, grads, updated_var)
     epoch_loss.append(loss)
@@ -183,14 +192,22 @@ class TrainState(struct.PyTreeNode):
   opt_state: optax.OptState = struct.field(pytree_node=True)
 
 
-def create_train_state(rng, aqt_cfg):
+def create_train_state(rng, aqt_cfg_dot_general, aqt_cfg_einsum):
   """Creates initial `TrainState`."""
-  cnn_train = CNN(bn_use_stats=True, aqt_cfg=aqt_cfg)
+  cnn_train = CNN(
+      bn_use_stats=True,
+      aqt_cfg_dot_general=aqt_cfg_dot_general,
+      aqt_cfg_einsum=aqt_cfg_einsum,
+  )
   model = cnn_train.init({'params': rng}, jnp.ones([1, 28, 28, 1]))
   learning_rate = 0.1
   momentum = 0.9
   tx = optax.sgd(learning_rate, momentum)
-  cnn_eval = CNN(bn_use_stats=False, aqt_cfg=aqt_cfg)
+  cnn_eval = CNN(
+      bn_use_stats=False,
+      aqt_cfg_dot_general=aqt_cfg_dot_general,
+      aqt_cfg_einsum=aqt_cfg_einsum
+  )
   return TrainState(
       cnn_train=cnn_train,
       cnn_eval=cnn_eval,
@@ -201,7 +218,10 @@ def create_train_state(rng, aqt_cfg):
 
 
 def train_and_evaluate(
-    num_epochs: int, workdir: str, aqt_cfg: aqt_config.DotGeneral
+    num_epochs: int,
+    workdir: str,
+    aqt_cfg_dot_general: aqt_config.DotGeneral,
+    aqt_cfg_einsum: aqt_config.DotGeneral,
 ) -> TrainState:
   """Execute model training and evaluation loop."""
   train_ds, test_ds = get_datasets()
@@ -210,7 +230,7 @@ def train_and_evaluate(
   summary_writer = tensorboard.SummaryWriter(workdir)
 
   rng, init_rng = jax.random.split(rng)
-  state = create_train_state(init_rng, aqt_cfg)
+  state = create_train_state(init_rng, aqt_cfg_dot_general, aqt_cfg_einsum)
 
   batch_size = 128
   for epoch in range(1, num_epochs + 1):
@@ -219,7 +239,7 @@ def train_and_evaluate(
         state, train_ds, batch_size, input_rng
     )
     _, test_loss, test_accuracy, _ = apply_model(
-        state, test_ds['image'], test_ds['label'], train=False
+        state.model, test_ds['image'], test_ds['label'], state.cnn_eval.apply
     )
 
     print(
@@ -246,12 +266,14 @@ def train_and_evaluate(
 
 def serving_conversion(train_state):
   """Model conversion (quantized weights freezing)."""
-  aqt_cfg = train_state.cnn_eval.aqt_cfg
+  aqt_cfg_dot_general = train_state.cnn_eval.aqt_cfg_dot_general
+  aqt_cfg_einsum = train_state.cnn_eval.aqt_cfg_einsum
   input_shape = (1, 28, 28, 1)
   cnn_freeze = CNN(
       bn_use_stats=False,
-      aqt_cfg=aqt_cfg,
-      quant_mode=aqt_flax_utils.QuantMode.CONVERT,
+      aqt_cfg_dot_general=aqt_cfg_dot_general,
+      aqt_cfg_einsum=aqt_cfg_einsum,
+      rhs_quant_mode=utils.QuantMode.CONVERT,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -261,11 +283,67 @@ def serving_conversion(train_state):
   )
   cnn_serve = CNN(
       bn_use_stats=False,
-      aqt_cfg=aqt_cfg,
-      quant_mode=aqt_flax_utils.QuantMode.SERVE,
+      aqt_cfg_dot_general=aqt_cfg_dot_general,
+      aqt_cfg_einsum=aqt_cfg_einsum,
+      rhs_quant_mode=utils.QuantMode.SERVE,
   )
 
   return cnn_serve.apply, model_serving
+
+
+def calibration_conversion(train_state):
+  """Model conversion for calibration."""
+  cnn_calibrate = CNN(
+      bn_use_stats=False,
+      aqt_cfg_dot_general=train_state.cnn_eval.aqt_cfg_dot_general,
+      aqt_cfg_einsum=train_state.cnn_eval.aqt_cfg_einsum,
+      # Both side should be calibrated.
+      lhs_quant_mode=aqt_flax.QuantMode.CALIBRATE,
+      rhs_quant_mode=aqt_flax.QuantMode.CALIBRATE,
+  )
+
+  # Initialize the model, and then load the checkpoint into the initialized
+  # parameter dict.
+  model_calibrated_init = cnn_calibrate.init(
+      jax.random.PRNGKey(0), jnp.ones([1, 28, 28, 1])
+  )
+
+  model_flattened, _ = jax.tree_util.tree_flatten_with_path(train_state.model)
+  init_flattened, init_treedef = jax.tree_util.tree_flatten_with_path(
+      model_calibrated_init
+  )
+  model_kp_to_val = {kp: val for kp, val in model_flattened}
+  merged_flattened = []
+  for kp, val in init_flattened:
+    if kp in model_kp_to_val:
+      merged_flattened.append((kp, model_kp_to_val[kp]))
+    else:
+      merged_flattened.append((kp, val))
+
+  model_calibrated = jax.tree_util.tree_unflatten(
+      init_treedef, [v for _, v in merged_flattened]
+  )
+
+  return cnn_calibrate.apply, model_calibrated
+
+
+def calibrate(state, train_ds, batch_size, rng, calibration_steps):
+  """Calibrate."""
+  calibrate_func, model_calibrate = calibration_conversion(state)
+
+  perms = _prepare_data_perm(train_ds, batch_size, rng, calibration_steps)
+
+  for perm in perms:
+    batch_images = train_ds['image'][perm, ...]
+    batch_labels = train_ds['label'][perm, ...]
+
+    # Calibration simply updates model during inference; it does NOT apply any
+    # gradients.
+    _, _, _, model_calibrate = apply_model(
+        model_calibrate, batch_images, batch_labels, calibrate_func
+    )
+
+  return model_calibrate
 
 
 @jax.jit
@@ -276,12 +354,9 @@ def serve(state):
   sample_image, sample_label = test_ds['image'][:64], test_ds['label'][:64]
   # serving
   serve_fn, model_serving = serving_conversion(state)
-  logits = serve_fn(
-      model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
+  _, loss, _, _ = apply_model(
+      model_serving, sample_image, sample_label, serve_fn
   )
-  # compute serving loss
-  one_hot = jax.nn.one_hot(sample_label, 10)
-  loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
   return loss
 
 
@@ -305,7 +380,10 @@ def main(argv):
   del argv
   aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
   state = train_and_evaluate(
-      num_epochs=2, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
+      num_epochs=2,
+      workdir='/tmp/aqt_mnist_example',
+      aqt_cfg_dot_general=aqt_cfg,
+      aqt_cfg_einsum=aqt_cfg,
   )
   loss = serve(state)
   print('serve loss on sample ds: {}'.format(loss))
