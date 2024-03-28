@@ -13,7 +13,7 @@
 # limitations under the License.
 """Tests for freezer."""
 
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence, Callable
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -33,9 +33,12 @@ class _CustomStructure:
 
 class TestModel(nn.Module):
   freezer_mode: freezer.FreezerMode
+  init_wrapper: Callable[..., Any] | None = None
 
   def setup(self):
-    self.f = freezer.Freezer('freezer', mode=self.freezer_mode)
+    self.f = freezer.Freezer(
+        'freezer', mode=self.freezer_mode, init_wrapper=self.init_wrapper
+    )
 
   def __call__(self, x):
     """Emulates basic routine on how to use the freezer."""
@@ -75,6 +78,22 @@ class FreezerTest(parameterized.TestCase):
       self.assertEqual(leaf1.dtype, leaf2.dtype)
 
   def test_freezer_get_set(self):
+    class CustomWrapper(flax.struct.PyTreeNode):
+      value: Any
+      metadata: str
+
+    def init_wrapper(x: _CustomStructure):
+      ret = x.replace(
+          member=CustomWrapper(x.member, 'member metadata'),
+          member_list=CustomWrapper(x.member_list, 'member list metadata'),
+      )
+      return ret
+
+    def unbox(x):
+      if isinstance(x, CustomWrapper):
+        return x.value
+      return x
+
     subkeys = jax.random.split(jax.random.PRNGKey(0), 6)
     cs_for_init = self._create_custom_structure(subkeys[0])
     cs = self._create_custom_structure(subkeys[1])
@@ -97,8 +116,24 @@ class FreezerTest(parameterized.TestCase):
     self.assertEqual(dict(), param_set_none)
 
     # 2. WRITE mode test.
-    tm_write = TestModel(freezer_mode=freezer.FreezerMode.WRITE)
+    tm_write = TestModel(
+        freezer_mode=freezer.FreezerMode.WRITE, init_wrapper=init_wrapper
+    )
     param_init_write = tm_write.init(subkeys[4], cs_for_init)
+
+    # Check if the init parameters are properly wrapped.
+    cs_frozen = param_init_write['freezer']['f']['frozen']
+    self.assertIsInstance(cs_frozen.member, CustomWrapper)
+    self.assertIsInstance(cs_frozen.member_list, CustomWrapper)
+    self.assertEqual(cs_frozen.member.metadata, 'member metadata')
+    self.assertEqual(cs_frozen.member_list.metadata, 'member list metadata')
+
+    # Unbox the initialization parameters.
+    # The metadata in the box is used to shard the variables here.
+    param_init_write = jax.tree.map(
+        unbox, param_init_write, is_leaf=lambda x: isinstance(x, CustomWrapper)
+    )
+
     get_write = tm_write.apply(param_init_write, method=TestModel.freezer_get)
     _, param_set_write = tm_write.apply(
         param_init_write, cs, method=TestModel.freezer_set, mutable=True
@@ -120,8 +155,22 @@ class FreezerTest(parameterized.TestCase):
     self.assertEqual(cs, param_set_write['freezer']['f']['frozen'])
 
     # 3. READ mode test.
-    tm_read = TestModel(freezer_mode=freezer.FreezerMode.READ)
+    tm_read = TestModel(
+        freezer_mode=freezer.FreezerMode.READ, init_wrapper=init_wrapper
+    )
     param_init_read = tm_read.init(subkeys[5], cs_for_init)
+
+    # Check if the init parameters are properly wrapped.
+    cs_frozen = param_init_read['freezer']['f']['frozen']
+    self.assertIsInstance(cs_frozen.member, CustomWrapper)
+    self.assertIsInstance(cs_frozen.member_list, CustomWrapper)
+    self.assertEqual(cs_frozen.member.metadata, 'member metadata')
+    self.assertEqual(cs_frozen.member_list.metadata, 'member list metadata')
+
+    # Unbox the initialization parameters.
+    param_init_read = jax.tree.map(
+        unbox, param_init_read, is_leaf=lambda x: isinstance(x, CustomWrapper)
+    )
 
     # The tree structure initialized with READ should be the same with the one
     # after WRITE.
