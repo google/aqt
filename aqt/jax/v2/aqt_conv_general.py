@@ -32,8 +32,7 @@ import jax.numpy as jnp
 def make_conv_general_dilated(cfg: config.DotGeneralRaw):
   """Makes quantized lax.make_conv_general_dilated replacement."""
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific cfg.
-  if cfg is None:
-    cfg = config.DotGeneralRaw.make()
+  assert cfg is not None, "Missing config for make_conv_general_dilated"
 
   def my_conv_general_dilated(
       lhs,
