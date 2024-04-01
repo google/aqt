@@ -13,8 +13,9 @@
 # limitations under the License.
 """Freezer for writing & storing general Flax structure."""
 
+import copy
 import enum
-from typing import Any
+from typing import Any, Callable
 
 import flax.linen as nn
 
@@ -44,25 +45,35 @@ class Freezer(nn.Module):
 
   collection: str
   mode: FreezerMode
+  init_wrapper: Callable[..., Any] | None = None
 
   @nn.compact
   def _get_or_set(self, inputs: Any, is_set: bool) -> Any | None:
+    def initializer():
+      if self.init_wrapper is not None:
+        # If we don't copy inputs here, the init_wrapper may change the internal
+        # structure of inputs, and it will be reflected when you apply
+        # s.value = input. That could result in an odd behavior.
+        return self.init_wrapper(copy.deepcopy(inputs))
+      return inputs
+
     if is_set:
       match self.mode:
         case FreezerMode.NONE:
           pass
         case FreezerMode.WRITE:
-          s = self.variable(
-              self.collection, _FREEZE_VAR_NAME, lambda: inputs
-          )
-          s.value = inputs
+          is_init = not self.has_variable(self.collection, _FREEZE_VAR_NAME)
+          s = self.variable(self.collection, _FREEZE_VAR_NAME, initializer)
+          if not is_init:
+            # In case we are using the initialization wrapper, we should NOT
+            # call this line, since this line could overwrite the initialized
+            # value (which is wrapped using self.init_wrapper).
+            s.value = inputs
           return None
         case FreezerMode.READ:
           # Set in READ mode works as an initializer for checkpoint reading.
           # we don't want to change the variable during the serving
-          _ = self.variable(
-              self.collection, _FREEZE_VAR_NAME, lambda: inputs
-          )
+          _ = self.variable(self.collection, _FREEZE_VAR_NAME, initializer)
           return None
         case _:
           # Nothing matched.
@@ -80,11 +91,11 @@ class Freezer(nn.Module):
 
           msg = 'Initialization should not happen in Get mode, but in Set mode.'
 
-          def initializer():
+          def initializer_poison():
             assert False, msg
 
           return self.variable(
-              self.collection, _FREEZE_VAR_NAME, initializer
+              self.collection, _FREEZE_VAR_NAME, initializer_poison
           ).value
         case _:
           # Nothing matched.
