@@ -29,11 +29,7 @@ from typing import Any, Optional, Sequence, Union
 
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
-from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
-from aqt.jax.v2.numerics import int_numerics
-from aqt.jax.v2.numerics import no_numerics
-from aqt.jax.v2.numerics import numerics as aqt_numerics
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy
@@ -89,58 +85,12 @@ class LocalAqt:
   contraction_axis_shard_count: int = utils.static_field()
 
 
-def _get_effective_numerics(
-    bits: Optional[int], preserve_max_val: bool = False
-) -> aqt_numerics.AqtNumerics:
-  """Retrieves effective numerics for the given args."""
-  if bits is None:
-    effective_numerics = no_numerics.NoNumerics()
-  else:
-
-    def _dtype_from_bits(bits, pz):
-      if 2 <= bits <= 8 and pz:
-        if bits == 4:
-          return jnp.int4
-        else:
-          return jnp.int8
-      else:
-        return None
-
-    pz = False if bits == 1 else True
-    dtype = _dtype_from_bits(bits, pz)
-    effective_numerics = int_numerics.IntNumerics(
-        bits=bits,
-        preserve_zero=pz,
-        preserve_max_val=preserve_max_val,
-        clip=True,
-        round=True,
-        noise_fn=None,
-        clip_gradient=False,  # This can be disabled when using abs-max scaling.
-        dtype=dtype,
-    )
-  return effective_numerics
-
-
 def tensor_make() -> 'Tensor':
   """Makes config.Tensor."""
   return Tensor(
       use_fwd_quant=None,
       dequant_mode=DequantMode.OUTPUT,
       calibration_mode=CalibrationMode.CONTRACTING_AXIS,
-  )
-
-
-def quantizer_make(
-    n_bits: int | None, preserve_max_val: bool = False
-) -> aqt_quantizer.Quantizer:
-  """Makes aqt_quantizer.Quantizer."""
-  return aqt_quantizer.Quantizer(
-      numerics=_get_effective_numerics(n_bits, preserve_max_val),
-      calib_shared_axes=None,
-      scale_stop_grad=True,
-      calibration=calibration.AbsMaxCalibration(),
-      po2_scale=False,
-      context=aqt_quantizer.Context(key=None, train_step=None),
   )
 
 
@@ -151,8 +101,8 @@ def _default_dg_quantizer_make(
     rhs_preserve_max_val: bool = False,
 ) -> 'DefaultDotGeneralQuantizer':
   """Makes config.DotGeneralQuantizer."""
-  lhs = quantizer_make(lhs_bits, lhs_preserve_max_val)
-  rhs = quantizer_make(rhs_bits, rhs_preserve_max_val)
+  lhs = aqt_quantizer.quantizer_make(lhs_bits, lhs_preserve_max_val)
+  rhs = aqt_quantizer.quantizer_make(rhs_bits, rhs_preserve_max_val)
 
   return DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
 

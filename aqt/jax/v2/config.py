@@ -36,9 +36,10 @@ from aqt.jax.v2.aqt_dot_general import DotGeneral
 from aqt.jax.v2.aqt_dot_general import DotGeneralRaw
 from aqt.jax.v2.aqt_dot_general import dtypes_allowed_for_int32_accum
 from aqt.jax.v2.aqt_dot_general import LocalAqt
-from aqt.jax.v2.aqt_dot_general import quantizer_make
 from aqt.jax.v2.aqt_dot_general import Tensor
 from aqt.jax.v2.aqt_dot_general import tensor_make
+
+from aqt.jax.v2.aqt_quantizer import quantizer_make
 
 from aqt.jax.v2.numerics import fp8_numerics
 from aqt.jax.v2.numerics import int_numerics
