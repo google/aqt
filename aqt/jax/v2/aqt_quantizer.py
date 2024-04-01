@@ -13,7 +13,7 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
-from typing import Literal, Optional
+from typing import Literal
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
@@ -123,28 +123,17 @@ class Quantizer:
     return qt, quant_grad
 
 
-# TODO(yichizh): Replace _dtype_from_bits with utils.infer_dtype_from_bits
-def _get_effective_numerics(
-    bits: Optional[int], preserve_max_val: bool = False
-) -> numerics.AqtNumerics:
-  """Retrieves effective numerics for the given args."""
-  if bits is None:
+def quantizer_make(
+    n_bits: int | None, preserve_max_val: bool = False
+) -> Quantizer:
+  """Makes Quantizer."""
+  if n_bits is None:
     effective_numerics = no_numerics.NoNumerics()
   else:
-
-    def _dtype_from_bits(bits, pz):
-      if 2 <= bits <= 8 and pz:
-        if bits == 4:
-          return jnp.int4
-        else:
-          return jnp.int8
-      else:
-        return None
-
-    pz = False if bits == 1 else True
-    dtype = _dtype_from_bits(bits, pz)
+    pz = False if n_bits == 1 else True
+    dtype = utils.infer_dtype_from_bits(n_bits, upcast=False) if pz else None
     effective_numerics = int_numerics.IntNumerics(
-        bits=bits,
+        bits=n_bits,
         preserve_zero=pz,
         preserve_max_val=preserve_max_val,
         clip=True,
@@ -153,15 +142,8 @@ def _get_effective_numerics(
         clip_gradient=False,  # This can be disabled when using abs-max scaling.
         dtype=dtype,
     )
-  return effective_numerics
-
-
-def quantizer_make(
-    n_bits: int | None, preserve_max_val: bool = False
-) -> Quantizer:
-  """Makes Quantizer."""
   return Quantizer(
-      numerics=_get_effective_numerics(n_bits, preserve_max_val),
+      numerics=effective_numerics,
       calib_shared_axes=None,
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration(),
