@@ -634,7 +634,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   @parameterized.parameters([
       dict(
-          cfg=config.config_v3(
+          cfg=lambda: config.config_v3(
               fwd_bits=3,
               dlhs_bits=4,
               drhs_bits=5,
@@ -670,7 +670,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ])
   def test_dot_general_calibration_with_remaining_axis(
       self,
-      cfg: config.DotGeneral,
+      cfg: config.DotGeneral | Callable[[], config.DotGeneral],
       lhs_maxval=10.0,
       rhs_maxval=20.0,
       gra_maxval=30.0,
@@ -682,6 +682,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dtype=jnp.float32,
       clip_gradient=False,
   ):
+    # Deferred evaluation of config function calls. 4-bit config initialization
+    # triggers jax.local_devices(), which shouldn't be called before
+    # absl.app.run() in some environments.
+    if not isinstance(cfg, config.DotGeneral):
+      cfg = cfg()
     # Set use_fwd_quant to None.
     cfg.drhs.rhs.use_fwd_quant = None
     cfg.dlhs.rhs.use_fwd_quant = None
