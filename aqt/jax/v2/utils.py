@@ -21,6 +21,7 @@ promote them to dedicated files.
 import difflib
 import functools
 import pprint
+import re
 from typing import Any, Sequence
 import flax.struct
 import jax
@@ -29,6 +30,9 @@ from jax import numpy as jnp
 
 # None means that the template matches any axis size
 ShapeTemplate = Sequence[int | None]
+
+# TODO(lew): We should get a better type for jax.lax.dot_general and variants.
+DotGeneralT = Any
 
 
 def assert_shape(shape: Sequence[int], shape_template: ShapeTemplate, msg: str):
@@ -61,13 +65,20 @@ def dynamic_field(**kwargs):
 
 def print_diff(str_a: str, str_b: str):
   diff_generator = difflib.context_diff(str_a.split(' '), str_b.split(' '))
+  print('Diff:')
   for diff in diff_generator:
     print(diff)
+  print(f'first string (actual):\n{str_a}')
 
 
-def test_pprint_eq(input_a: Any, input_b: Any):
+def test_pprint_eq(
+    input_a: Any, input_b: Any, remove_memory_addresses: bool = False
+):
   str_input_a = input_a if isinstance(input_a, str) else pprint.pformat(input_a)
   str_input_b = input_b if isinstance(input_b, str) else pprint.pformat(input_b)
+  if remove_memory_addresses:
+    str_input_a = re.sub(r' at 0x.*>', '>', str_input_a, 0, re.MULTILINE)
+    str_input_b = re.sub(r' at 0x.*>', '>', str_input_b, 0, re.MULTILINE)
   assert str_input_a == str_input_b, print_diff(str_input_a, str_input_b)
 
 

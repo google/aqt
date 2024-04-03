@@ -79,7 +79,8 @@ class AqtConfigTest(parameterized.TestCase):
                              dg_accumulator_dtype=<class 'jax.numpy.int16'>,
                              local_aqt=None,
                              jax_scope_name='aqt_fwd',
-                             allow_dummy_gradient_into_qtensor=False),
+                             allow_dummy_gradient_into_qtensor=False,
+                             dot_general=<function dot_general>),
            dlhs=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
                                          dequant_mode=<DequantMode.OUTPUT: 1>,
                                          calibration_mode=<CalibrationMode.CONTRACTING_AXIS: 1>),
@@ -117,7 +118,8 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=<class 'jax.numpy.int8'>,
                               local_aqt=LocalAqt(contraction_axis_shard_count=2),
                               jax_scope_name='aqt_dlhs',
-                              allow_dummy_gradient_into_qtensor=False),
+                              allow_dummy_gradient_into_qtensor=False,
+                              dot_general=<function dot_general>),
            drhs=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
                                          dequant_mode=<DequantMode.OUTPUT: 1>,
                                          calibration_mode=<CalibrationMode.CONTRACTING_AXIS: 1>),
@@ -155,9 +157,10 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=<class 'jax.numpy.int4'>,
                               local_aqt=LocalAqt(contraction_axis_shard_count=3),
                               jax_scope_name='aqt_drhs',
-                              allow_dummy_gradient_into_qtensor=False),
+                              allow_dummy_gradient_into_qtensor=False,
+                              dot_general=<function dot_general>),
            apply_custom_vjp_on_jax=True)"""
-    utils.test_pprint_eq(cfg, expected_cfg_str)
+    utils.test_pprint_eq(cfg, expected_cfg_str, remove_memory_addresses=True)
 
   def test_configv4_original(self):
     expected_cfg_str = """DotGeneral(fwd=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
@@ -197,7 +200,8 @@ class AqtConfigTest(parameterized.TestCase):
                              dg_accumulator_dtype=<class 'jax.numpy.int32'>,
                              local_aqt=None,
                              jax_scope_name='aqt_fwd',
-                             allow_dummy_gradient_into_qtensor=False),
+                             allow_dummy_gradient_into_qtensor=False,
+                             dot_general=<function dot_general>),
            dlhs=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
                                          dequant_mode=<DequantMode.OUTPUT: 1>,
                                          calibration_mode=<CalibrationMode.CONTRACTING_AXIS: 1>),
@@ -235,7 +239,8 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=<class 'jax.numpy.int32'>,
                               local_aqt=None,
                               jax_scope_name='aqt_dlhs',
-                              allow_dummy_gradient_into_qtensor=False),
+                              allow_dummy_gradient_into_qtensor=False,
+                              dot_general=<function dot_general>),
            drhs=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
                                          dequant_mode=<DequantMode.OUTPUT: 1>,
                                          calibration_mode=<CalibrationMode.CONTRACTING_AXIS: 1>),
@@ -261,9 +266,12 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_drhs',
-                              allow_dummy_gradient_into_qtensor=False),
+                              allow_dummy_gradient_into_qtensor=False,
+                              dot_general=<function dot_general>),
            apply_custom_vjp_on_jax=True)"""
-    utils.test_pprint_eq(config.config_v4(), expected_cfg_str)
+    utils.test_pprint_eq(
+        config.config_v4(), expected_cfg_str, remove_memory_addresses=True
+    )
 
   def test_config_fwd_fp8(self):
     expected_cfg = """DotGeneral(fwd=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
@@ -295,7 +303,8 @@ class AqtConfigTest(parameterized.TestCase):
                              dg_accumulator_dtype=<class 'jax.numpy.float32'>,
                              local_aqt=None,
                              jax_scope_name='aqt_fwd',
-                             allow_dummy_gradient_into_qtensor=False),
+                             allow_dummy_gradient_into_qtensor=False,
+                             dot_general=<function dot_general>),
            dlhs=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
                                          dequant_mode=<DequantMode.OUTPUT: 1>,
                                          calibration_mode=<CalibrationMode.CONTRACTING_AXIS: 1>),
@@ -321,7 +330,8 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_dlhs',
-                              allow_dummy_gradient_into_qtensor=False),
+                              allow_dummy_gradient_into_qtensor=False,
+                              dot_general=<function dot_general>),
            drhs=DotGeneralRaw(lhs=Tensor(use_fwd_quant=None,
                                          dequant_mode=<DequantMode.OUTPUT: 1>,
                                          calibration_mode=<CalibrationMode.CONTRACTING_AXIS: 1>),
@@ -347,9 +357,12 @@ class AqtConfigTest(parameterized.TestCase):
                               dg_accumulator_dtype=None,
                               local_aqt=None,
                               jax_scope_name='aqt_drhs',
-                              allow_dummy_gradient_into_qtensor=False),
+                              allow_dummy_gradient_into_qtensor=False,
+                              dot_general=<function dot_general>),
            apply_custom_vjp_on_jax=True)"""
-    utils.test_pprint_eq(config.config_fwd_fp8(), expected_cfg)
+    utils.test_pprint_eq(
+        config.config_fwd_fp8(), expected_cfg, remove_memory_addresses=True
+    )
 
   def test_set_int_numerics_preserve_zero(self):
     cfg = config.config_v4()

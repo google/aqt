@@ -471,6 +471,9 @@ class DotGeneralRaw:
   # Gradient will still flow into lhs_qt and/or rhs_qt, but it may be incorrect.
   # It is a caller responsibility to NOT update these QTensors
   allow_dummy_gradient_into_qtensor: bool = utils.static_field(default=False)
+  dot_general: utils.DotGeneralT = utils.static_field(
+      default=jax.lax.dot_general
+  )
 
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
@@ -707,7 +710,7 @@ def _qtensor_dot_general(
       assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
       lhs_qin = lhs_qin * transposed_scale.astype(lhs_qin.dtype)
 
-  out = lax.dot_general(
+  out = cfg.dot_general(
       lhs_qin,
       rhs_qin,
       dimension_numbers=dimension_numbers,
