@@ -28,24 +28,25 @@ import dataclasses
 import pprint
 from typing import Literal
 from absl import logging
+from aqt.jax.v2 import utils
 import jax
 import jax.numpy as jnp
 import numpy as np
 from typing_extensions import Self  # for python version < 3.11
 
 
-AxisIdx = int
-AxisSize = int
-EinsumEqnLetter = str
-EinsumTileSizes = dict[EinsumEqnLetter, AxisSize]
+_AxisIdx = utils.AxisIdx
+_AxisSize = utils.AxisSize
+_EinsumEqnLetter = utils.EinsumEqnLetter
+_EinsumTileSizes = utils.EinsumTileSizes
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
 class AxisTiling:
-  axis: AxisIdx
+  axis: _AxisIdx
   # At most one of tile_count, tile_size can be None.
-  tile_count: AxisSize | None
-  tile_size: AxisSize | None
+  tile_count: _AxisSize | None
+  tile_size: _AxisSize | None
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
@@ -62,7 +63,7 @@ class Cfg:
   rhs: TensorTiling
 
   @classmethod
-  def from_einsum(cls, eqn: str, einsum_tile_sizes: EinsumTileSizes) -> Self:
+  def from_einsum(cls, eqn: str, einsum_tile_sizes: _EinsumTileSizes) -> Self:
     """Creates Cfg based on einsum equation and tile sizes."""
     args_eqn, ret_eqn1 = eqn.split('->')
     args_eqn = args_eqn.split(',')
@@ -108,8 +109,8 @@ class Cfg:
 
   def complete_missing(
       self,
-      lhs_shape: tuple[AxisSize, ...],
-      rhs_shape: tuple[AxisSize, ...],
+      lhs_shape: tuple[_AxisSize, ...],
+      rhs_shape: tuple[_AxisSize, ...],
       dimension_numbers: jax.lax.DotDimensionNumbers,
   ) -> Self:
     """Makes lhs and rhs to cover all the axes."""
@@ -161,7 +162,7 @@ def zip_product(l, r):
   return map(lambda x, y: x * y, l, r)
 
 
-def get_ra(rank, ca, ba) -> list[AxisIdx]:
+def get_ra(rank, ca, ba) -> list[_AxisIdx]:
   return list(a for a in range(rank) if a not in ca + ba)
 
 
@@ -187,14 +188,14 @@ class _Xhs:
   #   After splitting axis 1 to 2 tiles, sized 10, we get
   #   xhs,shape == [10, 2, 10, 30, ...], ca=[0,2,3], ca_tile=[1]
   #   and other axes indices (ra, ra_tile, ba) also can be updated by +1.
-  ca: list[AxisIdx]
-  ra: list[AxisIdx]
+  ca: list[_AxisIdx]
+  ra: list[_AxisIdx]
 
-  ca_tile: list[AxisIdx] = empty_list()  # to be summed after DG
-  ra_tile: list[AxisIdx] = empty_list()  # to be reshaped after DG
-  ra_tile_other: list[AxisIdx] = empty_list()  # to be reshaped after DG
+  ca_tile: list[_AxisIdx] = empty_list()  # to be summed after DG
+  ra_tile: list[_AxisIdx] = empty_list()  # to be reshaped after DG
+  ra_tile_other: list[_AxisIdx] = empty_list()  # to be reshaped after DG
   # There is no point in tiling dot_general's batch axes
-  ba: list[AxisIdx] = dataclasses.field(default_factory=list)
+  ba: list[_AxisIdx] = dataclasses.field(default_factory=list)
 
   # axes waiting to be slitted
   # tensor_tiling: TensorTiling # TODO(lew): use this
@@ -234,7 +235,7 @@ class _Xhs:
       case 'ra':
         self.ra_tile.append(at.axis)
 
-  def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
+  def broadcast_to_other(self, bcast_shape: tuple[_AxisSize, ...]):
     """Adds new axes (bcast_shape) on AxisIdx=0."""
     assert self.ra_tile_other == list(), 'ra_tile_other already set'
     self.ra_tile_other = list(range(len(bcast_shape)))
@@ -250,7 +251,7 @@ class _Xhs:
     update(self.ra_tile)
     update(self.ba)
 
-  def axes_shape(self, axes: list[AxisIdx]) -> tuple[AxisSize, ...]:
+  def axes_shape(self, axes: list[_AxisIdx]) -> tuple[_AxisSize, ...]:
     return tuple(map(lambda a: self.x.shape[a], axes))
 
 

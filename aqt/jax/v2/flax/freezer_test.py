@@ -20,6 +20,7 @@ from absl.testing import parameterized
 from aqt.jax.v2.flax import freezer
 import flax
 from flax import linen as nn
+from flax.core import meta as nn_meta
 import jax
 from jax import numpy as jnp
 
@@ -33,11 +34,13 @@ class _CustomStructure:
 
 class TestModel(nn.Module):
   freezer_mode: freezer.FreezerMode
-  init_wrapper: Callable[..., Any] | None = None
+  axis_metadata_wrapper: Callable[..., nn_meta.AxisMetadata] | None = None
 
   def setup(self):
     self.f = freezer.Freezer(
-        'freezer', mode=self.freezer_mode, init_wrapper=self.init_wrapper
+        'freezer',
+        mode=self.freezer_mode,
+        axis_metadata_wrapper=self.axis_metadata_wrapper,
     )
 
   def __call__(self, x):
@@ -78,14 +81,28 @@ class FreezerTest(parameterized.TestCase):
       self.assertEqual(leaf1.dtype, leaf2.dtype)
 
   def test_freezer_get_set(self):
-    class CustomWrapper(flax.struct.PyTreeNode):
+    class CustomWrapper(flax.struct.PyTreeNode, nn_meta.AxisMetadata):
       value: Any
-      metadata: str
+      metadata: str = flax.struct.field(default=None, pytree_node=False)
 
-    def init_wrapper(x: _CustomStructure):
+      def unbox(self):
+        return self.value
+
+      def replace_boxed(self, val):
+        return self.replace(value=val)
+
+      def add_axis(self, index, params):
+        return self
+
+      def remove_axis(self, index, params):
+        return self
+
+    def axis_metadata_wrapper(x: _CustomStructure):
       ret = x.replace(
           member=CustomWrapper(x.member, 'member metadata'),
-          member_list=CustomWrapper(x.member_list, 'member list metadata'),
+          member_list=[
+              CustomWrapper(v, 'member list metadata') for v in x.member_list
+          ],
       )
       return ret
 
@@ -117,16 +134,18 @@ class FreezerTest(parameterized.TestCase):
 
     # 2. WRITE mode test.
     tm_write = TestModel(
-        freezer_mode=freezer.FreezerMode.WRITE, init_wrapper=init_wrapper
+        freezer_mode=freezer.FreezerMode.WRITE,
+        axis_metadata_wrapper=axis_metadata_wrapper,
     )
     param_init_write = tm_write.init(subkeys[4], cs_for_init)
 
     # Check if the init parameters are properly wrapped.
     cs_frozen = param_init_write['freezer']['f']['frozen']
     self.assertIsInstance(cs_frozen.member, CustomWrapper)
-    self.assertIsInstance(cs_frozen.member_list, CustomWrapper)
     self.assertEqual(cs_frozen.member.metadata, 'member metadata')
-    self.assertEqual(cs_frozen.member_list.metadata, 'member list metadata')
+    for value in cs_frozen.member_list:
+      self.assertIsInstance(value, CustomWrapper)
+      self.assertEqual(value.metadata, 'member list metadata')
 
     # Unbox the initialization parameters.
     # The metadata in the box is used to shard the variables here.
@@ -156,16 +175,18 @@ class FreezerTest(parameterized.TestCase):
 
     # 3. READ mode test.
     tm_read = TestModel(
-        freezer_mode=freezer.FreezerMode.READ, init_wrapper=init_wrapper
+        freezer_mode=freezer.FreezerMode.READ,
+        axis_metadata_wrapper=axis_metadata_wrapper,
     )
     param_init_read = tm_read.init(subkeys[5], cs_for_init)
 
     # Check if the init parameters are properly wrapped.
     cs_frozen = param_init_read['freezer']['f']['frozen']
     self.assertIsInstance(cs_frozen.member, CustomWrapper)
-    self.assertIsInstance(cs_frozen.member_list, CustomWrapper)
     self.assertEqual(cs_frozen.member.metadata, 'member metadata')
-    self.assertEqual(cs_frozen.member_list.metadata, 'member list metadata')
+    for value in cs_frozen.member_list:
+      self.assertIsInstance(value, CustomWrapper)
+      self.assertEqual(value.metadata, 'member list metadata')
 
     # Unbox the initialization parameters.
     param_init_read = jax.tree.map(
