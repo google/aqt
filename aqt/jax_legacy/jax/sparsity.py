@@ -320,6 +320,53 @@ def get_sparsity_mask(
     raise ValueError(f'invalid sparsity type {sparsity_hparams.type}!')
 
 
+@jax.jit
+def _topk_mask_calculator_internal(inputs: jnp.ndarray, prune_rate: float):
+  """Creates a binary mask given the prune rate on the scores."""
+  flat_inputs = jnp.reshape(inputs, -1)
+  num_ones = jnp.round(flat_inputs.size * (1 - prune_rate)).astype(int)
+  num_ones = jnp.maximum(1, num_ones)
+
+  topk_index = jnp.argsort(-flat_inputs)[num_ones - 1]
+  topk_threshold = flat_inputs[topk_index]
+
+  mask_by_value = inputs >= topk_threshold
+
+  # Use lower value indices to prioritize unpruned weight values.
+  mask_by_index = (jnp.arange(flat_inputs.size) <= topk_index) | (
+      flat_inputs != topk_threshold
+  )
+  mask_by_index = jnp.reshape(mask_by_index, inputs.shape)
+  return mask_by_value * mask_by_index
+
+
+@functools.partial(jax.jit, static_argnames=['channel_axis'])
+def get_sparsity_mask_channelwise(
+    inputs: jnp.ndarray, prune_rate: float, channel_axis: int = -1
+) -> jnp.ndarray:
+  """Returns a mask for the channel-wise pruned input.
+
+  Args:
+    inputs: The input matrix to have channel-wise masking applied.
+    prune_rate: The rate in which values in the inputs are pruned.
+    channel_axis: The channel axis, the dimension across which channels will be
+      pruned.
+
+  Returns:
+    A mask that indicates the pruning locations. The mask contains the same
+    dimensions as the input; however, only the specified channel axis has length
+    > 1 in order to facilitate broadcasting.
+  """
+  target_axis = channel_axis % inputs.ndim
+
+  non_target_axes = [i for i in range(inputs.ndim) if i != target_axis]
+  channel_score = jnp.sum(inputs, axis=non_target_axes, keepdims=True)
+
+  mask = _topk_mask_calculator_internal(channel_score, prune_rate)
+  mask = mask * jnp.ones_like(inputs)
+  return mask.astype(jnp.bool_)
+
+
 # TODO(ayazdan): Support arrays with length not divisible by `m`.
 def prune_inputs_n_m(inputs: jnp.ndarray,
                      *,
