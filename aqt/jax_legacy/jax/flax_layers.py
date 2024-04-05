@@ -33,8 +33,8 @@ from aqt.jax_legacy.jax import utils
 from aqt.jax_legacy.jax.flax import struct as flax_struct
 from aqt.jax_legacy.jax.quantization import QuantOps
 from aqt.jax_legacy.jax.quantization import QuantType
-from aqt.jax_legacy.jax.sparsity import SparseHParams
-from aqt.jax_legacy.jax.sparsity import Sparsity
+from aqt.jax_legacy.jax.sparsity.sparsity_core_depr import SparseHParams
+from aqt.jax_legacy.jax.sparsity.sparsity_core_depr import Sparsity
 import flax
 from flax import linen as nn
 from flax.core import frozen_dict
@@ -53,15 +53,22 @@ InitializerType = Callable[[jnp.ndarray, Sequence[int], Type[Any]], jnp.ndarray]
 
 default_kernel_init = nn.initializers.lecun_normal()
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (
+    flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+)
 
 Array = jnp.ndarray
 DType = jnp.dtype
 PRNGKey = jnp.ndarray
 Shape = Sequence[int]
 Initializer = Callable[[PRNGKey, Shape, DType], Array]
-PrecisionLike = Union[None, str, lax.Precision, Tuple[str, str],
-                      Tuple[lax.Precision, lax.Precision]]
+PrecisionLike = Union[
+    None,
+    str,
+    lax.Precision,
+    Tuple[str, str],
+    Tuple[lax.Precision, lax.Precision],
+]
 
 
 # Based on flax.linen.Dense
@@ -152,15 +159,19 @@ class DenseAqt(nn.Module):
 
     if self.dynamic_context.collect_acts_stats:
       stats_tag.StatsTag(
-          channel_axis=-1, name='inputs', update_stats=self.train)(
-              inputs, mask=padding_mask)
+          channel_axis=-1, name='inputs', update_stats=self.train
+      )(inputs, mask=padding_mask)
     hparams = self.hparams
 
-    if (hparams.weight_prec is not None and
-        isinstance(hparams.weight_prec, int) and hparams.weight_prec > 8):
+    if (
+        hparams.weight_prec is not None
+        and isinstance(hparams.weight_prec, int)
+        and hparams.weight_prec > 8
+    ):
       raise NotImplementedError(
-          'If you want to use more than 8bits for quantization, please revisit '
-          'jax.lax.Precision.DEFAULT to determine whether it is still sufficient.'
+          'If you want to use more than 8bits for quantization, please revisit'
+          ' jax.lax.Precision.DEFAULT to determine whether it is still'
+          ' sufficient.'
       )
 
     if not isinstance(self.features, tuple):
@@ -403,18 +414,24 @@ class DenseGeneralAqt(nn.Module):
 
     hparams = self.hparams
 
-    if (hparams.weight_prec is not None and
-        isinstance(hparams.weight_prec, int) and hparams.weight_prec > 8):
+    if (
+        hparams.weight_prec is not None
+        and isinstance(hparams.weight_prec, int)
+        and hparams.weight_prec > 8
+    ):
       raise NotImplementedError(
-          'If you want to use more than 8bits for quantization, please revisit '
-          'jax.lax.Precision.DEFAULT to determine whether it is still sufficient.'
+          'If you want to use more than 8bits for quantization, please revisit'
+          ' jax.lax.Precision.DEFAULT to determine whether it is still'
+          ' sufficient.'
       )
 
     kernel_shape = tuple([inputs.shape[ax] for ax in axis]) + features
     scale_shape = (1,) * len(axis) + features
     if self.reshape_kernel:
-      kernel_param_shape = (np.prod([inputs.shape[ax] for ax in axis]),
-                            np.prod(features))
+      kernel_param_shape = (
+          np.prod([inputs.shape[ax] for ax in axis]),
+          np.prod(features),
+      )
       scale_param_shape = (1, np.prod(features))
     else:
       kernel_param_shape = kernel_shape
@@ -632,8 +649,9 @@ class ConvAqt(nn.Module):
     hparams = self.hparams
     if hparams.weight_prec is not None and hparams.weight_prec > 8:
       raise NotImplementedError(
-          'If you want to use more than 8bits for quantization, please revisit '
-          'jax.lax.Precision.DEFAULT to determine whether it is still sufficient.'
+          'If you want to use more than 8bits for quantization, please revisit'
+          ' jax.lax.Precision.DEFAULT to determine whether it is still'
+          ' sufficient.'
       )
     jax_precision = jax.lax.Precision.DEFAULT
 

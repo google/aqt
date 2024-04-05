@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for sparsity."""
+"""Tests for sparsity_core_depr."""
 
 import dataclasses
 import typing
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from aqt.jax_legacy.jax import sparsity
 from aqt.jax_legacy.jax.flax import struct as flax_struct
-from aqt.jax_legacy.jax.sparsity import SparseHParams
-from aqt.jax_legacy.jax.sparsity import Sparsity
+from aqt.jax_legacy.jax.sparsity import sparsity_core_depr
+from aqt.jax_legacy.jax.sparsity.sparsity_core_depr import SparseHParams
+from aqt.jax_legacy.jax.sparsity.sparsity_core_depr import Sparsity
 import flax
 from flax import linen as nn
 import jax
@@ -205,7 +205,7 @@ class SparsityTest(parameterized.TestCase):
     ys = jnp.concatenate(
         jnp.moveaxis(filtered, 0, 0), axis=len(jnp.shape(inputs)) - 1)
     print(ys)
-    ys_hat = sparsity.prune_2_4(inputs)
+    ys_hat = sparsity_core_depr.prune_2_4(inputs)
     print(ys_hat)
     np.testing.assert_array_equal(ys, ys_hat)
 
@@ -226,7 +226,7 @@ class SparsityTest(parameterized.TestCase):
                       [25, 26, 27, 28, 29, 30, 31, 32]]))
   def test_column_row_pruning(self, order, exp_output):
     inputs = jnp.reshape(jnp.arange(1, 33), (4, 8))
-    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, order=order)
+    output = sparsity_core_depr.prune_inputs_n_m(inputs, n=2, m=4, order=order)
     np.testing.assert_array_equal(output, exp_output)
 
   @parameterized.named_parameters(
@@ -251,7 +251,7 @@ class SparsityTest(parameterized.TestCase):
                        [61, 62, 63, 64]]]))
   def test_3d_column_pruning(self, order, exp_output):
     inputs = jnp.reshape(jnp.arange(1, 65), (4, 4, 4))
-    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, order=order)
+    output = sparsity_core_depr.prune_inputs_n_m(inputs, n=2, m=4, order=order)
     np.testing.assert_array_equal(output, exp_output)
 
   @parameterized.named_parameters(
@@ -269,7 +269,9 @@ class SparsityTest(parameterized.TestCase):
     inputs = jnp.array([[1, 2, 3, 14, 5, 16, 7, 18, 9, 20],
                         [11, 12, 13, 4, 15, 6, 17, 8, 19, 10]])
 
-    output = sparsity.prune_inputs_n_m(inputs, n=2, m=4, offset=offset)
+    output = sparsity_core_depr.prune_inputs_n_m(
+        inputs, n=2, m=4, offset=offset
+    )
     np.testing.assert_array_equal(output, exp_output)
 
   @parameterized.named_parameters(
@@ -420,8 +422,7 @@ class SparsityTest(parameterized.TestCase):
               ~state['sparsity']['weight_sparsity']['mask'], params['kernel']))
       params = update_params(params, grads)
 
-
-# TODO(shivaniagrawal): Add tests for struct sparsity as well.
+  # TODO(shivaniagrawal): Add tests for struct sparsity as well.
 
   @parameterized.named_parameters(
       dict(
@@ -492,7 +493,7 @@ class PruningParamsTest(parameterized.TestCase):
   def test_invalid_params(self, sparse_type, prune_rate):
     with self.assertRaisesRegex(
         AssertionError, 'prune rate should be either None for no pruning'):
-      sparsity.SparseHParams(type=sparse_type, prune_rate=prune_rate)
+      sparsity_core_depr.SparseHParams(type=sparse_type, prune_rate=prune_rate)
 
   @parameterized.parameters(
       dict(
@@ -504,10 +505,11 @@ class PruningParamsTest(parameterized.TestCase):
                                      mask_decay_weight):
     with self.assertRaisesRegex(AssertionError,
                                 '.* `mask_decay_weight` must be positive.'):
-      sparsity.SparseHParams(
+      sparsity_core_depr.SparseHParams(
           type=sparse_type,
           prune_rate=prune_rate,
-          mask_decay_weight=mask_decay_weight)
+          mask_decay_weight=mask_decay_weight,
+      )
 
   @parameterized.parameters(
       dict(
@@ -524,11 +526,12 @@ class PruningParamsTest(parameterized.TestCase):
       self, sparse_type, prune_rate, sparse_ste, mask_decay_weight):
     with self.assertRaisesRegex(ValueError,
                                 'SR-STE only works with non-decaying mask.'):
-      sparsity.SparseHParams(
+      sparsity_core_depr.SparseHParams(
           type=sparse_type,
           prune_rate=prune_rate,
           sparse_ste=sparse_ste,
-          mask_decay_weight=mask_decay_weight)
+          mask_decay_weight=mask_decay_weight,
+      )
 
   @parameterized.parameters(
       dict(
@@ -547,22 +550,23 @@ class PruningParamsTest(parameterized.TestCase):
     with self.assertRaisesRegex(
         ValueError,
         'SR-STE only works with non-decaying sparse structure.'):
-      sparsity.SparseHParams(
+      sparsity_core_depr.SparseHParams(
           type=sparse_type,
           prune_rate=prune_rate,
           sparse_ste=sparse_ste,
-          structure_decay=structure_decay)
+          structure_decay=structure_decay,
+      )
 
   @parameterized.parameters(
       dict(sparse_type='UNSTRUCTURED', prune_rate=0.2, sparse_ste=True))
   def test_invalid_sparse_ste_with_unstructured_sparsity(
       self, sparse_type, prune_rate, sparse_ste):
-    with self.assertRaisesRegex(ValueError,
-                                'SR-STE only works with structured sparsity.'):
-      sparsity.SparseHParams(
-          type=sparse_type,
-          prune_rate=prune_rate,
-          sparse_ste=sparse_ste)
+    with self.assertRaisesRegex(
+        ValueError, 'SR-STE only works with structured sparsity'
+    ):
+      sparsity_core_depr.SparseHParams(
+          type=sparse_type, prune_rate=prune_rate, sparse_ste=sparse_ste
+      )
 
   @parameterized.parameters(
       dict(
@@ -574,12 +578,13 @@ class PruningParamsTest(parameterized.TestCase):
           prune_rate=2.5,
           error_msg='sparsity ratio can not be > 1, provided prune_rate'))
   def test_invalid_prune_rate(self, sparse_type, prune_rate, error_msg):
-    sparsity_hparams = sparsity.SparseHParams(
-        type=sparse_type, prune_rate=prune_rate)
+    sparsity_hparams = sparsity_core_depr.SparseHParams(
+        type=sparse_type, prune_rate=prune_rate
+    )
 
     inputs = jnp.arange(12)
     with self.assertRaisesRegex(AssertionError, error_msg):
-      sparsity.get_sparsity_mask(inputs, sparsity_hparams)
+      sparsity_core_depr.get_sparsity_mask(inputs, sparsity_hparams)
 
 
 class PruningFunctionalityTest(parameterized.TestCase):
@@ -587,43 +592,48 @@ class PruningFunctionalityTest(parameterized.TestCase):
   def test_pruning_mask(self):
     # Total number of parameters = 20
     inputs = jnp.array(np.random.rand(10, 2))
-    mask = sparsity.get_pruning_unstruct_mask(inputs, prune_rate=0.1)
+    mask = sparsity_core_depr.get_pruning_unstruct_mask(inputs, prune_rate=0.1)
     self.assertEqual(jnp.sum(mask), 18)
 
   def test_smallest_largest_magnitude_mask(self):
     # Total number of parameters = 20
     inputs = jnp.array(np.arange(20))
-    mask = sparsity.get_pruning_unstruct_mask(
-        inputs, smallest=True, prune_rate=0.1)
+    mask = sparsity_core_depr.get_pruning_unstruct_mask(
+        inputs, smallest=True, prune_rate=0.1
+    )
     self.assertFalse(mask[0])
     self.assertFalse(mask[1])
 
-    mask = sparsity.get_pruning_unstruct_mask(
-        inputs, smallest=False, prune_rate=0.1)
+    mask = sparsity_core_depr.get_pruning_unstruct_mask(
+        inputs, smallest=False, prune_rate=0.1
+    )
     self.assertFalse(mask[-1])
     self.assertFalse(mask[-2], 0)
 
   def test_prune_inputs_unstruct(self):
     # Total number of parameters = 20
     inputs = jnp.array(np.random.rand(10, 2))
-    prune_input = sparsity.prune_inputs_unstruct(inputs)
+    prune_input = sparsity_core_depr.prune_inputs_unstruct(inputs)
     self.assertEqual(jnp.sum(prune_input == 0), 2)
 
   def test_smallest_largest_magnitude_prune_unstruct(self):
     # Total number of parameters = 20
     inputs = jnp.array(np.arange(20))
-    prune_input = sparsity.prune_inputs_unstruct(inputs, prune_rate=0.1)
+    prune_input = sparsity_core_depr.prune_inputs_unstruct(
+        inputs, prune_rate=0.1
+    )
     self.assertEqual(prune_input[0], 0)
     self.assertEqual(prune_input[1], 0)
 
-    prune_input = sparsity.prune_inputs_unstruct(
-        inputs, prune_rate=0.1, smallest=False)
+    prune_input = sparsity_core_depr.prune_inputs_unstruct(
+        inputs, prune_rate=0.1, smallest=False
+    )
     self.assertEqual(prune_input[-1], 0)
     self.assertEqual(prune_input[-2], 0)
 
   def test_prune_inputs_n_m(self):
     inputs = jnp.array(np.random.rand(10, 2, 4))
-    out = sparsity.prune_inputs_n_m(inputs, n=1, m=4)
+    out = sparsity_core_depr.prune_inputs_n_m(inputs, n=1, m=4)
     self.assertEqual(out.shape[0], inputs.shape[0])
     self.assertEqual(out.shape[1], inputs.shape[1])
     self.assertEqual(out.shape[2], inputs.shape[2])
@@ -636,11 +646,11 @@ class PruningFunctionalityTest(parameterized.TestCase):
   def test_order_not_valid(self):
     inputs = jnp.array(np.random.rand(10, 2, 4))
     with self.assertRaises(ValueError):
-      _ = sparsity.prune_inputs_n_m(inputs, n=1, m=4, order='X')
+      _ = sparsity_core_depr.prune_inputs_n_m(inputs, n=1, m=4, order='X')
 
   def test_n_m_pruning_mask(self):
     inputs = jnp.array(np.random.rand(10, 2, 4))
-    mask = sparsity.get_pruning_n_m_mask(inputs, n=1, m=4)
+    mask = sparsity_core_depr.get_pruning_n_m_mask(inputs, n=1, m=4)
     self.assertEqual(
         list(np.argmax(inputs, axis=2).flatten()),
         list(np.argmax(mask == 1, axis=2).flatten()))

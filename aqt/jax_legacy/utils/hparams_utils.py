@@ -22,8 +22,8 @@ from typing import Any, Dict, Optional, Type, TypeVar
 
 from aqt.jax_legacy.jax import quant_config
 from aqt.jax_legacy.jax import quantization
-from aqt.jax_legacy.jax import sparsity
 from aqt.jax_legacy.jax.flax import struct as flax_struct
+from aqt.jax_legacy.jax.sparsity import sparsity_core_depr
 import dacite
 import jax
 import ml_collections
@@ -31,7 +31,9 @@ import ml_collections
 
 T = TypeVar('T')
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (
+    flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+)
 
 
 @dataclass
@@ -107,7 +109,7 @@ def load_dataclass_from_dict(dataclass_name: Type[T],
       quantization.QuantOps.ActHParams.InputDistribution,
       quantization.QuantType,
       quant_config.QuantGranularity,
-      sparsity.SparseType,
+      sparsity_core_depr.SparseType,
   ]
   data_dict = _convert_lists_to_tuples(data_dict)
   return dacite.from_dict(
