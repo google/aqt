@@ -29,6 +29,7 @@ from typing import Any, Optional, Sequence, Union
 
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2 import transpose
 from aqt.jax.v2 import utils
 import jax
 from jax import lax
@@ -225,137 +226,6 @@ def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
       precision=None,
       preferred_element_type=None,
       _dot_general=dg,
-  )
-
-
-def _scale_trans(x, ca, ba):
-  """Transposes x to output dimension order."""
-  ca = list(ca)
-  ba = list(ba)
-  for i in ca:
-    assert x.shape[i] == 1
-  ra = list(i for i in range(len(x.shape)) if i not in ba + ca)
-  x = jnp.transpose(x, ba + ra + ca)
-  # TODO(lew): x = jnp.squeeze(x, axis=range(len(ba+ra): len(x.shape))
-  shape_ba = x.shape[: len(ba)]
-  shape_ra = x.shape[len(ba) : len(x.shape) - len(ca)]
-  # Will need to add additional axes (size 1) for the other shape_ra
-  x = x.reshape(shape_ba + shape_ra)
-  return x
-
-
-def _lhs_scale_transpose_to_output(
-    lhs_scale, dimension_numbers, lhs_shape, rhs_shape
-):
-  """Transposes lhs_scale to output dimension order."""
-  if lhs_scale is None:
-    return None
-  # The axis order in out is as follows: batch, lhs_ra, rhs_ra
-  # - batch axes order is uniquely determined by either lhs_ba or rhs_ba
-  # - contraction axes ca disappear from the output
-  # - order of the remaining axes (ra) is preserved.
-  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-  qlhs_scale_t = _scale_trans(lhs_scale, lhs_ca, lhs_ba)
-  # inserting dummy axes for rhs_ra
-  assert len(qlhs_scale_t.shape) == len(lhs_shape) - len(lhs_ca)
-  start = len(qlhs_scale_t.shape)
-  end = len(rhs_shape) - len(rhs_ca) - len(rhs_ba) + start
-  lhs_dummy_axes = range(start, end)
-  qlhs_scale_t = jnp.expand_dims(qlhs_scale_t, axis=lhs_dummy_axes)
-  return qlhs_scale_t
-
-
-def _rhs_scale_transpose_to_output(
-    rhs_scale, dimension_numbers, lhs_shape, rhs_shape
-):
-  """Transposes rhs_scale to output dimension order."""
-  if rhs_scale is None:
-    return None
-  del rhs_shape
-  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-  qrhs_scale_t = _scale_trans(rhs_scale, rhs_ca, rhs_ba)
-  start = len(rhs_ba)
-  end = len(lhs_shape) - len(lhs_ca) - len(lhs_ba) + start
-  rhs_dummy_axes = range(start, end)
-  qrhs_scale_t = jnp.expand_dims(qrhs_scale_t, axis=rhs_dummy_axes)
-  return qrhs_scale_t
-
-
-def _get_ra(rank: int, ca: Sequence[int], ba: Sequence[int]):
-  """Returns the remaining axes."""
-  ret = []
-  for i in range(rank):
-    if i not in list(ca) + list(ba):
-      ret.append(i)
-  return ret
-
-
-def _scale_trans_for_other_input(
-    x: jax.Array,
-    my_ca: Sequence[int],
-    my_ba: Sequence[int],
-    other_ca: Sequence[int],
-    other_ba: Sequence[int],
-    other_rank: int,
-):
-  """Transposes x to other inputs' dimension order."""
-  my_ca = list(my_ca)
-  my_ba = list(my_ba)
-  other_ca = list(other_ca)
-  other_ba = list(other_ba)
-
-  # Match the rank.
-  if len(x.shape) < other_rank:
-    x = x.reshape(list(x.shape) + [1] * (other_rank - len(x.shape)))
-
-  transpose_dim = [-1] * len(x.shape)
-  my_axis_mapped = my_ca + my_ba
-  other_axis_mapped = other_ca + other_ba
-  my_ra = _get_ra(x.ndim, my_ca, my_ba)
-  for axis in my_ra:
-    assert x.shape[axis] == 1
-  for my_axis, other_axis in zip(my_axis_mapped, other_axis_mapped):
-    transpose_dim[other_axis] = my_axis
-
-  # Fill unrelated axis with remaining axis.
-  ra_idx = 0
-  for transpose_dim_idx, transpose_dim_value in enumerate(transpose_dim):
-    if transpose_dim_value == -1:
-      transpose_dim[transpose_dim_idx] = my_ra[ra_idx]
-      ra_idx += 1
-  assert ra_idx == len(my_ra)
-
-  # Transpose.
-  x = jnp.transpose(x, transpose_dim)
-
-  # Remove redundant axis.
-  if len(x.shape) > other_rank:
-    for idx in range(len(x.shape), other_rank):
-      assert x.shape[idx] == 1
-    x = x.reshape(x.shape[:other_rank])
-
-  return x
-
-
-def _lhs_scale_transpose_for_rhs_input(lhs_scale, dimension_numbers, rhs_shape):
-  """Transposes lhs_scale to rhs input dimension order."""
-  if lhs_scale is None:
-    return None
-
-  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-  return _scale_trans_for_other_input(
-      lhs_scale, lhs_ca, lhs_ba, rhs_ca, rhs_ba, len(rhs_shape)
-  )
-
-
-def _rhs_scale_transpose_for_lhs_input(rhs_scale, dimension_numbers, lhs_shape):
-  """Transposes lhs_scale to rhs input dimension order."""
-  if rhs_scale is None:
-    return None
-
-  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-  return _scale_trans_for_other_input(
-      rhs_scale, rhs_ca, rhs_ba, lhs_ca, lhs_ba, len(lhs_shape)
   )
 
 
@@ -563,7 +433,7 @@ class DotGeneralRaw:
         """Computes calibration axes for the given Tensor."""
         match tensor_cfg.calibration_mode:
           case CalibrationMode.REMAINING_AXIS:
-            calibration_axes = _get_ra(ndim, ca, ba)
+            calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
           case CalibrationMode.CONTRACTING_AXIS:
             calibration_axes = ca
           case _:
@@ -621,7 +491,7 @@ class DotGeneralRaw:
           lhs_qt_calculated,
           lhs_quant_grad,
           self.lhs,
-          _lhs_scale_transpose_to_output,
+          transpose.lhs_scale_transpose_to_output,
       )
       lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
       lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
@@ -631,7 +501,7 @@ class DotGeneralRaw:
           rhs_qt_calculated,
           rhs_quant_grad,
           self.rhs,
-          _rhs_scale_transpose_to_output,
+          transpose.rhs_scale_transpose_to_output,
       )
       rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
       rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
@@ -696,7 +566,7 @@ def _qtensor_dot_general(
   if cfg.lhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert rhs_qin.dtype in dtypes_can_be_scaled
     for scale in lhs_qt.scale:
-      transposed_scale = _lhs_scale_transpose_for_rhs_input(
+      transposed_scale = transpose.lhs_scale_transpose_for_rhs_input(
           scale, dimension_numbers, rhs_qt.shape
       )
       assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
@@ -704,7 +574,7 @@ def _qtensor_dot_general(
   if cfg.rhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert lhs_qin.dtype in dtypes_can_be_scaled
     for scale in rhs_qt.scale:
-      transposed_scale = _rhs_scale_transpose_for_lhs_input(
+      transposed_scale = transpose.rhs_scale_transpose_for_lhs_input(
           scale, dimension_numbers, lhs_qt.shape
       )
       assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
@@ -925,8 +795,8 @@ def dg_core_vjp_bwd(
       (y_ca, x_ca) = (x_ca, y_ca)
       (y_ba, x_ba) = (x_ba, y_ba)
     g_ndim = g.ndim - y_ndim + len(x_ba) + 2 * len(x_ca)
-    x_ra = tuple(_get_ra(g_ndim, x_ca, x_ba))
-    y_ra = tuple(_get_ra(y_ndim, y_ca, y_ba))
+    x_ra = tuple(utils.get_remaining_axes(g_ndim, x_ca, x_ba))
+    y_ra = tuple(utils.get_remaining_axes(y_ndim, y_ca, y_ba))
     if y_is_lhs:
       g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
     else:

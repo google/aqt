@@ -23,6 +23,7 @@ from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2 import transpose
 from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax_dg_core
 from aqt.jax.v2.flax import freezer as general_freezer
@@ -166,12 +167,12 @@ class AqtDotGeneral(nn.Module):
     for li, ri in zip(*contr):
       lhs_scale_shape[li] = 1
       rhs_scale_shape[ri] = 1
-    lhs_scale = aqt_dot_general._lhs_scale_transpose_to_output(  # pylint: disable=protected-access
+    lhs_scale = transpose.lhs_scale_transpose_to_output(
         jnp.zeros(lhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
     )
     assert lhs_scale is not None
     lhs_scale_shape = lhs_scale.shape
-    rhs_scale = aqt_dot_general._rhs_scale_transpose_to_output(  # pylint: disable=protected-access
+    rhs_scale = transpose.rhs_scale_transpose_to_output(
         jnp.zeros(rhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
     )
     assert rhs_scale is not None
