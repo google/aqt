@@ -26,7 +26,7 @@ from aqt.jax.v2 import transpose
 from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax_dg_core
 from aqt.jax.v2.flax import freezer as general_freezer
-from aqt.jax.v2.flax.utils import QuantMode
+from aqt.jax.v2.utils import QuantMode
 import flax.core.meta as nn_meta
 import flax.linen as nn
 import jax
@@ -81,6 +81,8 @@ class Freezer(nn.Module):
   def get(self) -> Optional[aqt_tensor.QTensor]:
     if self.quant_mode == QuantMode.TRAIN:
       return None
+    elif self.quant_mode == QuantMode.CALIBRATE:
+      return None
     elif self.quant_mode == QuantMode.CONVERT:
       return None
     elif self.quant_mode == QuantMode.SERVE:
@@ -107,6 +109,8 @@ class Freezer(nn.Module):
     #     f' {self.q_dtype}.'
     # )
     if self.quant_mode == QuantMode.TRAIN:
+      pass
+    elif self.quant_mode == QuantMode.CALIBRATE:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
       qvalue = inputs.qvalue
@@ -224,6 +228,7 @@ class AqtDotGeneral(nn.Module):
     else:
       quant_to_freezer_mode = {
           QuantMode.TRAIN: general_freezer.FreezerMode.NONE,
+          QuantMode.CALIBRATE: general_freezer.FreezerMode.NONE,
           QuantMode.CONVERT: general_freezer.FreezerMode.WRITE,
           QuantMode.SERVE: general_freezer.FreezerMode.READ,
       }
@@ -274,7 +279,13 @@ class AqtDotGeneral(nn.Module):
 
     prng_name = self.prng_name
     key = self.make_rng(prng_name) if prng_name is not None else None
-    cfg = config.set_context(cfg, key, train_step=None)
+    cfg = config.set_context(
+        cfg,
+        key,
+        train_step=None,
+        lhs_quant_mode=self.lhs_quant_mode,
+        rhs_quant_mode=self.rhs_quant_mode,
+    )
 
     def ret_dg(
         lhs,

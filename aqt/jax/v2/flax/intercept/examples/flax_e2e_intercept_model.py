@@ -16,8 +16,8 @@
 from absl import app
 from aqt.jax.v2 import config as aqt_config
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2 import utils as aqt_utils
 from aqt.jax.v2.examples import flax_e2e_model
-from aqt.jax.v2.flax import utils as aqt_flax_utils
 from aqt.jax.v2.flax.intercept import aqt_intercept_methods
 from flax import linen as nn
 from flax.metrics import tensorboard
@@ -121,7 +121,7 @@ def serving_conversion(train_state, aqt_cfg, tiling_cfg):
   )
   with aqt_intercept_methods.intercept_methods(
       aqt_cfg,
-      rhs_quant_mode=aqt_flax_utils.QuantMode.CONVERT,
+      rhs_quant_mode=aqt_utils.QuantMode.CONVERT,
       tiling_cfg=tiling_cfg):
     _, model_serving = cnn_freeze.apply(
         train_state.model,
@@ -136,7 +136,7 @@ def serving_conversion(train_state, aqt_cfg, tiling_cfg):
   serve_fn = aqt_intercept_methods.intercept_wrapper(
       cnn_serve.apply,
       aqt_cfg,
-      rhs_quant_mode=aqt_flax_utils.QuantMode.SERVE,
+      rhs_quant_mode=aqt_utils.QuantMode.SERVE,
       tiling_cfg=tiling_cfg)
   return serve_fn, model_serving
 

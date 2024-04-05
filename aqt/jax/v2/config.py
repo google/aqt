@@ -15,6 +15,7 @@
 
 
 import copy
+import functools
 from typing import Literal, Optional, TypeAlias, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
@@ -63,14 +64,22 @@ def _split_key(key: Optional[jax.Array], num_splits: int):
 
 
 def set_context(
-    cfg: DotGeneral, key: Optional[jax.Array], train_step: Optional[int]
+    cfg: DotGeneral,
+    key: Optional[jax.Array],
+    train_step: Optional[int],
+    lhs_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN,
+    rhs_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN,
 ):
   """Set context with prng keys and train_steps for dot_general config."""
 
   def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
     key1, key2 = _split_key(key, num_splits=2)
-    lhs_context = aqt_quantizer.Context(key=key1, train_step=train_step)
-    rhs_context = aqt_quantizer.Context(key=key2, train_step=train_step)
+    lhs_context = utils.Context(
+        key=key1, train_step=train_step, quant_mode=lhs_quant_mode
+    )
+    rhs_context = utils.Context(
+        key=key2, train_step=train_step, quant_mode=rhs_quant_mode
+    )
     cfg_raw.dg_quantizer.set_context(lhs_context, rhs_context)
 
   key_fwd, key_dlhs, key_drhs = _split_key(key, num_splits=3)
@@ -189,8 +198,9 @@ def set_stochastic_rounding(
 
 def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
   """Sets the static bound for calibration."""
-  def _get_calibration():
-    return calibration.ConstantCalibration(bound)
+  calibration_cls = functools.partial(
+      calibration.ConstantCalibration, bound=bound
+  )
 
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
@@ -202,12 +212,12 @@ def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
       cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
 
-  cfg.fwd.dg_quantizer.lhs.calibration = _get_calibration()
-  cfg.fwd.dg_quantizer.rhs.calibration = _get_calibration()
-  cfg.dlhs.dg_quantizer.lhs.calibration = _get_calibration()
-  cfg.dlhs.dg_quantizer.rhs.calibration = _get_calibration()
-  cfg.drhs.dg_quantizer.lhs.calibration = _get_calibration()
-  cfg.drhs.dg_quantizer.rhs.calibration = _get_calibration()
+  cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
+  cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls
+  cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
+  cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
+  cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
+  cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls
 
 
 def set_local_aqt(
@@ -275,11 +285,16 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
     dg_quantizer = dot_general_raw.dg_quantizer
     for quantizer in [dg_quantizer.lhs, dg_quantizer.rhs]:
-      assert isinstance(quantizer.calibration, calibration.AbsMaxCalibration), (
+      calibration_cls = quantizer.calibration
+      if isinstance(calibration_cls, functools.partial):
+        calibration_cls = calibration_cls.func
+      assert calibration_cls == calibration.AbsMaxCalibration, (
           'scale is only available in AbsMaxCalibration, while'
           f' {quantizer.calibration} is used in current config.'
       )
-      quantizer.calibration = calibration.AbsMaxCalibration(scale)
+      quantizer.calibration = functools.partial(
+          calibration.AbsMaxCalibration, scale=scale
+      )
       if scale < 1.0 and isinstance(
           quantizer.numerics, int_numerics.IntNumerics
       ):
@@ -356,9 +371,9 @@ def default_unquantized_config() -> DotGeneral:
         numerics=no_numerics.NoNumerics(),
         calib_shared_axes=None,
         scale_stop_grad=True,
-        calibration=calibration.AbsMaxCalibration(),
+        calibration=calibration.AbsMaxCalibration,
         po2_scale=False,
-        context=aqt_quantizer.Context(key=None, train_step=None),
+        context=utils.Context(key=None, train_step=None),
     )
 
   def dg_raw_cfg(jax_scope_name: str) -> DotGeneralRaw:

@@ -23,6 +23,7 @@ from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import utils
 import aqt.jax.v2.aqt_conv_general as aqt_conv
 import aqt.jax.v2.aqt_dot_general as aqt
 from aqt.jax.v2.numerics import int_numerics
@@ -1084,9 +1085,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         numerics=my_numerics,
         calib_shared_axes="per_tensor",
         scale_stop_grad=True,
-        calibration=calibration.AbsMaxCalibration(scale=None),
+        calibration=calibration.AbsMaxCalibration,
         po2_scale=False,
-        context=aqt_quantizer.Context(key=None, train_step=None),
+        context=utils.Context(key=None, train_step=None),
     )
 
     x = jnp.array([

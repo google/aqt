@@ -19,6 +19,7 @@ promote them to dedicated files.
 """
 
 import difflib
+import enum
 import functools
 import pprint
 import re
@@ -57,6 +58,13 @@ def assert_eq(value: Any, expected: Any, value_name: str):
 flax_slots_dataclass = functools.partial(
     flax.struct.dataclass, frozen=False, slots=True
 )
+
+
+class QuantMode(enum.Enum):
+  TRAIN = 1
+  CALIBRATE = 2
+  CONVERT = 3
+  SERVE = 4
 
 
 def static_field(**kwargs):
@@ -128,3 +136,10 @@ def get_remaining_axes(
     if i not in list(contraction_axes) + list(batch_axes):
       ret.append(i)
   return ret
+
+
+@flax_slots_dataclass
+class Context:
+  key: jax.Array | None = dynamic_field()
+  train_step: int | None = dynamic_field()
+  quant_mode: QuantMode = static_field(default=QuantMode.TRAIN)

@@ -14,25 +14,39 @@
 """Quantization calibration methods."""
 
 import abc
-from typing import Union
+from typing import Union, Sequence
 from aqt.jax.v2 import utils
 import jax.numpy as jnp
 
 
+@utils.flax_slots_dataclass
 class Calibration(abc.ABC):
+  """Abstract class for calibration."""
 
   @abc.abstractmethod
-  def get_bound(self, x, shared_axes) -> jnp.ndarray:
+  def get_bound(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[int] | None,
+      context: utils.Context | None = None
+  ) -> jnp.ndarray:
     pass
 
 
 @utils.flax_slots_dataclass
 class ConstantCalibration(Calibration):
+  """Calibration with a constant value."""
+
   bound: Union[jnp.ndarray, float]
 
-  def get_bound(self, x, shared_axes) -> jnp.ndarray:
+  def get_bound(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[int] | None,
+      context: utils.Context | None = None,
+  ) -> jnp.ndarray:
     """Calibration."""
-    del shared_axes
+    del shared_axes, context
     assert self.bound > 0, 'Bound should be positive.'
     # TODO(yichizh): hardcode bf16 for the scales, subject to quality evaluation
     return jnp.asarray(self.bound).reshape((1,) * len(x.shape)).astype(x.dtype)
@@ -49,8 +63,15 @@ class AbsMaxCalibration(Calibration):
 
   scale: float | None = None
 
-  def get_bound(self, x, shared_axes) -> jnp.ndarray:
+  def get_bound(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[int] | None,
+      context: utils.Context | None = None,
+  ) -> jnp.ndarray:
     """Calibration."""
+    del context
+
     msg = (
         'Perhaps you are using DequantMode.THIS_INPUT (fake_quant) and forgot'
         ' to set them.'

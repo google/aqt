@@ -276,8 +276,8 @@ class DotGeneralQuantizer(abc.ABC):
   @abc.abstractmethod
   def set_context(
       self,
-      lhs_context: aqt_quantizer.Context,
-      rhs_context: aqt_quantizer.Context,
+      lhs_context: utils.Context,
+      rhs_context: utils.Context,
   ) -> None:
     """Sets context for lhs and rhs."""
     pass
@@ -319,8 +319,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def set_context(
       self,
-      lhs_context: aqt_quantizer.Context,
-      rhs_context: aqt_quantizer.Context,
+      lhs_context: utils.Context,
+      rhs_context: utils.Context,
   ) -> None:
     self.lhs.context = lhs_context
     self.rhs.context = rhs_context

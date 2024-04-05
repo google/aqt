@@ -14,13 +14,26 @@
 
 """Test for flax e2e model."""
 import copy
+import functools
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
+from aqt.jax.v2.flax import aqt_flax_calibration
 import jax
 import jax.numpy as jnp
+import numpy as np
+
+
+def _dummy_dataset(ds_size, image_rng, label_rng):
+  return {
+      "image": jax.random.uniform(key=image_rng, shape=(ds_size, 28, 28, 1)),
+      "label": jax.random.randint(
+          key=label_rng, shape=(ds_size,), minval=0, maxval=10
+      ),
+  }
 
 
 class MnistTest(parameterized.TestCase):
@@ -88,12 +101,7 @@ class MnistTest(parameterized.TestCase):
 
     # Dataset
     ds_size = 8
-    ds = {
-        "image": jax.random.uniform(key=image_rng, shape=(ds_size, 28, 28, 1)),
-        "label": jax.random.randint(
-            key=label_rng, shape=(ds_size,), minval=0, maxval=10
-        ),
-    }
+    ds = _dummy_dataset(ds_size, image_rng, label_rng)
 
     # Stage 1: regular training
     state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
@@ -248,6 +256,133 @@ class MnistTest(parameterized.TestCase):
     qt.qvalue = jnp.zeros_like(qt.qvalue)
     bad_logits, _ = forward(model_serving, apply_serving)
     assert not (bad_logits == logits_s3).all()
+
+  @parameterized.parameters([
+      (
+          {
+              "drhs_bits": 8,
+              "drhs_accumulator_dtype": jnp.int32,  # overwrite the default None
+          },
+      ),
+  ])
+  def test_mnist_calibration(self, configs):
+    aqt_cfg = config.config_v4(**configs)
+
+    # RNGs
+    rng = jax.random.key(0)
+    rng, init_rng = jax.random.split(rng)
+    rng, image_rng1, image_rng2 = jax.random.split(rng, 3)
+    rng, label_rng1, label_rng2 = jax.random.split(rng, 3)
+    rng, input_rng = jax.random.split(rng)
+    rng, calibration_rng = jax.random.split(rng)
+    del rng
+
+    # Dataset
+    ds_size = 64
+    batch_size = 8
+    ds = _dummy_dataset(ds_size, image_rng1, label_rng1)
+    ds2 = _dummy_dataset(ds_size, image_rng2, label_rng2)
+
+    # Stage 1: regular training
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+
+    state, _, _ = flax_e2e_model.train_epoch(
+        state, ds, batch_size, rng=input_rng
+    )
+
+    # Stage 2: Calibration.
+    def _update_cfg_with_calibration(cfg):
+      sr_calibration_cls = functools.partial(
+          aqt_flax_calibration.MeanOfAbsMaxCalibration,
+          quant_collection="qc",
+      )
+      cfg.fwd.dg_quantizer.lhs.calibration = sr_calibration_cls
+      cfg.fwd.dg_quantizer.rhs.calibration = sr_calibration_cls
+
+    _update_cfg_with_calibration(state.cnn_train.aqt_cfg)
+    _update_cfg_with_calibration(state.cnn_eval.aqt_cfg)
+
+    # For static range calibration, the calibration axis for activation should
+    # be set to per_tensor, since its dimensions could be different during
+    # training and during inference.
+    aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = "per_tensor"
+
+    calibration_steps = 4
+    calibrated_params = flax_e2e_model.calibrate(
+        state,
+        ds,
+        batch_size,
+        rng=calibration_rng,
+        calibration_steps=calibration_steps,
+    )
+    calibration_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), calibrated_params
+    )
+    dtype = jnp.dtype
+    expected_calibration_pytree = {
+        "AqtEinsum_0": {
+            # For the Einsum case, lhs and rhs are swapped.
+            "AqtDotGeneral_0": {
+                "MeanOfAbsMaxCalibration_0": {
+                    "count": (dtype("int32"), ()),
+                    "sum_of_max": (dtype("float32"), (1, 1, 1, 1, 1))
+                },
+                "MeanOfAbsMaxCalibration_1": {
+                    "count": (dtype("int32"), ()),
+                    "sum_of_max": (dtype("float32"), (1, 2, 1, 1, 10))
+                }}},
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "MeanOfAbsMaxCalibration_0": {
+                    "count": (dtype("int32"), ()),
+                    "sum_of_max": (dtype("float32"), (1, 1, 1, 1, 1))
+                },
+                "MeanOfAbsMaxCalibration_1": {
+                    "count": (dtype("int32"), ()),
+                    "sum_of_max": (dtype("float32"), (1, 2, 1, 1, 256))
+                }}},
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "MeanOfAbsMaxCalibration_0": {
+                    "count": (dtype("int32"), ()),
+                    "sum_of_max": (dtype("float32"), (1, 1, 1, 1, 1))
+                },
+                "MeanOfAbsMaxCalibration_1": {
+                    "count": (dtype("int32"), ()),
+                    "sum_of_max": (dtype("float32"), (1, 2, 1, 1, 10))
+                }}}}
+
+    utils.test_pprint_eq(expected_calibration_pytree, calibration_pytree["qc"])
+
+    # The count number should be equal to the number of calibration.
+    einsum_params = calibrated_params["qc"]["AqtEinsum_0"]["AqtDotGeneral_0"]
+    einsum_count = einsum_params["MeanOfAbsMaxCalibration_0"]["count"]
+    self.assertEqual(calibration_steps, einsum_count)
+
+    # Stage 3: Training with the calibrated numbers.
+    state = state.replace(model=copy.deepcopy(calibrated_params))
+    state, _, _ = flax_e2e_model.train_epoch(
+        state, ds2, batch_size, rng=input_rng
+    )
+
+    # The calibrated parameters must not change.
+    jax.tree.map(
+        np.testing.assert_array_equal,
+        calibrated_params["qc"],
+        state.model["qc"],
+    )
+
+    # Other parameters should change due to the training.
+    def assert_array_not_equal(x, y):
+      mean_err = jnp.mean(jnp.abs(x - y))
+      if mean_err == 0.0:
+        assert False
+
+    jax.tree.map(
+        assert_array_not_equal,
+        calibrated_params["params"],
+        state.model["params"],
+    )
 
 
 if __name__ == "__main__":
