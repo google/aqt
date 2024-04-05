@@ -18,21 +18,20 @@ import itertools
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2 import utils
 import jax
 import jax.numpy as jnp
 import numpy as np
 import sympy
 
 
-AxisIdx = tiled_dot_general.AxisIdx
+AxisIdx = utils.AxisIdx
 TensorTiling = tiled_dot_general.TensorTiling
 Cfg = tiled_dot_general.Cfg
 AxisTiling = tiled_dot_general.AxisTiling
 
 
-def get_shape_from_axes(
-    axes: list[tiled_dot_general.AxisIdx], shape
-) -> list[int]:
+def get_shape_from_axes(axes: list[AxisIdx], shape) -> list[int]:
   return [shape[i] for i in axes]
 
 
@@ -54,8 +53,8 @@ def assign_input_shape(
 
 
 def get_axis_tiles(
-    axes: list[tiled_dot_general.AxisIdx], shape: list[int]
-) -> list[list[tiled_dot_general.AxisTiling]]:
+    axes: list[AxisIdx], shape: list[int]
+) -> list[list[AxisTiling]]:
   # Assume tiling all axes
   ret = list(
       itertools.product(*[

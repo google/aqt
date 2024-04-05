@@ -28,14 +28,15 @@ import dataclasses
 import pprint
 from typing import Literal
 from absl import logging
+from aqt.jax.v2 import utils
 import jax
 import jax.numpy as jnp
 import numpy as np
 from typing_extensions import Self  # for python version < 3.11
 
 
-AxisIdx = int
-AxisSize = int
+AxisIdx = utils.AxisIdx
+AxisSize = utils.AxisSize
 EinsumEqnLetter = str
 EinsumTileSizes = dict[EinsumEqnLetter, AxisSize]
 

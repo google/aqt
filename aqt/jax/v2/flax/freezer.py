@@ -13,10 +13,10 @@
 # limitations under the License.
 """Freezer for writing & storing general Flax structure."""
 
-import copy
 import enum
 from typing import Any, Callable
 
+from flax.core import meta as nn_meta
 import flax.linen as nn
 
 
@@ -45,16 +45,13 @@ class Freezer(nn.Module):
 
   collection: str
   mode: FreezerMode
-  init_wrapper: Callable[..., Any] | None = None
+  axis_metadata_wrapper: Callable[..., nn_meta.AxisMetadata] | None = None
 
   @nn.compact
   def _get_or_set(self, inputs: Any, is_set: bool) -> Any | None:
     def initializer():
-      if self.init_wrapper is not None:
-        # If we don't copy inputs here, the init_wrapper may change the internal
-        # structure of inputs, and it will be reflected when you apply
-        # s.value = input. That could result in an odd behavior.
-        return self.init_wrapper(copy.deepcopy(inputs))
+      if self.axis_metadata_wrapper is not None:
+        return self.axis_metadata_wrapper(inputs)
       return inputs
 
     if is_set:
@@ -62,13 +59,8 @@ class Freezer(nn.Module):
         case FreezerMode.NONE:
           pass
         case FreezerMode.WRITE:
-          is_init = not self.has_variable(self.collection, _FREEZE_VAR_NAME)
           s = self.variable(self.collection, _FREEZE_VAR_NAME, initializer)
-          if not is_init:
-            # In case we are using the initialization wrapper, we should NOT
-            # call this line, since this line could overwrite the initialized
-            # value (which is wrapped using self.init_wrapper).
-            s.value = inputs
+          s.value = inputs
           return None
         case FreezerMode.READ:
           # Set in READ mode works as an initializer for checkpoint reading.

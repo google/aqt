@@ -17,8 +17,7 @@
 # pylint: disable=g-importing-member
 import copy
 import functools
-from typing import Iterable
-from typing import Optional, Union
+from typing import Callable, Iterable, Optional, Sequence, Union
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
@@ -28,9 +27,16 @@ from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax_dg_core
 from aqt.jax.v2.flax import freezer as general_freezer
 from aqt.jax.v2.flax.utils import QuantMode
+import flax.core.meta as nn_meta
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+
+
+NoShardingAxes = Sequence[utils.AxisIdx]
+AxisMetadataWrapper = Callable[
+    [jnp.ndarray, NoShardingAxes], nn_meta.AxisMetadata
+]
 
 
 class Freezer(nn.Module):
@@ -130,17 +136,24 @@ class AqtDotGeneral(nn.Module):
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
   # apply_quant_mode determines if using Freezer in cfg.get/set_tensor
   lhs_apply_quant_mode: bool = True
-  lhs_init: nn.initializers.Initializer = jnp.zeros
-  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
   lhs_qtensor: Optional[aqt_tensor.QTensor] = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
-  rhs_init: nn.initializers.Initializer = jnp.zeros
-  rhs_scale_init: nn.initializers.Initializer = jnp.zeros
   rhs_var_name: str = 'qrhs'
   rhs_qtensor: Optional[aqt_tensor.QTensor] = None
+
+  # Variables only for the legacy Freezer.
+  lhs_init: nn.initializers.Initializer = jnp.zeros
+  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
+  rhs_init: nn.initializers.Initializer = jnp.zeros
+  rhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
+  # Variables only for the new Freezer.
+  lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
+  rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -214,16 +227,49 @@ class AqtDotGeneral(nn.Module):
           QuantMode.CONVERT: general_freezer.FreezerMode.WRITE,
           QuantMode.SERVE: general_freezer.FreezerMode.READ,
       }
+
+      def init_wrapper(
+          qt: aqt_tensor.QTensor,
+          axis_metadata_wrapper: Optional[AxisMetadataWrapper],
+      ):
+        if axis_metadata_wrapper is None:
+          return qt
+
+        # We are not doing any sharding for scale and scale_t, for now.
+        scale_non_shard_axis = range(qt.ndim)
+
+        qt = qt.replace(
+            qvalue=axis_metadata_wrapper(qt.qvalue, []),
+            scale=jax.tree_map(
+                lambda x: axis_metadata_wrapper(x, scale_non_shard_axis),
+                qt.scale,
+            ),
+            scale_t=jax.tree_map(
+                lambda x: axis_metadata_wrapper(x, scale_non_shard_axis),
+                qt.scale_t,
+            ),
+        )
+        return qt
+
+      lhs_init_wrapper = functools.partial(
+          init_wrapper, axis_metadata_wrapper=self.lhs_axis_metadata_wrapper
+      )
+      rhs_init_wrapper = functools.partial(
+          init_wrapper, axis_metadata_wrapper=self.rhs_axis_metadata_wrapper
+      )
+
       lhs_freezer = general_freezer.Freezer(
           name=self.lhs_var_name,
           mode=quant_to_freezer_mode[lhs_qm],
           collection=self.quant_collection,
+          axis_metadata_wrapper=lhs_init_wrapper,
       )
 
       rhs_freezer = general_freezer.Freezer(
           name=self.rhs_var_name,
           mode=quant_to_freezer_mode[rhs_qm],
           collection=self.quant_collection,
+          axis_metadata_wrapper=rhs_init_wrapper,
       )
 
     prng_name = self.prng_name
@@ -326,14 +372,21 @@ class AqtEinsum(nn.Module):
 
   # TODO(lew): split out separate class for each side.
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
-  lhs_init: nn.initializers.Initializer = jnp.zeros
-  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
   lhs_var_name: str = 'qlhs'
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
+  rhs_var_name: str = 'qrhs'
+
+  # Variables only for the legacy Freezer.
+  lhs_init: nn.initializers.Initializer = jnp.zeros
+  lhs_scale_init: nn.initializers.Initializer = jnp.zeros
+
   rhs_init: nn.initializers.Initializer = jnp.zeros
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
-  rhs_var_name: str = 'qrhs'
+
+  # Variables only for the new Freezer.
+  lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
+  rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -394,12 +447,14 @@ class AqtEinsum(nn.Module):
 
     lhs_quant_mode = self.lhs_quant_mode
     lhs_init = self.lhs_init
+    lhs_axis_metadata_wrapper = self.lhs_axis_metadata_wrapper
     lhs_scale_init = self.lhs_scale_init
     lhs_var_name = self.lhs_var_name
     lhs_qtensor = lhs_g if lhs_is_qt else None
 
     rhs_quant_mode = self.rhs_quant_mode
     rhs_init = self.rhs_init
+    rhs_axis_metadata_wrapper = self.rhs_axis_metadata_wrapper
     rhs_scale_init = self.rhs_scale_init
     rhs_var_name = self.rhs_var_name
     rhs_qtensor = rhs_g if rhs_is_qt else None
@@ -421,6 +476,10 @@ class AqtEinsum(nn.Module):
       lhs_var_name, rhs_var_name = rhs_var_name, lhs_var_name
       lhs_is_qt, rhs_is_qt = rhs_is_qt, lhs_is_qt
       lhs_qtensor, rhs_qtensor = rhs_qtensor, lhs_qtensor
+      lhs_axis_metadata_wrapper, rhs_axis_metadata_wrapper = (
+          rhs_axis_metadata_wrapper,
+          lhs_axis_metadata_wrapper,
+      )
       if tiling_config is not None:
         tiling_config = tiled_dot_general.Cfg(
             lhs=tiling_config.rhs, rhs=tiling_config.lhs
@@ -435,12 +494,14 @@ class AqtEinsum(nn.Module):
         # the qtensor passed to dg.
         lhs_apply_quant_mode=not lhs_is_qt,  # Freezer not used if lhs is qt
         lhs_init=lhs_init,
+        lhs_axis_metadata_wrapper=lhs_axis_metadata_wrapper,
         lhs_scale_init=lhs_scale_init,
         lhs_var_name=lhs_var_name,
         lhs_qtensor=lhs_qtensor,
         rhs_quant_mode=rhs_quant_mode,
         rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
         rhs_init=rhs_init,
+        rhs_axis_metadata_wrapper=rhs_axis_metadata_wrapper,
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
         rhs_qtensor=rhs_qtensor,

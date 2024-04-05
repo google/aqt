@@ -28,6 +28,10 @@ import jax
 from jax import numpy as jnp
 
 
+# Some common types.
+AxisIdx = int
+AxisSize = int
+
 # None means that the template matches any axis size
 ShapeTemplate = Sequence[int | None]
 
