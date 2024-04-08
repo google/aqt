@@ -165,6 +165,7 @@ This example demonstrates how to make a simple linear AQT quantizer.
 ```python
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
+from aqt.jax.v2 import utils as aqt_utils
 from aqt.jax.v2.numerics import int_numerics
 
 q = aqt_quantizer.Quantizer(
@@ -181,7 +182,7 @@ q = aqt_quantizer.Quantizer(
     scale_stop_grad=True,
     calibration=calibration.AbsMaxCalibration(),
     po2_scale=False,
-    context=aqt_quantizer.Context(key=jax.random.PRNGKey(0), train_step=0))
+    context=aqt_utils.Context(key=jax.random.PRNGKey(0), train_step=0))
 ```
 
 To view the quantized weights created by the quantizer, try quantizing a simple vector like so. Remember that these are the quantized values that are stored in memory for weight quantization.

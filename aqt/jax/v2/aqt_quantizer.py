@@ -20,8 +20,6 @@ from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
-# TODO(jungjw): Remove this after updating all affected clients.
-from aqt.jax.v2.utils import Context  # pylint: disable=g-importing-member, unused-import
 import jax
 import jax.numpy as jnp
 
