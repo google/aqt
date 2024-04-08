@@ -73,10 +73,6 @@ However if there is any other use, we will drop that assumption."""
         list(range(1, rank)), list(range(0, rank - 1)), msg
     )
     (lhs_qt, _), (rhs_qt, _) = cfg.dg_quantizer((lhs, None), (rhs, None))
-    # Therefore, cast qvalue back to its original data dtype.
-    # Delete the following two lines when the constraint is lifted.
-    lhs_qt = lhs_qt.qvalue_astype(lhs.dtype)
-    rhs_qt = rhs_qt.qvalue_astype(rhs.dtype)
 
     out = lax.conv_general_dilated(
         lhs=lhs_qt.qvalue,
