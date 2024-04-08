@@ -95,19 +95,6 @@ def tensor_make() -> 'Tensor':
   )
 
 
-def _default_dg_quantizer_make(
-    lhs_bits: int | None = None,
-    rhs_bits: int | None = None,
-    lhs_preserve_max_val: bool = False,
-    rhs_preserve_max_val: bool = False,
-) -> 'DefaultDotGeneralQuantizer':
-  """Makes config.DotGeneralQuantizer."""
-  lhs = aqt_quantizer.quantizer_make(lhs_bits, lhs_preserve_max_val)
-  rhs = aqt_quantizer.quantizer_make(rhs_bits, rhs_preserve_max_val)
-
-  return DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
-
-
 def dot_general_raw_make(
     lhs_bits=None,
     rhs_bits=None,
@@ -129,7 +116,9 @@ def dot_general_raw_make(
   else:
     dg_accumulator_dtype = None
 
-  dg_quantizer = _default_dg_quantizer_make(lhs_bits, rhs_bits)
+  lhs = aqt_quantizer.quantizer_make(lhs_bits)
+  rhs = aqt_quantizer.quantizer_make(rhs_bits)
+  dg_quantizer = DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
 
   return DotGeneralRaw(
       lhs=lhs_cfg,
