@@ -31,7 +31,7 @@ class MeanOfAbsMaxCalibration(calibration.Calibration, nn.Module):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[int] | None,
+      shared_axes: Sequence[utils.AxisIdx] | None,
       context: utils.Context | None = None,
   ) -> jnp.ndarray:
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)

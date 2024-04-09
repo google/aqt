@@ -27,7 +27,7 @@ class Calibration(abc.ABC):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[int] | None,
+      shared_axes: Sequence[utils.AxisIdx] | None,
       context: utils.Context | None = None
   ) -> jnp.ndarray:
     pass
@@ -42,7 +42,7 @@ class ConstantCalibration(Calibration):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[int] | None,
+      shared_axes: Sequence[utils.AxisIdx] | None,
       context: utils.Context | None = None,
   ) -> jnp.ndarray:
     """Calibration."""
@@ -66,7 +66,7 @@ class AbsMaxCalibration(Calibration):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[int] | None,
+      shared_axes: Sequence[utils.AxisIdx] | None,
       context: utils.Context | None = None,
   ) -> jnp.ndarray:
     """Calibration."""

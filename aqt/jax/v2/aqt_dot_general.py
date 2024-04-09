@@ -239,8 +239,8 @@ class DotGeneralQuantizer(abc.ABC):
   @abc.abstractmethod
   def __call__(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
   ) -> tuple[
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
@@ -255,8 +255,8 @@ class DotGeneralQuantizer(abc.ABC):
   @abc.abstractmethod
   def assert_calib_shared_axes_value(
       self,
-      lhs_val: Sequence[int] | None,
-      rhs_val: Sequence[int] | None,
+      lhs_val: Sequence[utils.AxisIdx] | None,
+      rhs_val: Sequence[utils.AxisIdx] | None,
       msg: str,
   ) -> None:
     """Asserts if calib_shared_axes have certain values."""
@@ -281,8 +281,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def __call__(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
   ) -> tuple[
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
@@ -299,8 +299,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def assert_calib_shared_axes_value(
       self,
-      lhs_val: Sequence[int] | None,
-      rhs_val: Sequence[int] | None,
+      lhs_val: Sequence[utils.AxisIdx] | None,
+      rhs_val: Sequence[utils.AxisIdx] | None,
       msg: str,
   ) -> None:
     assert self.lhs.calib_shared_axes == lhs_val, msg
@@ -416,9 +416,9 @@ class DotGeneralRaw:
       def _get_calibration_axes(
           tensor_cfg: Tensor,
           ndim: int,
-          ca: Sequence[int],
-          ba: Sequence[int],
-      ) -> Sequence[int]:
+          ca: Sequence[utils.AxisIdx],
+          ba: Sequence[utils.AxisIdx],
+      ) -> Sequence[utils.AxisIdx]:
         """Computes calibration axes for the given Tensor."""
         match tensor_cfg.calibration_mode:
           case CalibrationMode.REMAINING_AXIS:

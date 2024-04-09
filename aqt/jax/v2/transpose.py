@@ -81,10 +81,10 @@ def rhs_scale_transpose_to_output(
 
 def _scale_trans_for_other_input(
     x: jax.Array,
-    my_ca: Sequence[int],
-    my_ba: Sequence[int],
-    other_ca: Sequence[int],
-    other_ba: Sequence[int],
+    my_ca: Sequence[utils.AxisIdx],
+    my_ba: Sequence[utils.AxisIdx],
+    other_ca: Sequence[utils.AxisIdx],
+    other_ba: Sequence[utils.AxisIdx],
     other_rank: int,
 ):
   """Transposes x to other inputs' dimension order."""

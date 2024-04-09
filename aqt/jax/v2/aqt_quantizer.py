@@ -13,7 +13,7 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
-from typing import Literal
+from typing import Literal, Sequence
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
@@ -33,7 +33,7 @@ class Quantizer:
   """Configuration of quantization of one tensor."""
 
   numerics: AbstractAqtNumerics = utils.static_field()
-  calib_shared_axes: list[int] | Literal["per_tensor"] | None = (
+  calib_shared_axes: Sequence[utils.AxisIdx] | Literal["per_tensor"] | None = (
       utils.static_field()
   )
   scale_stop_grad: bool = utils.static_field()

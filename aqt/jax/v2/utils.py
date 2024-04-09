@@ -129,7 +129,10 @@ def infer_dtype_from_bits(bits: int, upcast: bool = True) -> jnp.dtype | None:
 
 
 def get_remaining_axes(
-    rank: int, contraction_axes: Sequence[int], batch_axes: Sequence[int]):
+    rank: int,
+    contraction_axes: Sequence[AxisIdx],
+    batch_axes: Sequence[AxisIdx],
+):
   """Returns the remaining axes."""
   ret = []
   for i in range(rank):
