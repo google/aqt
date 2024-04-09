@@ -176,23 +176,29 @@ def set_stochastic_rounding(
       cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
 
-  lhs_noise_fn = noise_fn if vjp_lhs_stochastic_rounding else None
-  rhs_noise_fn = noise_fn if vjp_rhs_stochastic_rounding else None
-
   def _set_numerics_noise_fn(
       dg_quantizer: aqt_dot_general.DefaultDotGeneralQuantizer,
-      lhs_noise_fn: stochastic_rounding.NoiseFn,
-      rhs_noise_fn: stochastic_rounding.NoiseFn,
+      is_lhs_sr: bool,
+      is_rhs_sr: bool,
   ) -> None:
-    dg_quantizer.lhs.numerics = dg_quantizer.lhs.numerics.replace(
-        noise_fn=lhs_noise_fn
-    )
-    dg_quantizer.rhs.numerics = dg_quantizer.rhs.numerics.replace(
-        noise_fn=rhs_noise_fn
-    )
+    # set stochastic noise for each dg_quantizer
+    def _set_noise_fn(
+        quantizer: aqt_quantizer.Quantizer,
+        is_sr: bool,
+    ) -> None:
+      # set stochastic noise for each side of a dg_quantizer
+      if isinstance(quantizer.numerics, fp8_numerics.Fp8Numerics):
+        quantizer.numerics.stochastic_rounding = is_sr
+      else:
+        quantizer.numerics.noise_fn = noise_fn if is_sr else None
 
-  _set_numerics_noise_fn(cfg.dlhs.dg_quantizer, lhs_noise_fn, rhs_noise_fn)
-  _set_numerics_noise_fn(cfg.drhs.dg_quantizer, lhs_noise_fn, rhs_noise_fn)
+    _set_noise_fn(dg_quantizer.lhs, is_lhs_sr)
+    _set_noise_fn(dg_quantizer.rhs, is_rhs_sr)
+
+  is_lhs_sr = vjp_lhs_stochastic_rounding
+  is_rhs_sr = vjp_rhs_stochastic_rounding
+  _set_numerics_noise_fn(cfg.dlhs.dg_quantizer, is_lhs_sr, is_rhs_sr)
+  _set_numerics_noise_fn(cfg.drhs.dg_quantizer, is_lhs_sr, is_rhs_sr)
 
 
 def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
@@ -515,9 +521,9 @@ def config_v3(
 
 def config_v4(
     *,
-    fwd_bits: Optional[int] = 8,
-    dlhs_bits: Optional[int] = 8,
-    drhs_bits: Optional[int] = None,
+    fwd_bits: Union[int, None, fp8_numerics.FP8Dtype] = 8,
+    dlhs_bits: Union[int, None, fp8_numerics.FP8Dtype] = 8,
+    drhs_bits: Union[int, None, fp8_numerics.FP8Dtype] = None,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
