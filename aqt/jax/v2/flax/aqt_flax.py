@@ -306,7 +306,7 @@ class AqtDotGeneral(nn.Module):
       assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
       assert rhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
 
-      config.assert_config_validity(cfg)
+      cfg.assert_config_validity()
 
       # Getter
       lhs_apply_quant_mode = self.lhs_apply_quant_mode

@@ -825,8 +825,3 @@ def make_dot_general(dg: Optional[DotGeneral]):
     return jax.lax.dot_general
   else:
     return dg
-
-
-def assert_config_validity(cfg):
-  # TODO(lew): call warnings.warn("Deprecated")
-  cfg.assert_config_validity()

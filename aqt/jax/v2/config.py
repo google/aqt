@@ -27,7 +27,6 @@ from aqt.jax.v2 import utils
 # TODO(lew): Remove these imports, use setters instead
 # pylint: disable=g-importing-member
 # pylint: disable=unused-import
-from aqt.jax.v2.aqt_dot_general import assert_config_validity
 from aqt.jax.v2.aqt_dot_general import CalibrationMode
 from aqt.jax.v2.aqt_dot_general import conv_general_dilated_make
 from aqt.jax.v2.aqt_dot_general import DequantMode
