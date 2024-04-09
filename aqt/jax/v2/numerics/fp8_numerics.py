@@ -13,8 +13,7 @@
 # limitations under the License.
 """Numerics for fp8."""
 
-from typing import Literal, Optional, TypeAlias
-from aqt.jax.v2 import stochastic_rounding
+from typing import Literal, TypeAlias
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
 import jax
@@ -25,14 +24,44 @@ FP8Dtype: TypeAlias = Literal['e4m3', 'e5m2']
 fp8_map = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 
 
+def fp_mantissa_round(x, mantissa_bits, key: jax.Array):
+  """FP stochastic rounding for a given mantissa."""
+  assert x.dtype == jnp.bfloat16  # (sign, exp, mantissa) = (1,8,7)
+  # bf16 bit pattern: seeeeeeeemmmmmmm
+  #                   7654321076543210
+  bf16_mantissa = 7
+  bits_dtype = jnp.uint16
+  assert mantissa_bits <= bf16_mantissa, 'bf16 mantissa bits'
+  noise_bit_count = bf16_mantissa - mantissa_bits
+
+  noise_mask = jnp.uint16((1 << noise_bit_count) - 1)
+
+  # TODO(lew): We can use smaller dtype
+  x = jax.lax.bitcast_convert_type(x, bits_dtype)  # adds noise to mantissa
+  noise = jax.random.bits(key, x.shape, jnp.uint32)
+  noise = jax.lax.convert_element_type(noise, bits_dtype) & noise_mask
+  # This noise add might overflow up to sign bit if x(bf16) has max exponent.
+  # In bf16 this happens if x=nan or x=inf.
+  x = x + noise
+
+  # TODO(lew): Is bitwise_and needed? Maybe round_to_nearest_even is ok.
+  x = jax.lax.bitwise_and(x, ~noise_mask)  # zero-out lowest bits in mantissa
+  x = jax.lax.bitcast_convert_type(x, jnp.bfloat16)
+
+  return x
+
+
 @utils.flax_slots_dataclass
 class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 
-  dtype: Literal[jnp.float8_e4m3fn, jnp.float8_e5m2]
+  # Storage type.
+  dtype: Literal[jnp.float8_e4m3fn, jnp.float8_e5m2, jnp.bfloat16]
+
+  # Requested rounding precision.
   exponent_bits: int = 4
   mantissa_bits: int = 3
-  noise_fn: Optional[stochastic_rounding.NoiseFn] = None
+  stochastic_rounding: bool = utils.static_field(default=False)
 
   def _get_edge_of_last_fp8_bucket(self):
     return jnp.finfo(self.dtype).max.astype(jnp.bfloat16)
@@ -44,6 +73,17 @@ class Fp8Numerics(numerics.AqtNumerics):
     return self._get_edge_of_last_fp8_bucket()
 
   def vjp_fwd(self, x, context):
+    match self.dtype:
+      case jnp.float8_e4m3fn:
+        assert (self.exponent_bits, self.mantissa_bits) == (4, 3)
+      case jnp.float8_e5m2:
+        assert (self.exponent_bits, self.mantissa_bits) == (5, 2)
+      case jnp.bfloat16:
+        assert self.exponent_bits <= 8
+        assert self.mantissa_bits <= 7
+      case _:
+        assert False, f'Unsupported dtype: {self.dtype}'
+
     res = (x,)
     if not (
         (self.exponent_bits == 4 and self.mantissa_bits == 3)
@@ -54,14 +94,17 @@ class Fp8Numerics(numerics.AqtNumerics):
           f'({self.exponent_bits}, {self.mantissa_bits})'
       )
 
-    if self.noise_fn is not None:
-      x = (x + self.noise_fn(x.shape, context.key)).astype(x.dtype)
+    if self.stochastic_rounding:
+      msg = 'stochastic_rounding requires PRNGKey in Context'
+      assert context.key is not None, msg
+      x = fp_mantissa_round(x, self.mantissa_bits, context.key)
 
-    # clip
+    # TODO(lew):
+    #   - Is cliping good enough for exponent rounding?
+    #   - Is it needed? Can we do clipping more efficiently?
     fwd_clip_bound = self._get_edge_of_last_fp8_bucket()
     x = jnp.clip(x, -1 * fwd_clip_bound, fwd_clip_bound)
-
-    # round
+    # TODO(lew): We can round more efficiently if stochastic_rounding == True.
     x = round_to_nearest_even(x, self.dtype)
 
     return x, res
@@ -79,6 +122,7 @@ class Fp8Numerics(numerics.AqtNumerics):
 
 def round_to_nearest_even(x: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
   x = x.astype(dtype)
+  # TODO(lew): Is this rounding utilizing subnormals range fully?
   # bitcast_convert to uint8 to avoid allow_excess_precision set in XLA
   x = jax.lax.bitcast_convert_type(x, jnp.uint8)
   x = jax.lax.bitcast_convert_type(x, dtype)

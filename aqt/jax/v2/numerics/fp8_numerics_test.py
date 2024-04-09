@@ -14,11 +14,31 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import config
+from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
-import aqt.jax.v2.numerics.fp8_numerics as numerics
+from aqt.jax.v2.numerics import fp8_numerics
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+
+def averaged_stochastic_rounding(
+    numerics,
+    key,
+    x_count,
+    x_min,
+    x_max,
+    sr_count,
+):
+  x = jnp.linspace(x_min, x_max, x_count, dtype=jnp.float32)
+  bx = x.reshape((x_count, 1)).astype(jnp.bfloat16)
+  bx = jnp.ones((x_count, sr_count), dtype=jnp.bfloat16) * bx  # broadcast
+  context = utils.Context(key=jax.random.PRNGKey(key), train_step=None)
+  qx, _ = numerics.vjp_fwd(bx, context)
+  assert qx.dtype == numerics.get_dtype()
+  qx = qx.astype(jnp.float32)
+  qx = jnp.mean(qx, axis=1)
+  return x, qx
 
 
 class MyTest(parameterized.TestCase):
@@ -41,7 +61,7 @@ class MyTest(parameterized.TestCase):
         dtype=jnp.float32,
     )
 
-    result = numerics.round_to_nearest_even(x, jnp.float8_e5m2)
+    result = fp8_numerics.round_to_nearest_even(x, jnp.float8_e5m2)
 
     np.testing.assert_array_equal(
         result,
@@ -72,7 +92,7 @@ class MyTest(parameterized.TestCase):
         dtype=jnp.float32,
     )
 
-    result = numerics.round_to_nearest_even(x, jnp.float8_e4m3fn)
+    result = fp8_numerics.round_to_nearest_even(x, jnp.float8_e4m3fn)
 
     np.testing.assert_array_equal(
         result,
@@ -86,10 +106,10 @@ class MyTest(parameterized.TestCase):
     )
 
   def test_retains_dtype(self):
-    result_f16 = numerics.round_to_nearest_even(
+    result_f16 = fp8_numerics.round_to_nearest_even(
         jnp.array([1], dtype=jnp.bfloat16), jnp.float8_e5m2
     )
-    result_f32 = numerics.round_to_nearest_even(
+    result_f32 = fp8_numerics.round_to_nearest_even(
         jnp.array([1], dtype=jnp.float32), jnp.float8_e4m3fn
     )
 
@@ -156,6 +176,124 @@ class MyTest(parameterized.TestCase):
     if train_loss not in target_loss[fwd_bits][device]:
       msg = f"train_loss={train_loss:.30f}, {device=}, {fwd_bits=}"
       self.fail(msg)
+
+  @parameterized.parameters([
+      dict(),
+      dict(key=1),
+      dict(key=2),
+      dict(key=3),
+      dict(key=4),
+      dict(dtype=jnp.float8_e4m3fn, exponent_bits=4, mantissa_bits=3),
+      dict(x_min=64 / 2**20, x_max=2 * 64 / 2**20),
+      dict(x_min=32 / 2**20, x_max=2 * 32 / 2**20),
+      # dict(x_min=16 / 2**20, x_max=2 * 16 / 2**20),  # This one is failing.
+  ])
+  def test_fp8_stochastic_rounding(
+      self,
+      key=0,
+      x_count=1024,
+      x_min=1.0,
+      x_max=4.0,
+      sr_count=10000,
+      dtype=jnp.float8_e5m2,
+      exponent_bits=5,
+      mantissa_bits=2,
+  ):
+    numerics = fp8_numerics.Fp8Numerics(
+        dtype=dtype,
+        exponent_bits=exponent_bits,
+        mantissa_bits=mantissa_bits,
+        stochastic_rounding=True,
+    )
+    x, qx = averaged_stochastic_rounding(
+        numerics,
+        key=key,
+        x_count=x_count,
+        x_min=x_min,
+        x_max=x_max,
+        sr_count=sr_count,
+    )
+    err = x - qx
+    mean_err = jnp.mean(err)
+    std_err = jnp.std(err) / jnp.sqrt(sr_count)
+    mean_in_std_err_units = jnp.abs(mean_err) / std_err
+    assert (
+        mean_in_std_err_units < 5
+    ), f"mean_in_std_err_units: {mean_in_std_err_units}"
+
+
+def illustrate_bf16():
+  def bit1(fro, to):
+    # (fro-to) 1s followed by (to) 0s
+    return (1 << fro) - (1 << to)
+
+  for i in range(-1, 16):
+    bits = jnp.uint16(0)
+    if i > 0:
+      bits += jnp.uint16(1 << i)
+    bits += bit1(15, 8)
+    f = float(jax.lax.bitcast_convert_type(bits, jnp.bfloat16))
+    print(f"{bits:016b} {i=: 3}, {f:.9f}")
+
+
+def illustrate_bf16_2():
+  def pr(n):
+    n = jnp.int16(n)
+    bx = jax.lax.bitcast_convert_type(n, jnp.bfloat16)
+    fp8 = fp8_numerics.sr_mantissa(bx, 2, key=jax.random.PRNGKey(0))
+    # fp8 = bx.astype(jnp.float8_e5m2)
+    fp8_n = jax.lax.bitcast_convert_type(fp8, jnp.uint8)
+    ns = f"{n:016b}"
+    ns = ns[:1] + "s " + ns[1:9] + "e " + ns[9:] + "m"
+    ns_8 = f"{fp8_n:08b}"
+    ns_8 = ns_8[:1] + "s " + ns_8[1:6] + "e " + ns_8[6:] + "m"
+    print(f"{float(bx):03.8f}[{ns}] -> {float(fp8):03.8}[{ns_8}]")
+
+  pr(0b0_01111111_0000000)
+  pr(0b0_01111111_0001000)
+  pr(0b0_01111111_0010000)  #
+  pr(0b0_01111111_0011000)
+  print()
+
+  pr(0b0_01111111_0100000)
+  pr(0b0_01111111_0101000)
+  pr(0b0_01111111_0110000)  #
+  pr(0b0_01111111_0111000)
+  print()
+
+  pr(0b0_01111111_1000000)
+  pr(0b0_01111111_1001000)
+  pr(0b0_01111111_1010000)  #
+  pr(0b0_01111111_1011000)
+  print()
+
+  pr(0b0_01111111_1100000)
+  pr(0b0_01111111_1101000)
+  pr(0b0_01111111_1110000)  #
+  pr(0b0_01111111_1111000)
+
+
+# To be used in colab.
+def plot_sr_error(x_min=1.0, x_max=2.0, sr_count=64 * 1024, x_count=1024):
+  n = fp8_numerics.Fp8Numerics(
+      dtype=jnp.float8_e5m2,
+      exponent_bits=5,
+      mantissa_bits=2,
+      stochastic_rounding=True,
+  )
+  x_min, x_max = 1.0, 2.0
+  x, qx = averaged_stochastic_rounding(
+      n, key=0, x_min=x_min, x_max=x_max, sr_count=sr_count, x_count=x_count
+  )
+
+  import matplotlib.pyplot as plt  # pylint: disable=g-import-not-at-top
+
+  plt.figure(figsize=(30, 15))
+  err = qx - x.astype(jnp.bfloat16).astype(jnp.float32)
+  plt.plot(x, err)
+  print(jnp.std(err), jnp.std(err) - 0.0004826417)
+
+  plt.show()
 
 
 if __name__ == "__main__":

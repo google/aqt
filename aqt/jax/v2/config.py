@@ -321,7 +321,6 @@ def set_bits(
           exponent_bits=exponent_bits,
           mantissa_bits=mantissa_bits,
           dtype=fp8_numerics.fp8_map[bits],
-          noise_fn=None,
       )
     else:
       pz = False if bits == 1 else True
