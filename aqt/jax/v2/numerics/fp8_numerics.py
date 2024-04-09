@@ -26,19 +26,23 @@ fp8_map = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 
 def fp_mantissa_round(x, mantissa_bits, key: jax.Array):
   """FP stochastic rounding for a given mantissa."""
-  assert x.dtype == jnp.bfloat16  # (sign, exp, mantissa) = (1,8,7)
+  input_dtype = x.dtype
+  total_bits = jnp.finfo(input_dtype).bits
+  # (sign, exp, mantissa) = (1,8,x)
+  msg = f'Unsupported dtype for sthochastic rounding: {input_dtype}.'
+  assert input_dtype == jnp.bfloat16 or input_dtype == jnp.float32, msg
   # bf16 bit pattern: seeeeeeeemmmmmmm
   #                   7654321076543210
-  bf16_mantissa = 7
-  bits_dtype = jnp.uint16
-  assert mantissa_bits <= bf16_mantissa, 'bf16 mantissa bits'
-  noise_bit_count = bf16_mantissa - mantissa_bits
+  mantissa = jnp.finfo(input_dtype).nmant
+  bits_dtype = jnp.uint16 if total_bits == 16 else jnp.uint32
+  assert mantissa_bits <= mantissa, 'bf16 mantissa bits'
+  noise_bit_count = mantissa - mantissa_bits
 
-  noise_mask = jnp.uint16((1 << noise_bit_count) - 1)
+  noise_mask = bits_dtype((1 << noise_bit_count) - 1)
 
   # TODO(lew): We can use smaller dtype
   x = jax.lax.bitcast_convert_type(x, bits_dtype)  # adds noise to mantissa
-  noise = jax.random.bits(key, x.shape, jnp.uint32)
+  noise = jax.random.bits(key, x.shape, bits_dtype)
   noise = jax.lax.convert_element_type(noise, bits_dtype) & noise_mask
   # This noise add might overflow up to sign bit if x(bf16) has max exponent.
   # In bf16 this happens if x=nan or x=inf.
@@ -46,7 +50,7 @@ def fp_mantissa_round(x, mantissa_bits, key: jax.Array):
 
   # TODO(lew): Is bitwise_and needed? Maybe round_to_nearest_even is ok.
   x = jax.lax.bitwise_and(x, ~noise_mask)  # zero-out lowest bits in mantissa
-  x = jax.lax.bitcast_convert_type(x, jnp.bfloat16)
+  x = jax.lax.bitcast_convert_type(x, input_dtype)
 
   return x
 
