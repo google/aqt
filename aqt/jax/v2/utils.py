@@ -94,33 +94,17 @@ def test_pprint_eq(
   assert str_input_a == str_input_b, print_diff(str_input_a, str_input_b)
 
 
-def infer_dtype_from_bits(bits: int, upcast: bool = True) -> jnp.dtype | None:
+def infer_dtype_from_bits(bits: int) -> jnp.dtype | None:
   """Get the dtype for the number of bits provided.
 
   Args:
     bits: number of bits for the dtype.
-    upcast: if upcasting the return dtype for int4 when platform is cpu.
 
   Returns:
     The corresponding container dtype for the number of bits provided.
   """
   if bits == 4:
-    # this branch should return jnp.int4 directly but
-    # lax.dot_general(int4, int4) is illegal on cpu.
-    # TODO(aqt): Remove this platform check once
-    # https://github.com/google/jax/issues/19682 is fixed.
-    if jax.local_devices()[0].platform != 'cpu':
-      return jnp.int4
-    else:
-      # TODO(yichizh): It's better to assert False here with the following msg
-      # msg = (
-      #     'lax.dot_general(int4, int4) is illegal on cpu:'
-      #     ' https://github.com/google/jax/issues/19682. The simple workaround'
-      #     ' is to upcast to int8, but in that case please directly set the'
-      #     ' numerics bits to int8. Please contact the AQT team if you believe'
-      #     ' the workaround is needed.'
-      # )
-      return jnp.int8 if upcast else jnp.int4
+    return jnp.int4
   else:
     if bits <= 8 and bits >= 2:
       return jnp.int8

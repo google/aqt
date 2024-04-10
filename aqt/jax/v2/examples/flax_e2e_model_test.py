@@ -64,6 +64,7 @@ class MnistTest(parameterized.TestCase):
             "cpu": [
                 3.123474359512329101562500000000,
                 3.123474597930908203125000000000,
+                3.123473882675170898437500000000,  # colab
             ],
             "TPU v2": [3.198328018188476562500000000000],
             "TPU v3": [3.198328018188476562500000000000],
@@ -125,9 +126,7 @@ class MnistTest(parameterized.TestCase):
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
-    expected_dtype = (
-        jnp.int4 if device_kind != "cpu" and bits == 4 else jnp.int8
-    )
+    expected_dtype = jnp.int4 if bits == 4 else jnp.int8
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
@@ -253,7 +252,7 @@ class MnistTest(parameterized.TestCase):
     # Sanity check 2: Frozen weights are indeed used for inference.
     #   If we zero them out, loss would change.
     qt = model_serving["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"]["frozen"]
-    qt.qvalue = jnp.zeros_like(qt.qvalue)
+    qt.qvalue = jnp.zeros(qt.qvalue.shape).astype(qt.qvalue.dtype)
     bad_logits, _ = forward(model_serving, apply_serving)
     assert not (bad_logits == logits_s3).all()
 

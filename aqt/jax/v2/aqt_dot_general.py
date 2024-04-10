@@ -569,6 +569,21 @@ def _qtensor_dot_general(
       assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
       lhs_qin = lhs_qin * transposed_scale.astype(lhs_qin.dtype)
 
+  if jax.local_devices()[0].platform == 'cpu':
+    # needed bet lax.dot_general(int4, int4) is illegal on cpu.
+    # TODO(aqt): Remove this platform check once
+    # https://github.com/google/jax/issues/19682 is fixed.
+    # TODO(yichizh): It's better to assert False here with the following msg
+    # msg = (
+    #     'lax.dot_general(int4, int4) is illegal on cpu:'
+    #     ' https://github.com/google/jax/issues/19682. The simple workaround'
+    #     ' is to upcast to int8, but in that case please directly set the'
+    #     ' numerics bits to int8. Please contact the AQT team if you believe'
+    #     ' the workaround is needed.'
+    # )
+    if lhs_qin.dtype == jnp.int4 and rhs_qin.dtype == jnp.int4:
+      lhs_qin = lhs_qin.astype(jnp.int8)
+      rhs_qin = rhs_qin.astype(jnp.int8)
   out = cfg.dot_general(
       lhs_qin,
       rhs_qin,

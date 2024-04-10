@@ -127,7 +127,7 @@ def quantizer_make(
     effective_numerics = no_numerics.NoNumerics()
   else:
     pz = False if n_bits == 1 else True
-    dtype = utils.infer_dtype_from_bits(n_bits, upcast=False) if pz else None
+    dtype = utils.infer_dtype_from_bits(n_bits) if pz else None
     effective_numerics = int_numerics.IntNumerics(
         bits=n_bits,
         preserve_zero=pz,
