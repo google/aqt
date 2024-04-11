@@ -37,8 +37,8 @@ import numpy as np
 import scipy.stats
 
 
-def test_jaxpr_dtype(f, cfgs: list[aqt.DotGeneralRaw], float_dtype):
-  """Tests whether dot_generals in f conform to dtypes inside of cfgs."""
+def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
+  """Tests whether dot_generals in f conform to dtypes inside of dg_raws."""
 
   def jaxpr_to_trityp(jaxpr):
     for eq in jaxpr.eqns:
@@ -55,19 +55,19 @@ def test_jaxpr_dtype(f, cfgs: list[aqt.DotGeneralRaw], float_dtype):
 
   f_jaxpr = jax.make_jaxpr(f)()
   trityps = [trityp for trityp in jaxpr_to_trityp(f_jaxpr)]
-  assert len(trityps) == len(cfgs)
-  for (lhs_sa, rhs_sa, out_sa), cfg in zip(trityps, cfgs):
+  assert len(trityps) == len(dg_raws)
+  for (lhs_sa, rhs_sa, out_sa), dg_raw in zip(trityps, dg_raws):
     # If cfg has None, the type is inherited from the arguments' type.
     def assert_dtype_eq(dtype1, dtype2):
       assert dtype1 == dtype2, f"dtype1 != dtype2: {dtype1=} != {dtype2=}"
 
-    assert isinstance(cfg.dg_quantizer, aqt.DefaultDotGeneralQuantizer)
+    assert isinstance(dg_raw.dg_quantizer, aqt.DefaultDotGeneralQuantizer)
 
-    lhs_dtype = cfg.dg_quantizer.lhs.numerics.get_dtype()
-    rhs_dtype = cfg.dg_quantizer.rhs.numerics.get_dtype()
+    lhs_dtype = dg_raw.dg_quantizer.lhs.numerics.get_dtype()
+    rhs_dtype = dg_raw.dg_quantizer.rhs.numerics.get_dtype()
     assert_dtype_eq(lhs_sa.dtype, lhs_dtype or float_dtype)
     assert_dtype_eq(rhs_sa.dtype, rhs_dtype or float_dtype)
-    assert_dtype_eq(out_sa.dtype, cfg.dg_accumulator_dtype or float_dtype)
+    assert_dtype_eq(out_sa.dtype, dg_raw.dg_accumulator_dtype or float_dtype)
 
 
 def rand_unif(shape, maxval, seed, dtype=jnp.float32):
@@ -142,7 +142,7 @@ def _check_result_eq(dgs, *, lhs, rhs, gra):
 
 def fqt_param_dict(s, use_fwd_quant, **kwargs):
   return dict(
-      cfg=config.fully_quantized(
+      dg=config.fully_quantized(
           use_fwd_quant=use_fwd_quant,
           use_stochastic_rounding=False,
           **kwargs,
@@ -175,8 +175,8 @@ class _TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
     return (ret, None)
 
 
-def _modify_cfg(
-    readonly_cfg: aqt.DotGeneral,
+def _modify_dg(
+    readonly_dg: aqt.DotGeneral,
     *,
     lhs_dequant_mode: aqt.DequantMode = aqt.DequantMode.OUTPUT,
     rhs_dequant_mode: aqt.DequantMode = aqt.DequantMode.OUTPUT,
@@ -187,11 +187,11 @@ def _modify_cfg(
     local_aqt: aqt.LocalAqt | None = None,
     clip_gradient: bool = False,
 ) -> aqt.DotGeneral:
-  cfg = copy.deepcopy(readonly_cfg)
+  dg = copy.deepcopy(readonly_dg)
   if fwd_lhs_tricky_clip_and_round:
     # Tricky means that we have zero gradient on x < 0
-    cfg.fwd.dg_quantizer.lhs.numerics = _TrickyNumerics()
-    cfg.fwd.dg_accumulator_dtype = None
+    dg.fwd.dg_quantizer.lhs.numerics = _TrickyNumerics()
+    dg.fwd.dg_accumulator_dtype = None
 
   # Setting po2_scale is ensuring that fake_quant and full dot_general
   # have the same numerics when scales are power of two (po2).
@@ -223,7 +223,7 @@ def _modify_cfg(
 
   disable_lhs_quant = lhs_dequant_mode == aqt.DequantMode.THIS_INPUT
   disable_rhs_quant = rhs_dequant_mode == aqt.DequantMode.THIS_INPUT
-  for c in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+  for c in [dg.fwd, dg.dlhs, dg.drhs]:
     _apply_po2_scale(c)
     _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode)
     _apply_calibration_mode(
@@ -246,36 +246,36 @@ def _modify_cfg(
             c.dg_quantizer.rhs.numerics.replace(round=False)
         )
 
-    disable_quant(cfg.fwd)
-    disable_quant(cfg.dlhs)
-    disable_quant(cfg.drhs)
+    disable_quant(dg.fwd)
+    disable_quant(dg.dlhs)
+    disable_quant(dg.drhs)
     lhs_quant = not isinstance(
-        cfg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics
+        dg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics
     )
     rhs_quant = not isinstance(
-        cfg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics
+        dg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics
     )
     if lhs_quant:
-      cfg.drhs.rhs.use_fwd_quant = use_fwd_quant
+      dg.drhs.rhs.use_fwd_quant = use_fwd_quant
     if rhs_quant:
-      cfg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+      dg.dlhs.rhs.use_fwd_quant = use_fwd_quant
   if local_aqt is not None:
     # Currently we are not supporting local_aqt in fwd pass
-    # cfg.fwd.local_aqt = local_aqt
-    cfg.dlhs.local_aqt = local_aqt
-    cfg.drhs.local_aqt = local_aqt
+    # dg.fwd.local_aqt = local_aqt
+    dg.dlhs.local_aqt = local_aqt
+    dg.drhs.local_aqt = local_aqt
 
     # When using abs-max scaling, this should be a no-op.
-  if isinstance(cfg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
-    cfg.fwd.dg_quantizer.lhs.numerics = (
-        cfg.fwd.dg_quantizer.lhs.numerics.replace(clip_gradient=clip_gradient)
+  if isinstance(dg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
+    dg.fwd.dg_quantizer.lhs.numerics = (
+        dg.fwd.dg_quantizer.lhs.numerics.replace(clip_gradient=clip_gradient)
     )
-  if isinstance(cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
-    cfg.fwd.dg_quantizer.rhs.numerics = (
-        cfg.fwd.dg_quantizer.rhs.numerics.replace(clip_gradient=clip_gradient)
+  if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
+    dg.fwd.dg_quantizer.rhs.numerics = (
+        dg.fwd.dg_quantizer.rhs.numerics.replace(clip_gradient=clip_gradient)
     )
 
-  return cfg
+  return dg
 
 
 def _aqt_dg_full_lr_diff(
@@ -287,12 +287,12 @@ def _aqt_dg_full_lr_diff(
     fwd_lhs_tricky_clip_and_round: bool = False,
     local_aqt: aqt.LocalAqt | None = None,
     *,
-    readonly_cfg: aqt.DotGeneral,
+    readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
     clip_gradient: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
-  cfg = _modify_cfg(
-      readonly_cfg,
+  dg = _modify_dg(
+      readonly_dg,
       lhs_dequant_mode=lhs_dequant_mode,
       rhs_dequant_mode=rhs_dequant_mode,
       lhs_calibration_mode=lhs_calibration_mode,
@@ -302,8 +302,7 @@ def _aqt_dg_full_lr_diff(
       local_aqt=local_aqt,
       clip_gradient=clip_gradient,
   )
-  cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-  dg = aqt.make_dot_general(cfg)
+  dg = config.set_context(dg, key=jax.random.PRNGKey(4), train_step=None)
   return lambda lhs, rhs: dg(lhs, rhs, dims)
 
 
@@ -314,7 +313,7 @@ def _aqt_dg_full(
     fwd_lhs_tricky_clip_and_round: bool = False,
     local_aqt: aqt.LocalAqt | None = None,
     *,
-    readonly_cfg: aqt.DotGeneral,
+    readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
     clip_gradient: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
@@ -326,7 +325,7 @@ def _aqt_dg_full(
       use_fwd_quant,
       fwd_lhs_tricky_clip_and_round,
       local_aqt,
-      readonly_cfg=readonly_cfg,
+      readonly_dg=readonly_dg,
       dims=dims,
       clip_gradient=clip_gradient
   )
@@ -338,25 +337,25 @@ def _aqt_dg_raw_lr_diff(
     lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     *,
-    readonly_cfg: aqt.DotGeneral,
+    readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
-  cfg = _modify_cfg(
-      readonly_cfg,
+  dg = _modify_dg(
+      readonly_dg,
       lhs_dequant_mode=lhs_dequant_mode,
       rhs_dequant_mode=rhs_dequant_mode,
       lhs_calibration_mode=lhs_calibration_mode,
       rhs_calibration_mode=rhs_calibration_mode,
   )
-  cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-  return lambda lhs, rhs: cfg.fwd(lhs, rhs, None, None, dims)[0]
+  dg = config.set_context(dg, key=jax.random.PRNGKey(4), train_step=None)
+  return lambda lhs, rhs: dg.fwd(lhs, rhs, None, None, dims)[0]
 
 
 def _aqt_dg_raw(
     dequant_mode: aqt.DequantMode,
     calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     *,
-    readonly_cfg: aqt.DotGeneral,
+    readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   return _aqt_dg_raw_lr_diff(
@@ -364,7 +363,7 @@ def _aqt_dg_raw(
       dequant_mode,
       calibration_mode,
       calibration_mode,
-      readonly_cfg=readonly_cfg,
+      readonly_dg=readonly_dg,
       dims=dims,
   )
 
@@ -453,32 +452,32 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(
           # TODO(aqt): Change dlhs_bits to 4bit once
           # https://github.com/google/jax/issues/19682 is fixed.
-          cfg=config.config_v3(
+          dg=config.config_v3(
               fwd_bits=3,
               dlhs_bits=6,
               drhs_bits=5,
               drhs_accumulator_dtype=jnp.int32,  # overwriting the default None
           )
       ),
-      dict(cfg=config.dot_general_make(None, None)),
-      dict(cfg=config.dot_general_make(1, 1)),
-      dict(cfg=config.dot_general_make(1, 2)),
-      dict(cfg=config.dot_general_make(2, 1)),
-      dict(cfg=config.dot_general_make(2, 2)),
-      dict(cfg=config.dot_general_make(8, 8)),
-      dict(cfg=config.dot_general_make(8, 8), clip_gradient=True),
-      dict(cfg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
-      dict(cfg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
+      dict(dg=config.dot_general_make(None, None)),
+      dict(dg=config.dot_general_make(1, 1)),
+      dict(dg=config.dot_general_make(1, 2)),
+      dict(dg=config.dot_general_make(2, 1)),
+      dict(dg=config.dot_general_make(2, 2)),
+      dict(dg=config.dot_general_make(8, 8)),
+      dict(dg=config.dot_general_make(8, 8), clip_gradient=True),
+      dict(dg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
+      dict(dg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
       # That test could fail numerically because bf16
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
       # We do this test anyway, to catch jax-compilation-time errors.
-      dict(cfg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
-      dict(cfg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
-      dict(cfg=config.dot_general_make(None, 8)),
-      dict(cfg=config.dot_general_make(8, None)),
+      dict(dg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
+      dict(dg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
+      dict(dg=config.dot_general_make(None, 8)),
+      dict(dg=config.dot_general_make(8, None)),
       dict(
-          cfg=fqt_param_dict(s=10, use_fwd_quant=True)["cfg"],
+          dg=fqt_param_dict(s=10, use_fwd_quant=True)["dg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -486,11 +485,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           gra_shape=(4, 3, 6),
       ),
       dict(
-          cfg=fqt_param_dict(
+          dg=fqt_param_dict(
               s=10,
               use_fwd_quant=True,
               dlhs_local_aqt=aqt.LocalAqt(2),
-          )["cfg"],
+          )["dg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -498,7 +497,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           gra_shape=(4, 3, 6),
       ),
       dict(
-          cfg=config.dot_general_make(2, 2),
+          dg=config.dot_general_make(2, 2),
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -510,7 +509,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ])
   def test_dot_general_calibration_with_contracting_axis(
       self,
-      cfg: aqt.DotGeneral,
+      dg: aqt.DotGeneral,
       lhs_maxval=10.0,
       rhs_maxval=20.0,
       gra_maxval=30.0,
@@ -528,8 +527,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dtype=jnp.float32,
       clip_gradient=False,
   ):
-    readonly_cfg = cfg
-    del cfg
+    readonly_dg = dg
+    del dg
 
     lhs = rand_unif(lhs_shape, lhs_maxval, seed, dtype)
     rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
@@ -538,31 +537,31 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # Prepare utility functions for test.
     aqt_dg_full = functools.partial(
         _aqt_dg_full,
-        readonly_cfg=readonly_cfg,
+        readonly_dg=readonly_dg,
         dims=dims,
         clip_gradient=clip_gradient,
     )
     aqt_dg_raw = functools.partial(
-        _aqt_dg_raw, readonly_cfg=readonly_cfg, dims=dims
+        _aqt_dg_raw, readonly_dg=readonly_dg, dims=dims
     )
-    modify_cfg = functools.partial(_modify_cfg, readonly_cfg=readonly_cfg)
+    modify_dg = functools.partial(_modify_dg, readonly_dg=readonly_dg)
     check = functools.partial(_check_result_eq, lhs=lhs, rhs=rhs, gra=gra)
 
     # Tests for dot_general.
     test_jaxpr_dtype(
         lambda: aqt_dg_full(aqt.DequantMode.OUTPUT)(lhs, rhs),
-        [modify_cfg().fwd],
+        [modify_dg().fwd],
         lhs.dtype,
     )
     test_jaxpr_dtype(
         lambda: jax.vjp(aqt_dg_full(aqt.DequantMode.OUTPUT), lhs, rhs),
-        [modify_cfg().fwd],
+        [modify_dg().fwd],
         lhs.dtype,
     )
     _, backprop = jax.vjp(aqt_dg_full(aqt.DequantMode.OUTPUT), lhs, rhs)
     test_jaxpr_dtype(
         lambda: backprop(gra),
-        [modify_cfg().dlhs, modify_cfg().drhs],
+        [modify_dg().dlhs, modify_dg().drhs],
         gra.dtype,
     )
 
@@ -608,7 +607,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     ])
 
     if isinstance(
-        readonly_cfg.fwd.dg_quantizer.lhs.numerics,
+        readonly_dg.fwd.dg_quantizer.lhs.numerics,
         int_numerics.IntNumerics,
     ):
       check([
@@ -622,7 +621,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       ])
 
     def unquant_aqt_dg(lhs, rhs):
-      dg = aqt.make_dot_general(config.default_unquantized_config())
+      dg = config.default_unquantized_config()
       return dg(lhs, rhs, dims)
 
     def lax_dg(lhs, rhs):
@@ -635,32 +634,32 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
   @parameterized.parameters([
       dict(
-          cfg=lambda: config.config_v3(
+          dg=lambda: config.config_v3(
               fwd_bits=3,
               dlhs_bits=4,
               drhs_bits=5,
               drhs_accumulator_dtype=jnp.int32,  # overwriting the default None
           )
       ),
-      dict(cfg=config.dot_general_make(None, None)),
-      dict(cfg=config.dot_general_make(1, 1)),
-      dict(cfg=config.dot_general_make(1, 2)),
-      dict(cfg=config.dot_general_make(2, 1)),
-      dict(cfg=config.dot_general_make(2, 2)),
-      dict(cfg=config.dot_general_make(8, 8)),
-      dict(cfg=config.dot_general_make(8, 8), clip_gradient=True),
-      dict(cfg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
-      dict(cfg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
+      dict(dg=config.dot_general_make(None, None)),
+      dict(dg=config.dot_general_make(1, 1)),
+      dict(dg=config.dot_general_make(1, 2)),
+      dict(dg=config.dot_general_make(2, 1)),
+      dict(dg=config.dot_general_make(2, 2)),
+      dict(dg=config.dot_general_make(8, 8)),
+      dict(dg=config.dot_general_make(8, 8), clip_gradient=True),
+      dict(dg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
+      dict(dg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
       # That test could fail numerically because bf16
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
       # We do this test anyway, to catch jax-compilation-time errors.
-      dict(cfg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
-      dict(cfg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
-      dict(cfg=config.dot_general_make(None, 8)),
-      dict(cfg=config.dot_general_make(8, None)),
+      dict(dg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
+      dict(dg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
+      dict(dg=config.dot_general_make(None, 8)),
+      dict(dg=config.dot_general_make(8, None)),
       dict(
-          cfg=config.dot_general_make(2, 2),
+          dg=config.dot_general_make(2, 2),
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
           lhs_shape=(2, 3, 5, 4),  # non-contr: 3, 4
@@ -671,7 +670,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   ])
   def test_dot_general_calibration_with_remaining_axis(
       self,
-      cfg: config.DotGeneral | Callable[[], config.DotGeneral],
+      dg: config.DotGeneral | Callable[[], config.DotGeneral],
       lhs_maxval=10.0,
       rhs_maxval=20.0,
       gra_maxval=30.0,
@@ -686,13 +685,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # Deferred evaluation of config function calls. 4-bit config initialization
     # triggers jax.local_devices(), which shouldn't be called before
     # absl.app.run() in some environments.
-    if not isinstance(cfg, config.DotGeneral):
-      cfg = cfg()
+    if not isinstance(dg, config.DotGeneral):
+      dg = dg()
     # Set use_fwd_quant to None.
-    cfg.drhs.rhs.use_fwd_quant = None
-    cfg.dlhs.rhs.use_fwd_quant = None
-    readonly_cfg = cfg
-    del cfg
+    dg.drhs.rhs.use_fwd_quant = None
+    dg.dlhs.rhs.use_fwd_quant = None
+    readonly_dg = dg
+    del dg
 
     lhs = rand_unif(lhs_shape, lhs_maxval, seed, dtype)
     rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
@@ -701,21 +700,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # Prepare utility functions for test.
     aqt_dg_full = functools.partial(
         _aqt_dg_full,
-        readonly_cfg=readonly_cfg,
+        readonly_dg=readonly_dg,
         dims=dims,
         clip_gradient=clip_gradient,
     )
     aqt_dg_full_lr_diff = functools.partial(
         _aqt_dg_full_lr_diff,
-        readonly_cfg=readonly_cfg,
+        readonly_dg=readonly_dg,
         dims=dims,
         clip_gradient=clip_gradient,
     )
     aqt_dg_raw = functools.partial(
-        _aqt_dg_raw, readonly_cfg=readonly_cfg, dims=dims
+        _aqt_dg_raw, readonly_dg=readonly_dg, dims=dims
     )
     aqt_dg_raw_lr_diff = functools.partial(
-        _aqt_dg_raw_lr_diff, readonly_cfg=readonly_cfg, dims=dims
+        _aqt_dg_raw_lr_diff, readonly_dg=readonly_dg, dims=dims
     )
     check = functools.partial(_check_result_eq, lhs=lhs, rhs=rhs, gra=gra)
 
@@ -814,7 +813,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     ])
 
   def test_dot_general_calibrate_dequant_mode_mismatch(self):
-    cfg = config.dot_general_make(8, 8, use_fwd_quant=None)
+    dg = config.dot_general_make(8, 8, use_fwd_quant=None)
     dims = (((1,), (0,)), ((), ()))
     lhs = rand_unif((10, 20), 10.0, 0, jnp.float32)
     rhs = rand_unif((20, 30), 20.0, 1, jnp.float32)
@@ -829,7 +828,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           aqt.DequantMode.OTHER_INPUT,
           aqt.CalibrationMode.CONTRACTING_AXIS,
           aqt.CalibrationMode.CONTRACTING_AXIS,
-          readonly_cfg=copy.deepcopy(cfg),
+          readonly_dg=copy.deepcopy(dg),
           dims=dims,
       )(lhs, rhs)
 
@@ -843,7 +842,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           aqt.DequantMode.OUTPUT,
           aqt.CalibrationMode.CONTRACTING_AXIS,
           aqt.CalibrationMode.REMAINING_AXIS,
-          readonly_cfg=copy.deepcopy(cfg),
+          readonly_dg=copy.deepcopy(dg),
           dims=dims,
       )(lhs, rhs)
 
@@ -852,7 +851,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       self, use_fwd_quant
   ):
     """If calibration axis is remaining_axis, use_fwd_quant should be None."""
-    cfg = config.dot_general_make(8, 8, use_fwd_quant=use_fwd_quant)
+    dg = config.dot_general_make(8, 8, use_fwd_quant=use_fwd_quant)
     dims = (((1,), (0,)), ((), ()))
     lhs = rand_unif((10, 20), 10.0, 0, jnp.float32)
     rhs = rand_unif((20, 30), 20.0, 1, jnp.float32)
@@ -866,27 +865,27 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           aqt.DequantMode.OTHER_INPUT,
           aqt.CalibrationMode.CONTRACTING_AXIS,
           aqt.CalibrationMode.REMAINING_AXIS,
-          readonly_cfg=copy.deepcopy(cfg),
+          readonly_dg=copy.deepcopy(dg),
           dims=dims,
       )(lhs, rhs)
 
   @parameterized.parameters([
-      dict(cfg=config.dot_general_make(8, 8)),
-      dict(cfg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
-      dict(cfg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
+      dict(dg=config.dot_general_make(8, 8)),
+      dict(dg=config.dot_general_make(8, 8, dlhs_local_aqt=aqt.LocalAqt(2))),
+      dict(dg=config.dot_general_make(8, 8, drhs_local_aqt=aqt.LocalAqt(2))),
   ])
   def test_dot_general_equality_between_different_calibration_axes(
       self,
-      cfg: config.DotGeneral,
+      dg: config.DotGeneral,
   ):
     """Check equality between different calibration axes."""
     dims = (((1,), (0,)), ((), ()))
 
     # Set use_fwd_quant to None.
-    cfg.drhs.rhs.use_fwd_quant = None
-    cfg.dlhs.rhs.use_fwd_quant = None
-    readonly_cfg = cfg
-    del cfg
+    dg.drhs.rhs.use_fwd_quant = None
+    dg.dlhs.rhs.use_fwd_quant = None
+    readonly_dg = dg
+    del dg
 
     # Set the two arguments as powers of 2, to prevent it from having the
     # quantization loss.
@@ -897,12 +896,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # Prepare utility functions for test.
     aqt_dg_full = functools.partial(
         _aqt_dg_full,
-        readonly_cfg=readonly_cfg,
+        readonly_dg=readonly_dg,
         dims=dims
     )
     aqt_dg_full_lr_diff = functools.partial(
         _aqt_dg_full_lr_diff,
-        readonly_cfg=readonly_cfg,
+        readonly_dg=readonly_dg,
         dims=dims
     )
     check = functools.partial(_check_result_eq, lhs=lhs, rhs=rhs, gra=gra)
@@ -952,19 +951,18 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_dynamic_context(self):
     @jax.jit
     def f(lhs, rhs):
-      cfg = config.dot_general_make()
-      cfg = config.set_context(cfg, key=jax.random.PRNGKey(4), train_step=None)
-      dg = aqt.make_dot_general(cfg)
+      dg = config.dot_general_make()
+      dg = config.set_context(dg, key=jax.random.PRNGKey(4), train_step=None)
       return dg(lhs, rhs, (((0,), (0,)), ((), ())))
 
     lhs, rhs = jnp.array([3.0, 4.0]), jnp.array([4.0, 5.0])
     jax.value_and_grad(f)(lhs, rhs)
 
   def test_hardware_int8(self, seed=0):
-    cfg = config.dot_general_raw_make(8, 8)
+    dg_raw = config.dot_general_raw_make(8, 8)
 
     def dg(lhs, rhs):
-      ret, _ = cfg(
+      ret, _ = dg_raw(
           lhs,
           rhs,
           None,
@@ -975,9 +973,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
-    test_jaxpr_dtype(lambda: dg(lhs, rhs), [cfg], lhs.dtype)
-    assert cfg.dg_quantizer.lhs.numerics.get_dtype() == jnp.int8
-    assert cfg.dg_quantizer.rhs.numerics.get_dtype() == jnp.int8
+    test_jaxpr_dtype(lambda: dg(lhs, rhs), [dg_raw], lhs.dtype)
+    assert dg_raw.dg_quantizer.lhs.numerics.get_dtype() == jnp.int8
+    assert dg_raw.dg_quantizer.rhs.numerics.get_dtype() == jnp.int8
 
   @parameterized.parameters([
       (1, 1),
@@ -997,13 +995,13 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       rhs_maxval=20.0,
       seed=0,
   ):
-    cfg = config.conv_general_dilated_make(2, lhs_bits, rhs_bits)
+    dg_raw_conv = config.conv_general_dilated_make(2, lhs_bits, rhs_bits)
 
-    if cfg.lhs:
+    if dg_raw_conv.lhs:
       # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      cfg.dg_quantizer.lhs.po2_scale = True
-    if cfg.rhs:
-      cfg.dg_quantizer.rhs.po2_scale = True
+      dg_raw_conv.dg_quantizer.lhs.po2_scale = True
+    if dg_raw_conv.rhs:
+      dg_raw_conv.dg_quantizer.rhs.po2_scale = True
 
     batch_n = 10
     contr_n = 20
@@ -1012,14 +1010,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval, seed + 1)
 
     lax_conv = jax.lax.conv_general_dilated
-    aqt_conv_fn = aqt_conv.make_conv_general_dilated(cfg)
+    aqt_conv_fn = aqt_conv.make_conv_general_dilated(dg_raw_conv)
     kwargs = {
         "window_strides": (1, 1),
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqt_quantizer.make_fake_quant(cfg.dg_quantizer.lhs)(lhs)
-    rhs_fq = aqt_quantizer.make_fake_quant(cfg.dg_quantizer.rhs)(rhs)
+    lhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.lhs)(lhs)
+    rhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.rhs)(rhs)
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv_fn(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
@@ -1039,32 +1037,32 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_local_aqt(self, shard_count, lhs, expected_product):
     # create a config that quantizes both forward and backward passes to int8
     # set the number of shards (local aqt) to 2
-    cfg = config.fully_quantized(
+    dg = config.fully_quantized(
         fwd_bits=8,
         bwd_bits=8,
         use_stochastic_rounding=False,
         drhs_local_aqt=aqt.LocalAqt(shard_count),
     )
-    cfg.fwd.dg_quantizer.lhs.numerics = (
-        cfg.fwd.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
+    dg.fwd.dg_quantizer.lhs.numerics = (
+        dg.fwd.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
     )
-    cfg.fwd.dg_quantizer.rhs.numerics = (
-        cfg.fwd.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
+    dg.fwd.dg_quantizer.rhs.numerics = (
+        dg.fwd.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
     )
-    cfg.drhs.dg_quantizer.lhs.numerics = (
-        cfg.drhs.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
+    dg.drhs.dg_quantizer.lhs.numerics = (
+        dg.drhs.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
     )
-    cfg.drhs.dg_quantizer.rhs.numerics = (
-        cfg.drhs.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
+    dg.drhs.dg_quantizer.rhs.numerics = (
+        dg.drhs.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
     )
-    dg = lambda lhs, rhs: aqt.make_dot_general(cfg)(
+    dg_f = lambda lhs, rhs: dg(
         lhs,
         rhs,
         dimension_numbers=(((), ()), ((), ())),
     )
     lhs = jnp.array(lhs)
     rhs = jnp.array([1.0])
-    output, bprop = jax.vjp(dg, lhs, rhs)
+    output, bprop = jax.vjp(dg_f, lhs, rhs)
     _, drhs = bprop(jnp.ones_like(output))
     assert drhs == expected_product
 

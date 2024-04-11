@@ -22,6 +22,7 @@ import functools
 from aqt.jax.v2 import tiled_dot_general
 import aqt.jax.v2.aqt_dot_general as aqt
 import aqt.jax.v2.config as aqt_config
+import jax
 import jax.numpy as jnp
 from praxis import base_layer
 
@@ -57,11 +58,12 @@ class AqtEinsum(base_layer.BaseLayer):
       train_step = self.get_var('train_step')
     else:
       train_step = None
-    cfg = self.cfg
-    if cfg is not None:
+    dg = self.cfg
+    if dg is not None:
       key = self.next_prng_key()
-      cfg = aqt_config.set_context(cfg, key, train_step)
-    dg = aqt.make_dot_general(cfg)
+      dg = aqt_config.set_context(dg, key, train_step)
+    else:
+      dg = jax.lax.dot_general
     if self.tiling_cfg is not None:
       dg = functools.partial(
           tiled_dot_general.tiled_dot_general,

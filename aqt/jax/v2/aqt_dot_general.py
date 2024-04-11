@@ -832,11 +832,3 @@ def dg_core_vjp_bwd(
   # None as grad to it. This is because it is a tuple of Python integers
   # that cannot be traced by Jax.
   return (dlhs, drhs, None, None, None)
-
-
-def make_dot_general(dg: Optional[DotGeneral]):
-  # TODO(lew): call warnings.warn("Deprecated")
-  if dg is None:
-    return jax.lax.dot_general
-  else:
-    return dg
