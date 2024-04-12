@@ -25,6 +25,8 @@
 import typing
 from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import no_numerics
+from aqt.jax.v2.numerics import numerics
 import flax.cursor
 import flax.struct
 import jax
@@ -32,6 +34,7 @@ import jax.numpy as jnp
 import jax.typing as jax_typing
 from typing_extensions import Self  # for python version < 3.11
 
+AbstractAqtNumerics = numerics.AqtNumerics
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
 _MSG_NO_QVALUE = (
     'QTensor does not have qvalue, but it is asked to access the qvalue.'
@@ -74,6 +77,18 @@ class QTensor:
       pytree_node=False, default=None
   )
 
+  # Numerics of the QTensor.
+  numerics: AbstractAqtNumerics = utils.static_field(default=None)
+
+  # Note: Adding quant_grad as a member here causes an error during backprop.
+  # TypeError: Custom VJP fwd rule f_fwd for function f must produce a pair
+  # (list or tuple of length two) where the first element represents the primal
+  # output (equal to the output of the custom_vjp-decorated function f) and the
+  # second element represents residuals (i.e. values stored from the forward
+  # pass for use on the backward pass), but instead the fwd rule output's first
+  # element had container/pytree structure
+  # quant_grad: Optional[Callable[..., Any]] = utils.static_field(default=None)
+
   def is_full(self) -> bool:
     return self.qvalue is not None
 
@@ -81,7 +96,12 @@ class QTensor:
     """Returns a copy of the QTensor without the qvalue."""
     return self.replace(qvalue=None)  # pytype: disable=attribute-error
 
-  def quant(self, x):
+  def quant(self, x, context: utils.Context) -> tuple[Self, GradientFn]:
+    """Uses the quantization parameters in qt to quantize x."""
+    assert self.numerics is not None, 'Missing numerics used for quantization.'
+    if isinstance(self.numerics, no_numerics.NoNumerics):
+      return self, None
+
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
 
@@ -89,9 +109,10 @@ class QTensor:
     for s in self.scale:
       qvalue = qvalue * jax.lax.reciprocal(s)
 
-    # TODO(lew): We should apply numerics here, so that 'quant' function
-    # Can be considered a part of API.
-    return self.replace(qvalue=qvalue)  # pytype: disable=attribute-error
+    x_q, res = self.numerics.vjp_fwd(qvalue, context)
+    quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
+
+    return self.replace(qvalue=x_q), quant_grad  # pytype: disable=attribute-error
 
   def dequant(self) -> jnp.ndarray:
     """Dequantizes the QTensor."""
