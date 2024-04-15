@@ -127,6 +127,10 @@ class QTensor:
     assert self.qvalue is not None, _MSG_NO_QVALUE
     return self.qvalue.shape  # pytype: disable=attribute-error
 
+  def __len__(self) -> int:
+    assert self.qvalue is not None, _MSG_NO_QVALUE
+    return len(self.qvalue)
+
 
 def zeros(
     shape: Sequence[int], qdtype: jnp.dtype, dequant_dtype: jnp.dtype
