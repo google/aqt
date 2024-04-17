@@ -78,7 +78,7 @@ class Freezer(nn.Module):
       self.qvalue = self.variable(collection, 'value', q_init, q_shape, q_dtype)
       self.scale_t = self.variable(collection, 'scale', s_init, s_shape)
 
-  def get(self) -> Optional[aqt_tensor.QTensor]:
+  def get(self) -> Optional[aqt_tensor.QArray]:
     if self.quant_mode == QuantMode.TRAIN:
       return None
     elif self.quant_mode == QuantMode.CALIBRATE:
@@ -90,7 +90,7 @@ class Freezer(nn.Module):
       # TODO(b/325626080): Remove the optional logic.
       if self.q_dtype == jnp.int4:
         qvalue = qvalue.astype(jnp.int4)
-      return aqt_tensor.QTensor(
+      return aqt_tensor.QArray(
           qvalue,
           scale=None,
           scale_t=[self.scale_t.value],
@@ -102,7 +102,7 @@ class Freezer(nn.Module):
     else:
       assert False, 'Unknown quant mode.'
 
-  def set(self, inputs: aqt_tensor.QTensor) -> None:
+  def set(self, inputs: aqt_tensor.QArray) -> None:
     # TODO(b/325626080): Uncomment the assert.
     # assert inputs.qvalue.dtype == self.q_dtype, (
     #     f'Freezer got a QTensor of type {inputs.qvalue.dtype} but expected'
@@ -141,12 +141,12 @@ class AqtDotGeneral(nn.Module):
   # apply_quant_mode determines if using Freezer in cfg.get/set_tensor
   lhs_apply_quant_mode: bool = True
   lhs_var_name: str = 'qlhs'
-  lhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  lhs_qtensor: Optional[aqt_tensor.QArray] = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
   rhs_var_name: str = 'qrhs'
-  rhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  rhs_qtensor: Optional[aqt_tensor.QArray] = None
 
   # Variables only for the legacy Freezer.
   lhs_init: nn.initializers.Initializer = jnp.zeros
@@ -234,7 +234,7 @@ class AqtDotGeneral(nn.Module):
       }
 
       def init_wrapper(
-          qt: aqt_tensor.QTensor,
+          qt: aqt_tensor.QArray,
           axis_metadata_wrapper: Optional[AxisMetadataWrapper],
       ):
         if axis_metadata_wrapper is None:
@@ -416,8 +416,8 @@ class AqtEinsum(nn.Module):
   def __call__(
       self,
       eqn,
-      lhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
-      rhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
+      lhs_g: Union[jnp.ndarray, aqt_tensor.QArray],
+      rhs_g: Union[jnp.ndarray, aqt_tensor.QArray],
   ):
     if self.assert_eqn is not None:
       utils.assert_eq(eqn, self.assert_eqn, 'einsum_eqn')
@@ -427,8 +427,8 @@ class AqtEinsum(nn.Module):
       utils.assert_shape(rhs_g.shape, self.assert_rhs_shape, 'rhs.shape')
 
     cfg = self.cfg
-    lhs_is_qt = isinstance(lhs_g, aqt_tensor.QTensor)
-    rhs_is_qt = isinstance(rhs_g, aqt_tensor.QTensor)
+    lhs_is_qt = isinstance(lhs_g, aqt_tensor.QArray)
+    rhs_is_qt = isinstance(rhs_g, aqt_tensor.QArray)
     msg = 'Aqt config is None but inputs to AqtEinsum are QTensor.'
     assert not ((lhs_is_qt or rhs_is_qt) and cfg is None), msg
     # when inputs are qtensor, xhs_in is a dummy input that will be consumed by

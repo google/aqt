@@ -22,8 +22,8 @@ from jax import numpy as jnp
 def dg_core_flax_lifted(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
-    lhs_qt: aqt_tensor.QTensor | None,
-    rhs_qt: aqt_tensor.QTensor | None,
+    lhs_qt: aqt_tensor.QArray | None,
+    rhs_qt: aqt_tensor.QArray | None,
     dimension_numbers: jax.lax.DotDimensionNumbers,
     mdl: nn.Module,
     cfg: aqt_dot_general.DotGeneral,
@@ -46,8 +46,8 @@ def dg_core_flax_lifted(
       mdl: nn.Module,
       lhs: jnp.ndarray,
       rhs: jnp.ndarray,
-      lhs_qt: aqt_tensor.QTensor | None,
-      rhs_qt: aqt_tensor.QTensor | None,
+      lhs_qt: aqt_tensor.QArray | None,
+      rhs_qt: aqt_tensor.QArray | None,
       dimension_numbers: jax.lax.DotDimensionNumbers,
       cfg: aqt_dot_general.DotGeneral,
   ):
@@ -67,8 +67,8 @@ def dg_core_flax_lifted(
       mdl: nn.Module,
       lhs: jnp.ndarray,
       rhs: jnp.ndarray,
-      lhs_qt: aqt_tensor.QTensor | None,
-      rhs_qt: aqt_tensor.QTensor | None,
+      lhs_qt: aqt_tensor.QArray | None,
+      rhs_qt: aqt_tensor.QArray | None,
       dimension_numbers: jax.lax.DotDimensionNumbers,
       cfg: aqt_dot_general.DotGeneral,
   ):
@@ -113,6 +113,3 @@ def dg_core_flax_lifted(
   return dg_core_with_custom_vjp(
       mdl, lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg
   )
-
-
-

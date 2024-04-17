@@ -94,7 +94,7 @@ However if there is any other use, we will drop that assumption."""
 
     # It seems lucky that original scale has shape suitable for output
     # scaling without any transposition.
-    out = aqt_tensor.QTensor(
+    out = aqt_tensor.QArray(
         qvalue=out,
         scale=[],
         scale_t=None,
