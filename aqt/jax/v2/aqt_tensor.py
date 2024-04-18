@@ -49,7 +49,7 @@ else:
 
 
 @utils.flax_slots_dataclass
-class QTensor:
+class QArray:
   """Quantized tensor."""
 
   # Quantized (compressed) representation of tensor.
@@ -110,7 +110,7 @@ class QTensor:
     assert self.qvalue is not None, _MSG_NO_QVALUE
     qvalue = self.qvalue[idx]
     scale = [s[idx] for s in self.scale]
-    return QTensor(
+    return QArray(
         qvalue=qvalue,
         scale=scale,
         scale_t=self.scale_t,
@@ -134,8 +134,8 @@ class QTensor:
 
 def zeros(
     shape: Sequence[int], qdtype: jnp.dtype, dequant_dtype: jnp.dtype
-) -> QTensor:
-  return QTensor(
+) -> QArray:
+  return QArray(
       qvalue=jnp.zeros(shape, dtype=qdtype),
       scale=[],
       scale_t=[],
@@ -148,7 +148,7 @@ def zeros_with_scale(
     calibration_axis: Sequence[utils.AxisIdx],
     qdtype: jnp.dtype,
     dequant_dtype: jnp.dtype,
-) -> QTensor:
+) -> QArray:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
   scale_shape = list(shape)
   for axis in calibration_axis:
@@ -156,7 +156,7 @@ def zeros_with_scale(
 
   # TODO(lew): hardcode dequant_dtype to bf16. This requires updating
   # other libraries to not break their functionality.
-  return QTensor(
+  return QArray(
       jnp.zeros(shape, dtype=qdtype),
       [jnp.ones(scale_shape, dtype=dequant_dtype)],
       None,
@@ -165,10 +165,10 @@ def zeros_with_scale(
 
 
 def dynamic_slice(
-    operand: QTensor,
+    operand: QArray,
     start_indices: Sequence[int],
     slice_sizes: Sequence[int],
-) -> QTensor:
+) -> QArray:
   """Dynamically slices the value at start_indices using the given shape."""
   msg = 'scale_t is not supported in the dynamic_slice of a QTensor.'
   assert operand.scale_t is None, msg
@@ -195,7 +195,7 @@ def dynamic_slice(
       ), msg
     return jax.lax.dynamic_slice(scale, scale_start_indices, scale_slice_sizes)
 
-  return QTensor(
+  return QArray(
       jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),
       [get_sliced_scales(s) for s in operand.scale],
       None,
@@ -204,8 +204,8 @@ def dynamic_slice(
 
 
 def dynamic_update_slice(
-    operand: QTensor, update: QTensor, start_indices: Sequence[int]
-) -> QTensor:
+    operand: QArray, update: QArray, start_indices: Sequence[int]
+) -> QArray:
   """Updates the value at start_indices with the given QTensor value."""
   # This function only works for a specific case, i.e., updating an entire slice
   # along the calibration axis.
@@ -243,15 +243,15 @@ def dynamic_update_slice(
       for scale, update_scale in zip(operand.scale, update.scale)
   ]
 
-  return QTensor(qvalues, scales, None, operand.dequant_dtype)
+  return QArray(qvalues, scales, None, operand.dequant_dtype)
 
 
-def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
+def update_frame(operand: QArray, frame: int, update: QArray) -> QArray:
   """Updates the value at frame with the given QTensor value."""
   assert operand.ndim == update.ndim + 1
   assert operand.dequant_dtype == update.dequant_dtype, 'Dequant dtype mismatch'
 
-  return QTensor(
+  return QArray(
       operand.qvalue.at[frame].set(update.qvalue),
       [
           target_scale.at[frame].set(update_scale)

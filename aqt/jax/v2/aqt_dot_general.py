@@ -186,7 +186,7 @@ def dot_general_make(
 @utils.flax_slots_dataclass
 class MultiTensor:
   x: jnp.ndarray
-  qx: aqt_tensor.QTensor
+  qx: aqt_tensor.QArray
 
 
 @utils.flax_slots_dataclass
@@ -219,12 +219,12 @@ def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
 
 
 def _get_scale_t(
-    qt: aqt_tensor.QTensor,
+    qt: aqt_tensor.QArray,
     transpose_fn: Any,
     dimension_numbers: lax.DotDimensionNumbers,
     lhs_shape: Sequence[int],
     rhs_shape: Sequence[int],
-) -> aqt_tensor.QTensor:
+) -> aqt_tensor.QArray:
   list_scale_t = []
   for scale in qt.scale:
     scale_t = transpose_fn(scale, dimension_numbers, lhs_shape, rhs_shape)
@@ -242,8 +242,8 @@ class DotGeneralQuantizer(abc.ABC):
       lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
       rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
   ) -> tuple[
-      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
-      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QArray, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QArray, aqt_tensor.GradientFn],
   ]:
     pass
 
@@ -284,8 +284,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
       lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
       rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
   ) -> tuple[
-      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
-      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QArray, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QArray, aqt_tensor.GradientFn],
   ]:
     lhs_input, lhs_ca = lhs_quantization_info
     rhs_input, rhs_ca = rhs_quantization_info
@@ -347,8 +347,8 @@ class DotGeneralRaw:
       lhs: jnp.ndarray,
       rhs: Union[jnp.ndarray, MultiTensor],
       # xhs_qt are used in serving.
-      lhs_qt: Optional[aqt_tensor.QTensor],
-      rhs_qt: Optional[aqt_tensor.QTensor],
+      lhs_qt: Optional[aqt_tensor.QArray],
+      rhs_qt: Optional[aqt_tensor.QArray],
       dimension_numbers: jax.lax.DotDimensionNumbers,
   ):
     """A quantized dot_general function without custom gradient."""
@@ -432,12 +432,12 @@ class DotGeneralRaw:
         return calibration_axes
 
       def _postprocess_qtensor(
-          input_qtensor: Optional[aqt_tensor.QTensor],
-          calculated_qtensor: aqt_tensor.QTensor,
+          input_qtensor: Optional[aqt_tensor.QArray],
+          calculated_qtensor: aqt_tensor.QArray,
           quant_grad: aqt_tensor.GradientFn,
           tensor_cfg: Tensor,
           transpose_fn: Any,
-      ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
+      ) -> tuple[aqt_tensor.QArray, str | aqt_tensor.GradientFn]:
         """Compute qtensor from input or input_qtensor."""
         if input_qtensor is not None:
           if not self.allow_dummy_gradient_into_qtensor:
@@ -517,17 +517,17 @@ class DotGeneralRaw:
 
 
 def _qtensor_dot_general(
-    lhs_qt: aqt_tensor.QTensor,
-    rhs_qt: aqt_tensor.QTensor,
+    lhs_qt: aqt_tensor.QArray,
+    rhs_qt: aqt_tensor.QArray,
     dimension_numbers: jax.lax.DotDimensionNumbers,
     cfg: ...,  # DotGeneralRaw,
     # dequant_dtype: DType,
     dequant_dtype: jnp.dtype,
-) -> aqt_tensor.QTensor:
+) -> aqt_tensor.QArray:
   """QTensor lax.dot_general replacement."""
 
   def _maybe_dequant(
-      input_qtensor: aqt_tensor.QTensor, tensor_cfg: Tensor
+      input_qtensor: aqt_tensor.QArray, tensor_cfg: Tensor
   ) -> jnp.ndarray:
     if tensor_cfg.dequant_mode == DequantMode.THIS_INPUT:
       output = input_qtensor.dequant()
@@ -593,7 +593,7 @@ def _qtensor_dot_general(
   )
   # TODO(lew): Do we have a correct precision above?
   #   Relevant: https://github.com/google/jax/issues/14022
-  out = aqt_tensor.QTensor(
+  out = aqt_tensor.QArray(
       qvalue=out,
       scale=[],
       scale_t=None,
@@ -626,8 +626,8 @@ class DotGeneral:
       self,
       lhs: jnp.ndarray,
       rhs: jnp.ndarray,
-      lhs_qt: Optional[aqt_tensor.QTensor],
-      rhs_qt: Optional[aqt_tensor.QTensor],
+      lhs_qt: Optional[aqt_tensor.QArray],
+      rhs_qt: Optional[aqt_tensor.QArray],
       dimension_numbers: lax.DotDimensionNumbers,
   ):
     """dot_general function with expanded API."""
@@ -729,8 +729,8 @@ class DotGeneral:
 def _dg_core(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
-    lhs_qt: Optional[aqt_tensor.QTensor],
-    rhs_qt: Optional[aqt_tensor.QTensor],
+    lhs_qt: Optional[aqt_tensor.QArray],
+    rhs_qt: Optional[aqt_tensor.QArray],
     dimension_numbers: lax.DotDimensionNumbers,
     cfg: DotGeneral,
 ):
@@ -746,8 +746,8 @@ def _dg_core(
 def dg_core_vjp_fwd(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
-    lhs_qt: Optional[aqt_tensor.QTensor],
-    rhs_qt: Optional[aqt_tensor.QTensor],
+    lhs_qt: Optional[aqt_tensor.QArray],
+    rhs_qt: Optional[aqt_tensor.QArray],
     dimension_numbers: lax.DotDimensionNumbers,
     cfg: DotGeneral,
 ):

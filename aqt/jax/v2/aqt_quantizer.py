@@ -51,10 +51,10 @@ class Quantizer:
       x,
       *,
       calibration_axes,
-  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
+  ) -> tuple[aqt_tensor.QArray, aqt_tensor.GradientFn]:
     """The core quantizing function."""
     if isinstance(self.numerics, no_numerics.NoNumerics):
-      qt = aqt_tensor.QTensor(
+      qt = aqt_tensor.QArray(
           qvalue=x, scale=[], scale_t=[], dequant_dtype=x.dtype
       )
       return qt, None
@@ -68,7 +68,7 @@ class Quantizer:
       x,
       *,
       calibration_axes,
-  ) -> aqt_tensor.QTensor:
+  ) -> aqt_tensor.QArray:
     """Create incomplete QTensor with only quantization parameters."""
     dequant_dtype = x.dtype
     # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
@@ -94,7 +94,7 @@ class Quantizer:
       #   We should take that into account somehow.
       scale = jax.lax.stop_gradient(scale)
 
-    qt = aqt_tensor.QTensor(
+    qt = aqt_tensor.QArray(
         qvalue=None,
         scale=[scale],
         scale_t=None,
@@ -103,10 +103,8 @@ class Quantizer:
     return qt
 
   def calculate_qvalue(
-      self,
-      x,
-      qt: aqt_tensor.QTensor
-  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
+      self, x, qt: aqt_tensor.QArray
+  ) -> tuple[aqt_tensor.QArray, aqt_tensor.GradientFn]:
     """Uses the quantization parameters in qt to quantize x."""
     qt = qt.quant(x)
 

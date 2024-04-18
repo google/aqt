@@ -132,11 +132,11 @@ class MnistTest(parameterized.TestCase):
             "AqtEinsum_0": {
                 "AqtDotGeneral_0": {
                     "qlhs": {
-                        "frozen": aqt_tensor.QTensor(
+                        "frozen": aqt_tensor.QArray(
                             qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                             scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                             scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
                         )
                     }
                 }
@@ -144,7 +144,7 @@ class MnistTest(parameterized.TestCase):
             "Dense_0": {
                 "AqtDotGeneral_0": {
                     "qrhs": {
-                        "frozen": aqt_tensor.QTensor(
+                        "frozen": aqt_tensor.QArray(
                             # The weight shape was (3136, 256) before tiling.
                             # After tiling it is (2, 1568, 1, 256).
                             # Contraction shape 3136 is tiled to (2, 1568).
@@ -156,7 +156,7 @@ class MnistTest(parameterized.TestCase):
                             # After tiling the scale shape is (1, 2, 1, 1, 256),
                             # then transposed to (2, 1, 1, 1, 256).
                             scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
                         )
                     }
                 }
@@ -164,7 +164,7 @@ class MnistTest(parameterized.TestCase):
             "Dense_1": {
                 "AqtDotGeneral_0": {
                     "qrhs": {
-                        "frozen": aqt_tensor.QTensor(
+                        "frozen": aqt_tensor.QArray(
                             # The weight shape was (256, 10) before tiling.
                             # After tiling it is (2, 128, 1, 10).
                             # Contraction shape 256 is tiled to (2, 128).
@@ -176,11 +176,11 @@ class MnistTest(parameterized.TestCase):
                             # After tiling the scale shape is (1, 2, 1, 1, 10),
                             # then transposed to (2, 1, 1, 1, 10).
                             scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
                         )
                     }
                 }
-            }
+            },
         },
         "batch_stats": {
             "BatchNorm_0": {
