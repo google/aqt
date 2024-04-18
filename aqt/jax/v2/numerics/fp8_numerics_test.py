@@ -240,14 +240,16 @@ def illustrate_bf16_2():
   def pr(n):
     n = jnp.int16(n)
     bx = jax.lax.bitcast_convert_type(n, jnp.bfloat16)
-    fp8 = fp8_numerics.sr_mantissa(bx, 2, key=jax.random.PRNGKey(0))
+    # fp8 = fp8_numerics.fp_mantissa_round(bx, 2, key=jax.random.PRNGKey(0))
     # fp8 = bx.astype(jnp.float8_e5m2)
-    fp8_n = jax.lax.bitcast_convert_type(fp8, jnp.uint8)
+    # fp8_n = jax.lax.bitcast_convert_type(fp8, jnp.uint8)
     ns = f"{n:016b}"
     ns = ns[:1] + "s " + ns[1:9] + "e " + ns[9:] + "m"
-    ns_8 = f"{fp8_n:08b}"
-    ns_8 = ns_8[:1] + "s " + ns_8[1:6] + "e " + ns_8[6:] + "m"
-    print(f"{float(bx):03.8f}[{ns}] -> {float(fp8):03.8}[{ns_8}]")
+    # print("x1", fp8, fp8_n)
+    # ns_8 = f"{fp8_n:08b}"
+    # ns_8 = ns_8[:1] + "s " + ns_8[1:6] + "e " + ns_8[6:] + "m"
+    # print(f"{float(bx):03.8f}[{ns}] -> {float(fp8):03.8}[{ns_8}]")
+    print(f"{float(bx):03.8f}[{ns}]")
 
   pr(0b0_01111111_0000000)
   pr(0b0_01111111_0001000)
