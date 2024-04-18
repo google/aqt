@@ -24,6 +24,7 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
 from aqt.jax.v2.flax import aqt_flax_calibration
+from flax import serialization
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -49,6 +50,7 @@ class MnistTest(parameterized.TestCase):
               "drhs_accumulator_dtype": jnp.int32,  # overwrite the default None
           },
           8,
+          -8298285887061527295,
       ),
       (
           {
@@ -57,9 +59,10 @@ class MnistTest(parameterized.TestCase):
               "dlhs_accumulator_dtype": None,
           },
           4,
+          8505123732271468160,
       ),
   ])
-  def test_mnist_training(self, configs, bits):
+  def test_mnist_training(self, configs, bits, expected_hash):
     aqt_cfg = config.config_v4(**configs)
     target_loss = {
         8: {
@@ -221,6 +224,16 @@ class MnistTest(parameterized.TestCase):
             },
         },
     }
+
+    def zeros_like(x):  # u4 does not support broadcast
+      return jnp.zeros(x.shape).astype(x.dtype)
+
+    serialization_hash = hash(
+        serialization.to_bytes(
+            jax.tree_util.tree_map(zeros_like, model_serving)
+        )
+    )
+    utils.assert_eq(serialization_hash, expected_hash, "serialization hash")
 
     serving_pytree = jax.tree_util.tree_map(
         lambda x: (x.dtype, x.shape), model_serving
