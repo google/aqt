@@ -534,6 +534,8 @@ def config_v4(
     fwd_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
     dlhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
     drhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
+    dlhs_use_fwd_quant: Union[bool, None, SkipT] = SKIP,
+    drhs_use_fwd_quant: Union[bool, None, SkipT] = SKIP,
 ) -> DotGeneral:
   """Version 4 of user-visible AQT config."""
   cfg = default_unquantized_config()
@@ -566,9 +568,11 @@ def config_v4(
       dlhs_local_aqt=dlhs_local_aqt,
       drhs_local_aqt=drhs_local_aqt,
   )
-  # TODO(yichizh): remove set_use_fwd_quant here since it will be automatically
-  # set in set_bits. Or make them as an argument.
-  set_use_fwd_quant(cfg, dlhs_use_fwd_quant=False, drhs_use_fwd_quant=False)
+  set_use_fwd_quant(
+      cfg,
+      dlhs_use_fwd_quant=dlhs_use_fwd_quant,
+      drhs_use_fwd_quant=drhs_use_fwd_quant,
+  )
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg
 
