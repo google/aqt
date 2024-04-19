@@ -16,6 +16,7 @@
 # pylint: disable=unnecessary-lambda
 # pylint: disable=g-importing-member
 import copy
+import enum
 import functools
 from typing import Callable, Iterable, Optional, Sequence, Union
 from aqt.jax.v2 import aqt_dot_general
@@ -37,6 +38,12 @@ NoShardingAxes = Sequence[utils.AxisIdx]
 AxisMetadataWrapper = Callable[
     [jnp.ndarray, NoShardingAxes], nn_meta.AxisMetadata
 ]
+
+
+class FreezerMode(enum.Enum):
+  NONE = 1
+  CALIBRATION = 2
+  CALIBRATION_AND_VALUE = 3
 
 
 class Freezer(nn.Module):
@@ -158,6 +165,11 @@ class AqtDotGeneral(nn.Module):
   # Variables only for the new Freezer.
   lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
   rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
+
+  # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
+  # CALIBRATION_AND_VALUE to store both scales and quantized values.
+  lhs_freeze_mode: FreezerMode = FreezerMode.NONE
+  rhs_freeze_mode: FreezerMode = FreezerMode.CALIBRATION_AND_VALUE
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -319,6 +331,35 @@ class AqtDotGeneral(nn.Module):
           lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg
       )
 
+      # Remove qvalue of the activation to not to store it in Freezer.
+      match self.lhs_freeze_mode:
+        case FreezerMode.NONE:
+          if self.lhs_apply_quant_mode and self.lhs_quant_mode in {
+              QuantMode.CONVERT,
+              QuantMode.SERVE,
+          }:
+            raise ValueError('Freezer is used with Freezer mode NONE.')
+        case FreezerMode.CALIBRATION:
+          out_lhs_qt = out_lhs_qt.without_qvalue()
+        case FreezerMode.CALIBRATION_AND_VALUE:
+          pass
+        case _:
+          raise ValueError('Unknown freeze mode: %s' % self.lhs_freeze_mode)
+
+      match self.rhs_freeze_mode:
+        case FreezerMode.NONE:
+          if self.rhs_apply_quant_mode and self.rhs_quant_mode in {
+              QuantMode.CONVERT,
+              QuantMode.SERVE,
+          }:
+            raise ValueError('Freezer is used with Freezer mode NONE.')
+        case FreezerMode.CALIBRATION:
+          out_rhs_qt = out_rhs_qt.without_qvalue()
+        case FreezerMode.CALIBRATION_AND_VALUE:
+          pass
+        case _:
+          raise ValueError('Unknown freeze mode: %s' % self.rhs_freeze_mode)
+
       # Setter
       if self.lhs_apply_quant_mode:
         lhs_freezer.set(out_lhs_qt)
@@ -399,6 +440,11 @@ class AqtEinsum(nn.Module):
   lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
   rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
 
+  # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
+  # CALIBRATION_AND_VALUE to store both scales and quantized values.
+  lhs_freeze_mode: FreezerMode = FreezerMode.NONE
+  rhs_freeze_mode: FreezerMode = FreezerMode.CALIBRATION_AND_VALUE
+
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
@@ -470,6 +516,9 @@ class AqtEinsum(nn.Module):
     rhs_var_name = self.rhs_var_name
     rhs_qtensor = rhs_g if rhs_is_qt else None
 
+    lhs_freeze_mode = self.lhs_freeze_mode
+    rhs_freeze_mode = self.rhs_freeze_mode
+
     quant_collection = self.quant_collection
     tiling_config = None
     if self.tile_sizes is not None:
@@ -491,6 +540,7 @@ class AqtEinsum(nn.Module):
           rhs_axis_metadata_wrapper,
           lhs_axis_metadata_wrapper,
       )
+      lhs_freeze_mode, rhs_freeze_mode = rhs_freeze_mode, lhs_freeze_mode
       if tiling_config is not None:
         tiling_config = tiled_dot_general.Cfg(
             lhs=tiling_config.rhs, rhs=tiling_config.lhs
@@ -519,5 +569,7 @@ class AqtEinsum(nn.Module):
         quant_collection=quant_collection,
         tiling_cfg=tiling_config,
         use_legacy_freezer=self.use_legacy_freezer,
+        lhs_freeze_mode=lhs_freeze_mode,
+        rhs_freeze_mode=rhs_freeze_mode,
     )
     return einsum(lhs=lhs_in, rhs=rhs_in, dg=aqt_dg)

@@ -591,3 +591,16 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
   set_stochastic_rounding(cfg, False, False, 'jax.uniform')
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg
+
+
+def set_fwd_calibration(
+    cfg: DotGeneral,
+    calibration_factory
+) -> DotGeneral:
+  """Updates aqt_cfg for static range calibration."""
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+
+  cfg.fwd.dg_quantizer.lhs.calibration = calibration_factory
+  cfg.fwd.dg_quantizer.rhs.calibration = calibration_factory

@@ -53,23 +53,18 @@ class Quantizer:
       calibration_axes,
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """The core quantizing function."""
+    qt = self.calibrate(x, calibration_axes=calibration_axes)
+    qt, quant_grad = self.calculate_qvalue(x, qt)
+    return qt, quant_grad
+
+  def calibrate(self, x, *, calibration_axes) -> aqt_tensor.QTensor:
+    """Create incomplete QTensor with only quantization parameters."""
     if isinstance(self.numerics, no_numerics.NoNumerics):
       qt = aqt_tensor.QTensor(
           qvalue=x, scale=[], scale_t=[], dequant_dtype=x.dtype
       )
-      return qt, None
+      return qt
 
-    qt = self.calculate_scale(x, calibration_axes=calibration_axes)
-    qt, quant_grad = self.calculate_qvalue(x, qt)
-    return qt, quant_grad
-
-  def calculate_scale(
-      self,
-      x,
-      *,
-      calibration_axes,
-  ) -> aqt_tensor.QTensor:
-    """Create incomplete QTensor with only quantization parameters."""
     dequant_dtype = x.dtype
     # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
     # TODO(lew): After we implement optimization to not double-quantize,
@@ -108,6 +103,11 @@ class Quantizer:
       qt: aqt_tensor.QTensor
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """Uses the quantization parameters in qt to quantize x."""
+    if isinstance(self.numerics, no_numerics.NoNumerics):
+      return qt, None
+
+    # TODO: b/333984742 - make numeric as a member of QTensor, and put
+    # numerics-related logics into the QTensor.
     qt = qt.quant(x)
 
     # TODO(lew): A logical thing would be if this call was part of

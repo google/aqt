@@ -236,7 +236,6 @@ def _get_scale_t(
 class DotGeneralQuantizer(abc.ABC):
   """Abstract class for dot_general quantizer."""
 
-  @abc.abstractmethod
   def __call__(
       self,
       lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
@@ -245,6 +244,34 @@ class DotGeneralQuantizer(abc.ABC):
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
   ]:
+    lhs, _ = lhs_quantization_info
+    rhs, _ = rhs_quantization_info
+    lhs_qt, rhs_qt = self.calibrate(
+        lhs_quantization_info, rhs_quantization_info
+    )
+    return self.calculate_qvalue(lhs, lhs_qt, rhs, rhs_qt)
+
+  @abc.abstractmethod
+  def calibrate(
+      self,
+      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]:
+    """Calculates incomplete QTensor from the given inputs."""
+    pass
+
+  @abc.abstractmethod
+  def calculate_qvalue(
+      self,
+      lhs: jax.Array,
+      lhs_qt: aqt_tensor.QTensor,
+      rhs: jax.Array,
+      rhs_qt: aqt_tensor.QTensor,
+  ) -> tuple[
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+      tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+  ]:
+    """Calculates qvalues from the given inputs."""
     pass
 
   @abc.abstractmethod
@@ -279,20 +306,32 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
   lhs: aqt_quantizer.Quantizer
   rhs: aqt_quantizer.Quantizer
 
-  def __call__(
+  def calibrate(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
+      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]:
+    lhs_input, lhs_ca = lhs_quantization_info
+    rhs_input, rhs_ca = rhs_quantization_info
+    lhs_qt = self.lhs.calibrate(lhs_input, calibration_axes=lhs_ca)
+    rhs_qt = self.rhs.calibrate(rhs_input, calibration_axes=rhs_ca)
+    return (lhs_qt, rhs_qt)
+
+  def calculate_qvalue(
+      self,
+      lhs: jax.Array,
+      lhs_qt: aqt_tensor.QTensor,
+      rhs: jax.Array,
+      rhs_qt: aqt_tensor.QTensor,
   ) -> tuple[
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
   ]:
-    lhs_input, lhs_ca = lhs_quantization_info
-    rhs_input, rhs_ca = rhs_quantization_info
-    lhs_qt, lhs_quant_grad = self.lhs.quant(lhs_input, calibration_axes=lhs_ca)
-    rhs_qt, rhs_quant_grad = self.rhs.quant(rhs_input, calibration_axes=rhs_ca)
+    """Calculates qvalues from the given inputs."""
+    lhs_qt, lhs_grad = self.lhs.calculate_qvalue(lhs, lhs_qt)
+    rhs_qt, rhs_grad = self.rhs.calculate_qvalue(rhs, rhs_qt)
 
-    return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)
+    return (lhs_qt, lhs_grad), (rhs_qt, rhs_grad)
 
   def swap_lhs_and_rhs(self) -> None:
     self.lhs, self.rhs = self.rhs, self.lhs
@@ -469,8 +508,21 @@ class DotGeneralRaw:
       lhs_calib_axes = _get_calibration_axes(self.lhs, lhs.ndim, lhs_ca, lhs_ba)
       rhs_calib_axes = _get_calibration_axes(self.rhs, rhs.ndim, rhs_ca, rhs_ba)
 
-      lhs_quantized, rhs_quantized = (
-          self.dg_quantizer((lhs, lhs_calib_axes), (rhs, rhs_calib_axes))
+      lhs_incomplete_qt, rhs_incomplete_qt = self.dg_quantizer.calibrate(
+          (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
+      )
+      if lhs_qt is not None and not lhs_qt.is_full():
+        # Incomplete QTensor is provided as lhs_qt.
+        lhs_incomplete_qt = lhs_qt
+        lhs_qt = None
+
+      if rhs_qt is not None and not rhs_qt.is_full():
+        # Incomplete QTensor is provided as rhs_qt.
+        rhs_incomplete_qt = rhs_qt
+        rhs_qt = None
+
+      lhs_quantized, rhs_quantized = self.dg_quantizer.calculate_qvalue(
+          lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
       )
       lhs_qt_calculated, lhs_quant_grad = lhs_quantized
       rhs_qt_calculated, rhs_quant_grad = rhs_quantized
@@ -503,10 +555,7 @@ class DotGeneralRaw:
 
       out = out.dequant()
 
-      res = DotGeneralRes(
-          lhs=lhs_res,
-          rhs=rhs_res,
-      )
+      res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
       if self.local_aqt is not None:
         assert len(lhs_ca) == len(rhs_ca)
         if len(lhs_ca) > 0:

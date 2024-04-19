@@ -74,8 +74,15 @@ class QTensor:
       pytree_node=False, default=None
   )
 
+  def is_full(self) -> bool:
+    return self.qvalue is not None
+
+  def without_qvalue(self) -> Self:
+    """Returns a copy of the QTensor without the qvalue."""
+    return self.replace(qvalue=None)  # pytype: disable=attribute-error
+
   def quant(self, x):
-    assert self.qvalue is None, 'Already quantized QTensor.'
+    assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
 
     qvalue = x
@@ -94,20 +101,20 @@ class QTensor:
         ' be used in dot_general, but to dequantize you need to set its dtype.'
     )
     assert self.dequant_dtype is not None, msg
-    assert self.qvalue is not None, _MSG_NO_QVALUE
+    assert self.is_full(), _MSG_NO_QVALUE
     ret = self.qvalue
     for scale in self.scale:
       ret = ret.astype(self.dequant_dtype) * scale.astype(self.dequant_dtype)  # pytype: disable=attribute-error
     return ret  # pytype: disable=bad-return-type
 
   def qvalue_astype(self, dtype) -> Self:
-    assert self.qvalue is not None, _MSG_NO_QVALUE
+    assert self.is_full(), _MSG_NO_QVALUE
     return self.replace(qvalue=self.qvalue.astype(dtype))  # pytype: disable=attribute-error
 
   def __getitem__(self, idx: jax_typing.ArrayLike) -> Self:
     """Returns the indexed subtensor on the first axis."""
     assert self.scale_t is None, 'scale_t is not supported in __getitem__'
-    assert self.qvalue is not None, _MSG_NO_QVALUE
+    assert self.is_full(), _MSG_NO_QVALUE
     qvalue = self.qvalue[idx]
     scale = [s[idx] for s in self.scale]
     return QTensor(
@@ -119,12 +126,12 @@ class QTensor:
 
   @property
   def ndim(self) -> int:
-    assert self.qvalue is not None, _MSG_NO_QVALUE
+    assert self.is_full(), _MSG_NO_QVALUE
     return self.qvalue.ndim  # pytype: disable=attribute-error
 
   @property
   def shape(self) -> Sequence[int]:
-    assert self.qvalue is not None, _MSG_NO_QVALUE
+    assert self.is_full(), _MSG_NO_QVALUE
     return self.qvalue.shape  # pytype: disable=attribute-error
 
   def __len__(self) -> int:

@@ -22,6 +22,7 @@ from aqt.jax.v2 import config as aqt_config
 from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
+from aqt.jax.v2.flax import aqt_flax_calibration
 from flax import linen as nn
 from flax import struct
 from flax.metrics import tensorboard
@@ -65,7 +66,8 @@ class CNN(nn.Module):
         lhs_quant_mode=self.activation_quant_mode,
         rhs_quant_mode=self.weights_quant_mode,
         tiling_cfg=tiling_cfg,
-        use_legacy_freezer=False
+        use_legacy_freezer=False,
+        lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION
     )
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
@@ -99,7 +101,9 @@ class CNN(nn.Module):
         assert_lhs_shape=(10, 10),
         assert_rhs_shape=(None, 10),
         tile_sizes={'b': 5},
-        use_legacy_freezer=False
+        use_legacy_freezer=False,
+        lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
+        rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
     )
     # Note for AQT developers:
     #   This equation is harder because jnp.einsum and einsum swap lhs and rhs.
@@ -215,7 +219,10 @@ def create_train_state(rng, aqt_cfg):
 
 
 def train_and_evaluate(
-    num_epochs: int, workdir: str, aqt_cfg: aqt_config.DotGeneral
+    num_epochs: int,
+    workdir: str,
+    aqt_cfg: aqt_config.DotGeneral | None = None,
+    state: TrainState | None = None,
 ) -> TrainState:
   """Execute model training and evaluation loop."""
   train_ds, test_ds = get_datasets()
@@ -224,7 +231,9 @@ def train_and_evaluate(
   summary_writer = tensorboard.SummaryWriter(workdir)
 
   rng, init_rng = jax.random.split(rng)
-  state = create_train_state(init_rng, aqt_cfg)
+  if state is None:
+    assert aqt_cfg is not None
+    state = create_train_state(init_rng, aqt_cfg)
 
   batch_size = 128
   for epoch in range(1, num_epochs + 1):
@@ -260,6 +269,7 @@ def train_and_evaluate(
 
 def serving_conversion(
     train_state: TrainState,
+    weight_only: bool = True
 ) -> tuple[Callable[..., Any], dict[str, Any]]:
   """Model conversion (quantized weights freezing).
 
@@ -268,15 +278,21 @@ def serving_conversion(
 
   Args:
     train_state: TrainState containing model definitions and params.
+    weight_only: If set, does not quantize activations.
+
   Returns:
     A tuple of serving function, and converted model parameters.
   """
   aqt_cfg = train_state.cnn_eval.aqt_cfg
   input_shape = (1, 28, 28, 1)
+  activation_quant_mode = (
+      utils.QuantMode.TRAIN if weight_only else utils.QuantMode.CONVERT
+  )
   cnn_freeze = CNN(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.CONVERT,
+      activation_quant_mode=activation_quant_mode,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -288,6 +304,7 @@ def serving_conversion(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.SERVE,
+      activation_quant_mode=activation_quant_mode,
   )
 
   return cnn_serve.apply, model_serving
@@ -312,6 +329,21 @@ def _merge_pytrees(from_model, to_model):
   )
 
   return merged_model
+
+
+def update_cfg_with_calibration(aqt_cfg):
+  """Updates aqt_cfg for static range calibration."""
+  sr_calibration_cls = functools.partial(
+      aqt_flax_calibration.MeanOfAbsMaxCalibration,
+      quant_collection='qc',
+  )
+
+  aqt_config.set_fwd_calibration(aqt_cfg, sr_calibration_cls)
+
+  # For static range calibration, the calibration axis for activation should
+  # be set to per_tensor, since its dimensions could be different during
+  # training and during inference.
+  aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = 'per_tensor'
 
 
 def calibration_conversion(
@@ -346,10 +378,15 @@ def calibration_conversion(
   return cnn_calibrate.apply, model_calibrated
 
 
-def calibrate(state, train_ds, batch_size, rng, calibration_steps):
-  """Calibrate."""
-  calibrate_func, model_calibrate = calibration_conversion(state)
-
+def calibrate_epoch(
+    calibrate_func,
+    model_calibrated,
+    train_ds,
+    batch_size,
+    rng,
+    calibration_steps,
+):
+  """Calibrates for a single epoch."""
   perms = _prepare_data_perm(train_ds, batch_size, rng, calibration_steps)
 
   for perm in perms:
@@ -358,21 +395,40 @@ def calibrate(state, train_ds, batch_size, rng, calibration_steps):
 
     # Calibration simply updates model during inference; it does NOT apply any
     # gradients.
-    _, _, _, model_calibrate = apply_model(
-        model_calibrate, batch_images, batch_labels, calibrate_func
+    _, _, _, model_calibrated = apply_model(
+        model_calibrated, batch_images, batch_labels, calibrate_func
     )
 
-  return model_calibrate
+  return model_calibrated
 
 
-@jax.jit
-def serve(state):
+def calibrate(state: TrainState, calibration_steps: int) -> TrainState:
+  """Calibrate."""
+  train_ds, _ = get_datasets()
+  rng = jax.random.key(0)
+  batch_size = 128
+  calibration_func, model_calibrated = calibration_conversion(state)
+
+  model_calibrated = calibrate_epoch(
+      calibration_func,
+      model_calibrated,
+      train_ds,
+      batch_size,
+      rng,
+      calibration_steps,
+  )
+
+  return state.replace(model=model_calibrated)
+
+
+@functools.partial(jax.jit, static_argnums=(1,))
+def serve(state: TrainState, weight_only: bool = True):
   """Take train state, freeze integer weights, and serve."""
   # get sample serving data
   _, test_ds = get_datasets()
   sample_image, sample_label = test_ds['image'][:64], test_ds['label'][:64]
   # serving
-  serve_fn, model_serving = serving_conversion(state)
+  serve_fn, model_serving = serving_conversion(state, weight_only=weight_only)
   logits = serve_fn(
       model_serving, sample_image, rngs={'params': jax.random.PRNGKey(0)}
   )
@@ -401,12 +457,24 @@ def serve_fn_hlo(state):
 def main(argv):
   del argv
 
-  # TODO(dhchoi): Extend to TRAIN-CALIBRATE-TRAIN-CONVERT-SERVE.
+  # 1. TRAIN.
   aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
   state = train_and_evaluate(
-      num_epochs=2, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
+      num_epochs=1, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
   )
-  loss = serve(state)
+
+  # 2. Calibration.
+  update_cfg_with_calibration(state.cnn_train.aqt_cfg)
+  update_cfg_with_calibration(state.cnn_eval.aqt_cfg)
+  state = calibrate(state, calibration_steps=10)
+
+  # 3. TRAIN with the calibrated stats.
+  state = train_and_evaluate(
+      num_epochs=1, workdir='/tmp/aqt_mnist_example', state=state
+  )
+
+  # 4. CONVERT & SERVE.
+  loss = serve(state, weight_only=False)
   print('serve loss on sample ds: {}'.format(loss))
 
 

@@ -14,14 +14,12 @@
 
 """Test for flax e2e model."""
 import copy
-import functools
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
-from aqt.jax.v2.flax import aqt_flax_calibration
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -262,10 +260,24 @@ class MnistTest(parameterized.TestCase):
               "drhs_bits": 8,
               "drhs_accumulator_dtype": jnp.int32,  # overwrite the default None
           },
+          8,
+      ),
+      (
+          {
+              "fwd_bits": 4,
+              "fwd_accumulator_dtype": None,
+              "dlhs_accumulator_dtype": None,
+          },
+          4,
       ),
   ])
-  def test_mnist_calibration(self, configs):
+  def test_mnist_calibration(self, configs, bits):
     aqt_cfg = config.config_v4(**configs)
+    device_kind = jax.devices()[0].device_kind
+    if device_kind == "cpu" and bits == 4:
+      # Some 4-bit operations are not supported on cpu.
+      # Omitting tests on cpu with 4-bits.
+      return
 
     # RNGs
     rng = jax.random.key(0)
@@ -290,25 +302,14 @@ class MnistTest(parameterized.TestCase):
     )
 
     # Stage 2: Calibration.
-    def _update_cfg_with_calibration(cfg):
-      sr_calibration_cls = functools.partial(
-          aqt_flax_calibration.MeanOfAbsMaxCalibration,
-          quant_collection="qc",
-      )
-      cfg.fwd.dg_quantizer.lhs.calibration = sr_calibration_cls
-      cfg.fwd.dg_quantizer.rhs.calibration = sr_calibration_cls
-
-    _update_cfg_with_calibration(state.cnn_train.aqt_cfg)
-    _update_cfg_with_calibration(state.cnn_eval.aqt_cfg)
-
-    # For static range calibration, the calibration axis for activation should
-    # be set to per_tensor, since its dimensions could be different during
-    # training and during inference.
-    aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = "per_tensor"
+    flax_e2e_model.update_cfg_with_calibration(state.cnn_train.aqt_cfg)
+    flax_e2e_model.update_cfg_with_calibration(state.cnn_eval.aqt_cfg)
+    calibrate_f, model_calibrate = flax_e2e_model.calibration_conversion(state)
 
     calibration_steps = 4
-    calibrated_params = flax_e2e_model.calibrate(
-        state,
+    calibrated_params = flax_e2e_model.calibrate_epoch(
+        calibrate_f,
+        model_calibrate,
         ds,
         batch_size,
         rng=calibration_rng,
@@ -382,6 +383,93 @@ class MnistTest(parameterized.TestCase):
         calibrated_params["params"],
         state.model["params"],
     )
+
+    # Stage 4. Convert the calibrated checkpoint.
+    serve_fn, model_serving = flax_e2e_model.serving_conversion(
+        state, weight_only=False
+    )
+    dtype = jnp.dtype
+    expected_dtype = dtype("int4") if bits == 4 else dtype("int8")
+    expected_aqt_pytree = {
+        "AqtEinsum_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
+                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        dequant_dtype=dtype("float32")
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        dequant_dtype=dtype("float32")
+                    )
+                }
+            }
+        },
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        dequant_dtype=dtype("float32")
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
+                        scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
+                        dequant_dtype=dtype("float32")
+                    )
+                }
+            }
+        },
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        dequant_dtype=dtype("float32")
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
+                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        dequant_dtype=dtype("float32")
+                    )
+                }
+            }
+        }
+    }
+
+    serving_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), model_serving
+    )
+    utils.test_pprint_eq(expected_aqt_pytree, serving_pytree["aqt"])
+
+    # Compare logits of models before conversion and after conversion.
+    def forward(model, apply_fn):
+      return apply_fn(
+          model,
+          ds["image"],
+          rngs={"params": jax.random.PRNGKey(0)},
+          mutable=True,
+      )
+
+    logits_before_conversion, _ = forward(state.model, state.cnn_eval.apply)
+    logits_after_conversion, _ = forward(model_serving, serve_fn)
+    assert (logits_before_conversion == logits_after_conversion).all()
 
 
 if __name__ == "__main__":
