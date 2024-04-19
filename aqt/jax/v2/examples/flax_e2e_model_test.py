@@ -13,13 +13,17 @@
 # limitations under the License.
 
 """Test for flax e2e model."""
+
 import copy
+import functools
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
+from aqt.jax.v2.flax import aqt_flax_calibration
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -468,6 +472,208 @@ class MnistTest(parameterized.TestCase):
       )
 
     logits_before_conversion, _ = forward(state.model, state.cnn_eval.apply)
+    logits_after_conversion, _ = forward(model_serving, serve_fn)
+    assert (logits_before_conversion == logits_after_conversion).all()
+
+  @parameterized.parameters([
+      (
+          {
+              "drhs_bits": 8,
+          },
+          8,
+      ),
+      (
+          {
+              "fwd_bits": 4,
+              "fwd_accumulator_dtype": None,
+              "dlhs_accumulator_dtype": None,
+          },
+          4,
+      ),
+  ])
+  def test_mnist_weighted_stats_calibration(self, configs, bits):
+    aqt_cfg = config.config_v4(**configs)
+    device_kind = jax.devices()[0].device_kind
+    if device_kind == "cpu" and bits == 4:
+      # Some 4-bit operations are not supported on cpu.
+      # Omitting tests on cpu with 4-bits.
+      return
+
+    # Update cfg with WeightedStatsCalibration.
+    calibration_cls = functools.partial(
+        aqt_flax_calibration.WeightedStatsCalibration,
+        l1_dev_coeff=1.0,
+        lp_dev_coeff=1.0,
+        max_dev_coeff=1.0,
+        const_bound_coeff=1.0,
+        quant_collection="qc",
+    )
+    config.set_fwd_calibration(aqt_cfg, calibration_cls)
+    aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = "per_tensor"
+
+    # RNGs
+    rng = jax.random.key(0)
+    rng, init_rng = jax.random.split(rng)
+    rng, image_rng, label_rng = jax.random.split(rng, 3)
+    rng, input_rng = jax.random.split(rng)
+    del rng
+
+    # Dataset
+    ds_size = 64
+    batch_size = 8
+    ds = _dummy_dataset(ds_size, image_rng, label_rng)
+
+    # Stage 1: Training with collecting stats.
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+
+    state, _, _ = flax_e2e_model.train_epoch(
+        state, ds, batch_size, rng=input_rng
+    )
+
+    trained_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), state.model
+    )
+    dtype = jnp.dtype
+    expected_trained_pytree = {
+        "AqtEinsum_0": {
+            "AqtDotGeneral_0": {
+                "WeightedStatsCalibration_0": {
+                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_ones": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                },
+                "WeightedStatsCalibration_1": {
+                    "max_of_abs_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_ones": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                }}},
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "WeightedStatsCalibration_0": {
+                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_ones": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                },
+                "WeightedStatsCalibration_1": {
+                    "max_of_abs_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
+                    "sum_of_ones": (dtype("float32"), (1, 2, 1, 1, 256)),
+                    "sum_of_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
+                }}},
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "WeightedStatsCalibration_0": {
+                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_ones": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "sum_of_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                },
+                "WeightedStatsCalibration_1": {
+                    "max_of_abs_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_ones": (dtype("float32"), (1, 2, 1, 1, 10)),
+                    "sum_of_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
+                }}}}
+
+    utils.test_pprint_eq(expected_trained_pytree, trained_pytree["qc"])
+
+    def forward(model, apply_fn):
+      return apply_fn(
+          model,
+          ds["image"],
+          rngs={"params": jax.random.PRNGKey(0)},
+          mutable=True,
+      )
+
+    logits_before_conversion, params = forward(
+        state.model, state.cnn_eval.apply
+    )
+    state = state.replace(model=params)
+
+    # Stage 2. Convert the checkpoint, and serve.
+    serve_fn, model_serving = flax_e2e_model.serving_conversion(
+        state, weight_only=False
+    )
+    dtype = jnp.dtype
+    expected_dtype = dtype("int4") if bits == 4 else dtype("int8")
+    expected_aqt_pytree = {
+        "AqtEinsum_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
+                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        dequant_dtype=dtype("float32")
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        dequant_dtype=dtype("float32")
+                    )
+                }
+            }
+        },
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        dequant_dtype=dtype("float32")
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
+                        scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
+                        dequant_dtype=dtype("float32")
+                    )
+                }
+            }
+        },
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        dequant_dtype=dtype("float32")
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
+                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        dequant_dtype=dtype("float32")
+                    )
+                }
+            }
+        }
+    }
+
+    serving_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), model_serving
+    )
+    utils.test_pprint_eq(expected_aqt_pytree, serving_pytree["aqt"])
+
+    # Compare logits of models before conversion and after conversion.
     logits_after_conversion, _ = forward(model_serving, serve_fn)
     assert (logits_before_conversion == logits_after_conversion).all()
 
