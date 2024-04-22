@@ -79,6 +79,73 @@ def rhs_scale_transpose_to_output(
   return qrhs_scale_t
 
 
+def _scale_trans_back(
+    scale_t: jax.Array, ca: Sequence[utils.AxisIdx], ba: Sequence[utils.AxisIdx]
+) -> jax.Array:
+  """Transposes scale (transposed for output) back to its original dimension.
+
+  Args:
+    scale_t: scale transposed for output, without other arguments' remaining
+      axis dimensions. Output of _scale_trans.
+    ca: contracting axis.
+    ba: batching axis.
+
+  Returns:
+    Recovered scale from the scale_t.
+  """
+  ca, ba = list(ca), list(ba)
+
+  start = len(scale_t.shape)
+  end = start + len(ca)
+  scale = jnp.expand_dims(scale_t, axis=range(start, end))
+
+  ra = utils.get_remaining_axes(scale.ndim, ca, ba)
+
+  transpose_back = [-1] * len(ba + ra + ca)
+  for axis_orig, axis_transposed in enumerate(ba + ra + ca):
+    transpose_back[axis_transposed] = axis_orig
+
+  assert -1 not in transpose_back
+
+  scale = jnp.transpose(scale, transpose_back)
+  return scale
+
+
+def lhs_recover_scale_from_scale_t(
+    lhs_scale_t: jax.Array,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    lhs_shape: Sequence[int],
+    rhs_shape: Sequence[int],
+):
+  """Recovers lhs_scale from lhs_scale_t."""
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+
+  # Remove dummy axes.
+  start = len(lhs_shape) - len(lhs_ca)
+  rhs_ra_ndim = len(rhs_shape) - len(rhs_ca) - len(rhs_ba)
+  lhs_scale = jnp.squeeze(lhs_scale_t, axis=range(start, start + rhs_ra_ndim))
+
+  return _scale_trans_back(lhs_scale, lhs_ca, lhs_ba)
+
+
+def rhs_recover_scale_from_scale_t(
+    rhs_scale_t: jax.Array,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    lhs_shape: Sequence[int],
+    rhs_shape: Sequence[int],
+):
+  """Recovers rhs_scale from rhs_scale_t."""
+  del rhs_shape
+
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+
+  start = len(rhs_ba)
+  end = len(lhs_shape) - len(lhs_ca) - len(lhs_ba) + start
+  rhs_scale = jnp.squeeze(rhs_scale_t, axis=range(start, end))
+
+  return _scale_trans_back(rhs_scale, rhs_ca, rhs_ba)
+
+
 def _scale_trans_for_other_input(
     x: jax.Array,
     my_ca: Sequence[utils.AxisIdx],

@@ -58,6 +58,13 @@ class AqtTransposeTest(parameterized.TestCase):
     self.assertIsNotNone(qlhs_scale_t)
     self.assertEqual(qlhs_scale_t.shape, expected_qlhs_scale_t_shape)
 
+    # Test recover.
+    qlhs_scale_recovered = transpose.lhs_recover_scale_from_scale_t(
+        qlhs_scale_t, dimension_numbers, lhs.shape, rhs_shape
+    )
+    self.assertEqual(lhs_scale.shape, qlhs_scale_recovered.shape)
+    assert (lhs_scale == qlhs_scale_recovered).all()
+
   @parameterized.parameters(
       # 'bmnts,bsnh->bmtnh'
       (
@@ -93,6 +100,13 @@ class AqtTransposeTest(parameterized.TestCase):
 
     self.assertIsNotNone(qrhs_scale_t)
     self.assertEqual(qrhs_scale_t.shape, expected_qrhs_scale_t_shape)
+
+    # Test recover.
+    qrhs_scale_recovered = transpose.rhs_recover_scale_from_scale_t(
+        qrhs_scale_t, dimension_numbers, lhs.shape, rhs_shape
+    )
+    self.assertEqual(rhs_scale.shape, qrhs_scale_recovered.shape)
+    assert (rhs_scale == qrhs_scale_recovered).all()
 
   @parameterized.parameters(
       # 'bmnts,bsnh->bmtnh'
