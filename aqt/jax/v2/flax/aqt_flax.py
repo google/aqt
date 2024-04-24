@@ -169,7 +169,7 @@ class AqtDotGeneral(nn.Module):
   # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
   # CALIBRATION_AND_VALUE to store both scales and quantized values.
   lhs_freeze_mode: FreezerMode = FreezerMode.NONE
-  rhs_freeze_mode: FreezerMode = FreezerMode.CALIBRATION_AND_VALUE
+  rhs_freeze_mode: FreezerMode = FreezerMode.NONE
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
@@ -443,7 +443,7 @@ class AqtEinsum(nn.Module):
   # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
   # CALIBRATION_AND_VALUE to store both scales and quantized values.
   lhs_freeze_mode: FreezerMode = FreezerMode.NONE
-  rhs_freeze_mode: FreezerMode = FreezerMode.CALIBRATION_AND_VALUE
+  rhs_freeze_mode: FreezerMode = FreezerMode.NONE
 
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.

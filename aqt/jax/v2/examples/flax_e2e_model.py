@@ -67,7 +67,8 @@ class CNN(nn.Module):
         rhs_quant_mode=self.weights_quant_mode,
         tiling_cfg=tiling_cfg,
         use_legacy_freezer=False,
-        lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION
+        lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
+        rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
     )
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(features=32, kernel_size=(3, 3))(x)

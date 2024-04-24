@@ -53,7 +53,11 @@ class AqtFlaxTest(parameterized.TestCase):
           if self.rhs_qt_external:
             rhs_in = rhs_q.qvalue_astype(rhs_dtype)
 
-        einsum = aqt_flax.AqtEinsum(cfg=self.aqt_cfg)
+        einsum = aqt_flax.AqtEinsum(
+            cfg=self.aqt_cfg,
+            lhs_freeze_mode=aqt_flax.FreezerMode.NONE,
+            rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
+        )
         # xhs_qt can be inputs to AqtEinsum
         # xhs->xhs_qt can happen outside of AqtEinsum, e.g., k/v cache quant
         # input xhs_qt will force get_tensor() to always return xhs_qt
@@ -97,7 +101,11 @@ class AqtFlaxTest(parameterized.TestCase):
 
       @nn.compact
       def __call__(self, x):
-        einsum = aqt_flax.AqtEinsum(self.aqt_cfg)
+        einsum = aqt_flax.AqtEinsum(
+            self.aqt_cfg,
+            lhs_freeze_mode=aqt_flax.FreezerMode.NONE,
+            rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE
+        )
         x = einsum('bc,ab->ac', jnp.identity(10, dtype=x.dtype), x)
         return x
 
@@ -134,6 +142,8 @@ class AqtFlaxTest(parameterized.TestCase):
             cfg=self.aqt_cfg,
             lhs_quant_mode=self.lhs_quant_mode,
             rhs_quant_mode=self.rhs_quant_mode,
+            lhs_freeze_mode=aqt_flax.FreezerMode.NONE,
+            rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
             use_legacy_freezer=self.use_legacy_freezer,
         )
         out = einsum('ijkh,mkh->ijm', lhs, kernel)
