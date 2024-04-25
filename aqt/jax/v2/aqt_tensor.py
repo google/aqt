@@ -48,6 +48,29 @@ else:
   ArrayT: TypeAlias = jnp.ndarray
 
 
+def _restore_from_permutation(
+    scale: jax.Array, permute_axis: list[utils.AxisIdx]
+) -> jax.Array:
+  """Restores the scale from permutation and expansion."""
+  expanded_axis = []
+  transpose_axis = []
+  for i, axis in enumerate(permute_axis):
+    if axis == -1:
+      expanded_axis.append(i)
+    else:
+      transpose_axis.append(axis)
+
+  scale = jnp.squeeze(scale, expanded_axis)
+  # If the size of tensor is equivalent to the size of one axis of tensor, then
+  # the tensor is reshapable.
+  reshable = max(scale.shape) == scale.size
+  if reshable:
+    scale = jnp.reshape(scale, (scale.shape[i] for i in transpose_axis))
+  else:
+    scale = jax.lax.transpose(scale, transpose_axis)
+  return scale
+
+
 @utils.flax_slots_dataclass
 class QTensor:
   """Quantized tensor."""
@@ -74,6 +97,22 @@ class QTensor:
       pytree_node=False, default=None
   )
 
+  # The permutation and expansion applied on each scale factor.
+  # -1 indicates an expanded dim.
+  #
+  # This is needed for pallas. The shape of tensor provided as an argument of
+  # pl.pallas_call has following constraints:
+  # - the size of the last dimension of tensor should be bigger than 128.
+  # - the size of the last two dimension should be either
+  #     - bigger than (8, 128)
+  #     - or (1, multiples of 128)
+  # To meets the constraints, scales are transposed and expanded. An axis bigger
+  # than 128 sent back to the last dimension, and the second last dimension is
+  # expanded. The scale is restored during dequantization.
+  scale_permute_axis: Optional[list[list[utils.AxisIdx]]] = flax.struct.field(
+      pytree_node=False, default=None
+  )
+
   def is_full(self) -> bool:
     return self.qvalue is not None
 
@@ -82,11 +121,15 @@ class QTensor:
     return self.replace(qvalue=None)  # pytype: disable=attribute-error
 
   def quant(self, x):
+    """Quantizes the QTensor."""
+
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
 
     qvalue = x
-    for s in self.scale:
+    for i, s in enumerate(self.scale):
+      if self.scale_permute_axis is not None:
+        s = _restore_from_permutation(s, self.scale_permute_axis[i])
       qvalue = qvalue * jax.lax.reciprocal(s)
 
     # TODO(lew): We should apply numerics here, so that 'quant' function
@@ -103,7 +146,9 @@ class QTensor:
     assert self.dequant_dtype is not None, msg
     assert self.is_full(), _MSG_NO_QVALUE
     ret = self.qvalue
-    for scale in self.scale:
+    for i, scale in enumerate(self.scale):
+      if self.scale_permute_axis is not None:
+        scale = _restore_from_permutation(scale, self.scale_permute_axis[i])
       ret = ret.astype(self.dequant_dtype) * scale.astype(self.dequant_dtype)  # pytype: disable=attribute-error
     return ret  # pytype: disable=bad-return-type
 
