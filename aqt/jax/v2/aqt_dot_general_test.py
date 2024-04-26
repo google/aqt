@@ -666,7 +666,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           rhs_shape=(5, 2, 4, 6, 3),  # non-contr: 4, 6, 3
           gra_shape=(4, 3, 6),
       ),
-      *[fqt_param_dict(s, use_fwd_quant=None) for s in range(10)],
+      *[fqt_param_dict(s, use_fwd_quant=False) for s in range(10)],
   ])
   def test_dot_general_calibration_with_remaining_axis(
       self,
@@ -687,9 +687,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # absl.app.run() in some environments.
     if not isinstance(dg, config.DotGeneral):
       dg = dg()
-    # Set use_fwd_quant to None.
-    dg.drhs.rhs.use_fwd_quant = None
-    dg.dlhs.rhs.use_fwd_quant = None
+    # Set use_fwd_quant to False.
+    dg.drhs.rhs.use_fwd_quant = False
+    dg.dlhs.rhs.use_fwd_quant = False
     readonly_dg = dg
     del dg
 
@@ -813,7 +813,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     ])
 
   def test_dot_general_calibrate_dequant_mode_mismatch(self):
-    dg = config.dot_general_make(8, 8, use_fwd_quant=None)
+    dg = config.dot_general_make(8, 8, use_fwd_quant=False)
     dims = (((1,), (0,)), ((), ()))
     lhs = rand_unif((10, 20), 10.0, 0, jnp.float32)
     rhs = rand_unif((20, 30), 20.0, 1, jnp.float32)
@@ -846,19 +846,16 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           dims=dims,
       )(lhs, rhs)
 
-  @parameterized.parameters([False, True])
-  def test_dot_general_prevent_fwd_quant_with_remaining_axis(
-      self, use_fwd_quant
-  ):
-    """If calibration axis is remaining_axis, use_fwd_quant should be None."""
-    dg = config.dot_general_make(8, 8, use_fwd_quant=use_fwd_quant)
+  def test_dot_general_prevent_fwd_quant_with_remaining_axis(self):
+    """If calibration axis is remaining_axis, use_fwd_quant should be False."""
+    dg = config.dot_general_make(8, 8, use_fwd_quant=True)
     dims = (((1,), (0,)), ((), ()))
     lhs = rand_unif((10, 20), 10.0, 0, jnp.float32)
     rhs = rand_unif((20, 30), 20.0, 1, jnp.float32)
 
     with self.assertRaisesRegex(
         AssertionError,
-        ".*use_fwd_quant should be set to None.*",
+        ".*use_fwd_quant should be set to False.*",
     ):
       _aqt_dg_full_lr_diff(
           aqt.DequantMode.THIS_INPUT,
@@ -881,9 +878,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     """Check equality between different calibration axes."""
     dims = (((1,), (0,)), ((), ()))
 
-    # Set use_fwd_quant to None.
-    dg.drhs.rhs.use_fwd_quant = None
-    dg.dlhs.rhs.use_fwd_quant = None
+    # Set use_fwd_quant to False.
+    dg.drhs.rhs.use_fwd_quant = False
+    dg.dlhs.rhs.use_fwd_quant = False
     readonly_dg = dg
     del dg
 

@@ -145,7 +145,7 @@ def zeros(
   return QTensor(
       qvalue=jnp.zeros(shape, dtype=qdtype),
       scale=[],
-      scale_t=[],
+      scale_t=None,
       dequant_dtype=dequant_dtype,
   )
 

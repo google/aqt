@@ -137,7 +137,7 @@ class MnistTest(parameterized.TestCase):
                         "frozen": aqt_tensor.QTensor(
                             qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                             scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
-                            scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                            scale_t=None,
                             dequant_dtype=dtype("float32")
                         )
                     }
@@ -157,7 +157,7 @@ class MnistTest(parameterized.TestCase):
                             # The scale_t shape was (1, 256) before tiling.
                             # After tiling the scale shape is (1, 2, 1, 1, 256),
                             # then transposed to (2, 1, 1, 1, 256).
-                            scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
+                            scale_t=None,
                             dequant_dtype=dtype("float32")
                         )
                     }
@@ -177,7 +177,7 @@ class MnistTest(parameterized.TestCase):
                             # The scale_t shape was (1, 10) before tiling.
                             # After tiling the scale shape is (1, 2, 1, 1, 10),
                             # then transposed to (2, 1, 1, 1, 10).
-                            scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                            scale_t=None,
                             dequant_dtype=dtype("float32")
                         )
                     }
@@ -401,7 +401,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
-                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 },
@@ -409,7 +409,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
-                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 }
@@ -421,7 +421,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
-                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 },
@@ -429,7 +429,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
-                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 }
@@ -441,7 +441,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
-                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 },
@@ -449,7 +449,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
-                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 }
@@ -612,7 +612,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
-                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 },
@@ -620,7 +620,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
-                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 }
@@ -632,7 +632,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
-                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 },
@@ -640,7 +640,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
-                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 256))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 }
@@ -652,7 +652,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
-                        scale_t=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 },
@@ -660,7 +660,7 @@ class MnistTest(parameterized.TestCase):
                     "frozen": aqt_tensor.QTensor(
                         qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
-                        scale_t=[(dtype("float32"), (2, 1, 1, 1, 10))],
+                        scale_t=None,
                         dequant_dtype=dtype("float32")
                     )
                 }
@@ -676,6 +676,82 @@ class MnistTest(parameterized.TestCase):
     # Compare logits of models before conversion and after conversion.
     logits_after_conversion, _ = forward(model_serving, serve_fn)
     assert (logits_before_conversion == logits_after_conversion).all()
+
+  def test_mnist_training_backward_compatibility(self):
+    aqt_cfg = config.config_v4()
+
+    def forward(model, apply_fn):
+      return apply_fn(
+          model,
+          ds["image"],
+          rngs={"params": jax.random.PRNGKey(0)},
+          mutable=True,
+      )
+
+    # RNGs
+    rng = jax.random.key(0)
+    rng, init_rng = jax.random.split(rng)
+    rng, image_rng = jax.random.split(rng)
+    rng, label_rng = jax.random.split(rng)
+    rng, input_rng = jax.random.split(rng)
+    del rng
+
+    # Dataset
+    ds_size = 8
+    ds = _dummy_dataset(ds_size, image_rng, label_rng)
+
+    # Stage 1: regular training
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+
+    state, _, _ = flax_e2e_model.train_epoch(
+        state, ds, batch_size=ds_size // 2, rng=input_rng
+    )
+
+    # Run forward once more in the same mode to get logits for testing below.
+    logits_s1, _ = forward(state.model, state.cnn_eval.apply)
+
+    # Stage 2: Model conversion (quantized weights freezing)
+    # Freeze with legacy freezer; serve with new freezer.
+    apply_serving, model_serving = flax_e2e_model.serving_conversion(
+        state, legacy_for_freeze=True, legacy_for_serve=False
+    )
+
+    dtype = jnp.dtype
+    expected_aqt_pytree = {
+        "AqtEinsum_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
+                    "value": (dtype("int8"), (1, 2, 5, 1, 10)),
+                }
+            }
+        },
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "qrhs": {
+                    "scale": (dtype("float32"), (2, 1, 1, 1, 256)),
+                    "value": (dtype("int8"), (1, 2, 1568, 1, 256)),
+                }
+            }
+        },
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "qrhs": {
+                    "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
+                    "value": (dtype("int8"), (1, 2, 128, 1, 10)),
+                }
+            }
+        }
+    }
+
+    serving_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), model_serving
+    )
+    utils.test_pprint_eq(expected_aqt_pytree, serving_pytree["aqt"])
+
+    # Stage 3: inference mode.
+    logits_s3, _ = forward(model_serving, apply_serving)
+    assert (logits_s3 == logits_s1).all()
 
 
 if __name__ == "__main__":

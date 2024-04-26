@@ -39,6 +39,7 @@ class CNN(nn.Module):
   aqt_cfg: aqt_config.DotGeneral
   weights_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
   activation_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
+  use_legacy_freezer: bool = False
 
   @nn.compact
   def __call__(self, x):
@@ -66,7 +67,7 @@ class CNN(nn.Module):
         lhs_quant_mode=self.activation_quant_mode,
         rhs_quant_mode=self.weights_quant_mode,
         tiling_cfg=tiling_cfg,
-        use_legacy_freezer=False,
+        use_legacy_freezer=self.use_legacy_freezer,
         lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
         rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
     )
@@ -102,7 +103,7 @@ class CNN(nn.Module):
         assert_lhs_shape=(10, 10),
         assert_rhs_shape=(None, 10),
         tile_sizes={'b': 5},
-        use_legacy_freezer=False,
+        use_legacy_freezer=self.use_legacy_freezer,
         lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
         rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
     )
@@ -270,7 +271,9 @@ def train_and_evaluate(
 
 def serving_conversion(
     train_state: TrainState,
-    weight_only: bool = True
+    weight_only: bool = True,
+    legacy_for_freeze: bool = False,
+    legacy_for_serve: bool = False
 ) -> tuple[Callable[..., Any], dict[str, Any]]:
   """Model conversion (quantized weights freezing).
 
@@ -280,6 +283,8 @@ def serving_conversion(
   Args:
     train_state: TrainState containing model definitions and params.
     weight_only: If set, does not quantize activations.
+    legacy_for_freeze: If set, use legacy freezer during freeze.
+    legacy_for_serve: If set, use legacy freezer during serve.
 
   Returns:
     A tuple of serving function, and converted model parameters.
@@ -294,6 +299,7 @@ def serving_conversion(
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.CONVERT,
       activation_quant_mode=activation_quant_mode,
+      use_legacy_freezer=legacy_for_freeze
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -306,6 +312,7 @@ def serving_conversion(
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.SERVE,
       activation_quant_mode=activation_quant_mode,
+      use_legacy_freezer=legacy_for_serve
   )
 
   return cnn_serve.apply, model_serving

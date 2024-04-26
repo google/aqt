@@ -61,7 +61,7 @@ class Quantizer:
     """Create incomplete QTensor with only quantization parameters."""
     if isinstance(self.numerics, no_numerics.NoNumerics):
       qt = aqt_tensor.QTensor(
-          qvalue=x, scale=[], scale_t=[], dequant_dtype=x.dtype
+          qvalue=x, scale=[], scale_t=None, dequant_dtype=x.dtype
       )
       return qt
 

@@ -136,8 +136,56 @@ class Freezer(nn.Module):
     return None
 
 
+def _maybe_recover_scale_from_scale_t(
+    qt: aqt_tensor.QTensor | None,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    is_rhs: bool,
+    lhs_shape: Sequence[int],
+    rhs_shape: Sequence[int],
+) -> aqt_tensor.QTensor:
+  """Recovers scale from scale_t if necessary."""
+  if qt is None or qt.scale is not None or qt.scale_t is None:
+    return qt
+
+  transpose_fn = transpose.lhs_recover_scale_from_scale_t
+  if is_rhs:
+    transpose_fn = transpose.rhs_recover_scale_from_scale_t
+
+  return qt.replace(
+      scale=[
+          transpose_fn(scale_t, dimension_numbers, lhs_shape, rhs_shape)
+          for scale_t in qt.scale_t
+      ],
+      scale_t=None,
+  )
+
+
+def _populate_scale_t(
+    qt: aqt_tensor.QTensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    is_rhs: bool,
+    lhs_shape: Sequence[int],
+    rhs_shape: Sequence[int],
+) -> aqt_tensor.QTensor:
+  """Populates scale_t from scale."""
+  if qt.scale is None:
+    return qt
+
+  transpose_fn = transpose.lhs_scale_transpose_to_output
+  if is_rhs:
+    transpose_fn = transpose.rhs_scale_transpose_to_output
+
+  return qt.replace(
+      scale_t=[
+          transpose_fn(scale, dimension_numbers, lhs_shape, rhs_shape)
+          for scale in qt.scale
+      ]
+  )
+
+
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
+
   cfg: Optional[aqt_dot_general.DotGeneral] = None
   prng_name: Optional[str] = 'params'
 
@@ -326,6 +374,15 @@ class AqtDotGeneral(nn.Module):
       lhs_qt = lhs_freezer.get() if lhs_apply_quant_mode else self.lhs_qtensor
       rhs_qt = rhs_freezer.get() if rhs_apply_quant_mode else self.rhs_qtensor
 
+      # Recover scale from scale_t, if necessary.
+      # The quantized tensor loaded from the legacy freezer has only scale_t.
+      lhs_qt = _maybe_recover_scale_from_scale_t(
+          lhs_qt, dimension_numbers, False, lhs_shape, rhs_shape
+      )
+      rhs_qt = _maybe_recover_scale_from_scale_t(
+          rhs_qt, dimension_numbers, True, lhs_shape, rhs_shape
+      )
+
       cfg.apply_custom_vjp_on_jax = False
       out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(
           lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg
@@ -361,6 +418,18 @@ class AqtDotGeneral(nn.Module):
           raise ValueError('Unknown freeze mode: %s' % self.rhs_freeze_mode)
 
       # Setter
+      calib_contracting_axis = aqt_dot_general.CalibrationMode.CONTRACTING_AXIS
+      if self.use_legacy_freezer:
+        # We need to populate the stored QTensor with scale_t.
+        if cfg.fwd.lhs.calibration_mode == calib_contracting_axis:
+          out_lhs_qt = _populate_scale_t(
+              out_lhs_qt, dimension_numbers, False, lhs_shape, rhs_shape
+          )
+        if cfg.fwd.rhs.calibration_mode == calib_contracting_axis:
+          out_rhs_qt = _populate_scale_t(
+              out_rhs_qt, dimension_numbers, True, lhs_shape, rhs_shape
+          )
+
       if self.lhs_apply_quant_mode:
         lhs_freezer.set(out_lhs_qt)
       if self.rhs_apply_quant_mode:

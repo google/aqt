@@ -364,7 +364,7 @@ def default_unquantized_config() -> DotGeneral:
 
   def tensor_cfg() -> Tensor:
     cfg = Tensor(
-        use_fwd_quant=None,
+        use_fwd_quant=False,
         dequant_mode=DequantMode.OUTPUT,
         calibration_mode=CalibrationMode.CONTRACTING_AXIS,
     )
