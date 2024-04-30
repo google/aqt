@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Test for AQT Tiled Dot General."""
+import functools
 import itertools
 
 from absl.testing import absltest
@@ -138,6 +139,51 @@ def generate_tiling_cfgs(lhs_shape, lhs_ca, lhs_ra, rhs_shape, rhs_ca, rhs_ra):
 
 
 class TiledDotGeneralTest(parameterized.TestCase):
+
+  def test_tiled_dot_general_shape(self):
+    for i in range(10):
+      key1, key2 = jax.random.split(jax.random.PRNGKey(i), 2)
+      hypers = jax.random.randint(key1, shape=(4,), minval=2, maxval=7)
+      num_ca = hypers[0]
+      num_ba = hypers[1]
+      num_lhs_ra = hypers[2]
+      num_rhs_ra = hypers[3]
+      max_shape_val = 6
+      lhs, rhs, lhs_axes, rhs_axes = generate_inputs(
+          key2, num_ca, num_ba, num_lhs_ra, num_rhs_ra, max_shape_val
+      )
+      lhs_ca, lhs_ba, lhs_ra = lhs_axes
+      rhs_ca, rhs_ba, rhs_ra = rhs_axes
+      dims = ((tuple(lhs_ca), tuple(rhs_ca)), (tuple(lhs_ba), tuple(rhs_ba)))
+
+      def _lax_dg(dims, lhs_in, rhs_in):
+        return jax.lax.dot_general(lhs_in, rhs_in, dims)
+
+      def _tiled_dg(cfg_in, dims, lhs_in, rhs_in):
+        return tiled_dot_general.tiled_dot_general(cfg_in, lhs_in, rhs_in, dims)
+
+      lax_dg_test = functools.partial(_lax_dg, dims)
+      expected_output_shape = jax.eval_shape(lax_dg_test, lhs, rhs).shape
+
+      tiling_cfgs = generate_tiling_cfgs(
+          lhs.shape, lhs_ca, lhs_ra, rhs.shape, rhs_ca, rhs_ra
+      )
+      for i in range(len(tiling_cfgs)):
+        cfg_in = tiling_cfgs[i]
+        tiled_dg_test = functools.partial(_tiled_dg, cfg_in, dims)
+        output_shape = jax.eval_shape(tiled_dg_test, lhs, rhs).shape
+        msg = (
+            'Test failed. Please try the following single test:\n'
+            f'lhs_shape = {lhs.shape}\n'
+            f'rhs_shape = {rhs.shape}\n'
+            'lhs = jnp.ones(lhs_shape)\n'
+            'rhs = jnp.ones(rhs_shape)\n'
+            f'cfg = {cfg_in}\n'
+            f'dims = {dims}\n'
+            'out = tiled_dot_general.local_dg(cfg, lhs, rhs, dims)\n'
+            'assert out.shape == jax.lax.dot_general(lhs, rhs, dims).shape'
+        )
+        assert output_shape == expected_output_shape, msg
 
   def test_tiled_dot_general(self):
     num_ca = 2
