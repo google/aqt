@@ -131,7 +131,7 @@ class MnistTest(parameterized.TestCase):
         state, aqt_cfg, tiling_cfg)
 
     dtype = jnp.dtype
-    expected_dtype = jnp.int8
+    expected_dtype = jnp.int4 if bits == 4 else jnp.int8
     expected_aqt_pytree = {
         "aqt": {
             "Dense_0": {

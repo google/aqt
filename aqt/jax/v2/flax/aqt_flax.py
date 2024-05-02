@@ -93,12 +93,8 @@ class Freezer(nn.Module):
     elif self.quant_mode == QuantMode.CONVERT:
       return None
     elif self.quant_mode == QuantMode.SERVE:
-      qvalue = self.qvalue.value
-      # TODO(b/325626080): Remove the optional logic.
-      if self.q_dtype == jnp.int4:
-        qvalue = qvalue.astype(jnp.int4)
       return aqt_tensor.QTensor(
-          qvalue,
+          self.qvalue.value,
           scale=None,
           scale_t=[self.scale_t.value],
           # TODO(lew): Ideal solution: To find out this dequant_dtype one should
@@ -110,7 +106,7 @@ class Freezer(nn.Module):
       assert False, 'Unknown quant mode.'
 
   def set(self, inputs: aqt_tensor.QTensor) -> None:
-    # TODO(b/325626080): Uncomment the assert.
+    # TODO(b/325626080): Uncommenting the assert will fail.
     # assert inputs.qvalue.dtype == self.q_dtype, (
     #     f'Freezer got a QTensor of type {inputs.qvalue.dtype} but expected'
     #     f' {self.q_dtype}.'
@@ -120,12 +116,7 @@ class Freezer(nn.Module):
     elif self.quant_mode == QuantMode.CALIBRATE:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
-      qvalue = inputs.qvalue
-      # TODO(b/325626080): Remove the optional logic.
-      if self.q_dtype == jnp.int4:
-        assert qvalue.dtype == jnp.int4
-        qvalue = qvalue.astype(jnp.int8)
-      self.qvalue.value = qvalue
+      self.qvalue.value = inputs.qvalue
       assert inputs.scale_t is not None and len(inputs.scale_t) == 1
       self.scale_t.value = inputs.scale_t[0]
     elif self.quant_mode == QuantMode.SERVE:
