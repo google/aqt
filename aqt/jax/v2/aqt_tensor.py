@@ -70,9 +70,14 @@ class QTensor:
   scale_t: Optional[list[ArrayT]]
 
   # DType of the tensor before quantized.
+  # NOTE: AQT Users should use the public property, dtype, instead.
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
       pytree_node=False, default=None
   )
+
+  @property
+  def dtype(self) -> jnp.dtype | None:
+    return self.dequant_dtype
 
   def is_full(self) -> bool:
     return self.qvalue is not None
@@ -80,6 +85,9 @@ class QTensor:
   def without_qvalue(self) -> Self:
     """Returns a copy of the QTensor without the qvalue."""
     return self.replace(qvalue=None)  # pytype: disable=attribute-error
+
+  def astype(self, dtype: jnp.dtype) -> Self:
+    return self.replace(dequant_dtype=dtype)  # pytype: disable=attribute-error
 
   def quant(self, x):
     assert not self.is_full(), 'Already quantized QTensor.'
@@ -140,8 +148,15 @@ class QTensor:
 
 
 def zeros(
-    shape: Sequence[int], qdtype: jnp.dtype, dequant_dtype: jnp.dtype
+    shape: Sequence[int],
+    qdtype: jnp.dtype,
+    dequant_dtype: jnp.dtype | None = None,
+    dtype: jnp.dtype | None = None,
 ) -> QTensor:
+  assert bool(dequant_dtype) != bool(
+      dtype
+  ), 'One and only one of dequant_dtype and dtype must be set.'
+  dequant_dtype = dequant_dtype or dtype
   return QTensor(
       qvalue=jnp.zeros(shape, dtype=qdtype),
       scale=[],
@@ -154,9 +169,14 @@ def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[utils.AxisIdx],
     qdtype: jnp.dtype,
-    dequant_dtype: jnp.dtype,
+    dequant_dtype: jnp.dtype | None = None,
+    dtype: jnp.dtype | None = None,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
+  assert bool(dequant_dtype) != bool(
+      dtype
+  ), 'One and only one of dequant_dtype and dtype must be set.'
+  dequant_dtype = dequant_dtype or dtype
   scale_shape = list(shape)
   for axis in calibration_axis:
     scale_shape[axis] = 1

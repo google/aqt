@@ -87,6 +87,15 @@ class AqtTensorTest(parameterized.TestCase):
     print(y.qvalue)
     print(y.scale[0])
 
+  def test_dtype(self):
+    qt = aqt_tensor.zeros(shape=(1,), qdtype=jnp.int8, dtype=jnp.float32)
+    self.assertEqual(qt.dtype, jnp.float32)
+    self.assertEqual(qt.dequant_dtype, jnp.float32)
+
+    qt = qt.astype(jnp.bfloat16)
+    self.assertEqual(qt.dtype, jnp.bfloat16)
+    self.assertEqual(qt.dequant_dtype, jnp.bfloat16)
+
 
 if __name__ == "__main__":
   absltest.main()
