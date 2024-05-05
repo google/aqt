@@ -171,6 +171,23 @@ def zeros_with_scale(
   )
 
 
+def partition_spec(
+    partitions: Sequence[Any],
+    calibration_axis: Sequence[utils.AxisIdx],
+    dtype: jnp.dtype,
+) -> QTensor:
+  """Returns a QTensor filled with partition specs."""
+  scale_partitions = list(partitions)
+  for axis in calibration_axis:
+    scale_partitions[axis] = None
+  return QTensor(
+      jax.sharding.PartitionSpec(*partitions),
+      [jax.sharding.PartitionSpec(*scale_partitions)],
+      None,
+      dtype,
+  )
+
+
 def dynamic_slice(
     operand: QTensor,
     start_indices: Sequence[int],
