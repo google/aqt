@@ -70,29 +70,18 @@ class Tensor:
 
   # Controls at what value of input tensor should be used.
   # Setting it to True, but not quantizing fwd pass will assert-fail.
-  use_fwd_quant: bool = utils.static_field()
+  use_fwd_quant: bool = utils.static_field(default=False)
   # Dequantization mode.
-  dequant_mode: DequantMode = utils.static_field()
+  dequant_mode: DequantMode = utils.static_field(default=DequantMode.OUTPUT)
   # Calibration axis mode.
-  calibration_mode: CalibrationMode = utils.static_field()
-
-  @classmethod
-  def make(cls, *args, **kwargs) -> Self:
-    return tensor_make(*args, **kwargs)
+  calibration_mode: CalibrationMode = utils.static_field(
+      default=CalibrationMode.CONTRACTING_AXIS
+  )
 
 
 @utils.flax_slots_kw_only_dataclass
 class LocalAqt:
   contraction_axis_shard_count: int = utils.static_field()
-
-
-def tensor_make() -> 'Tensor':
-  """Makes config.Tensor."""
-  return Tensor(
-      use_fwd_quant=False,
-      dequant_mode=DequantMode.OUTPUT,
-      calibration_mode=CalibrationMode.CONTRACTING_AXIS,
-  )
 
 
 def dot_general_raw_make(
@@ -102,8 +91,8 @@ def dot_general_raw_make(
     jax_scope_name='aqt',
 ) -> 'DotGeneralRaw':
   """Create quantization configs for input matrices to a matmul."""
-  lhs_cfg = tensor_make()
-  rhs_cfg = tensor_make()
+  lhs_cfg = Tensor()
+  rhs_cfg = Tensor()
 
   # Binary uses 0.5 right now.
   if (
