@@ -286,32 +286,43 @@ class AqtDotGeneral(nn.Module):
 
       def init_wrapper(
           qt: aqt_tensor.QTensor,
+          contracting_axis: Sequence[utils.AxisIdx],
           axis_metadata_wrapper: Optional[AxisMetadataWrapper],
       ):
         if axis_metadata_wrapper is None:
           return qt
 
-        # We are not doing any sharding for scale and scale_t, for now.
-        scale_non_shard_axis = range(qt.ndim)
+        scale_non_shard_axis_all = list(range(qt.ndim))
+        scale_non_shard_axis_contracting = list(contracting_axis)
 
         qt = qt.replace(
             qvalue=axis_metadata_wrapper(qt.qvalue, []),
             scale=jax.tree_map(
-                lambda x: axis_metadata_wrapper(x, scale_non_shard_axis),
+                lambda x: axis_metadata_wrapper(
+                    x, scale_non_shard_axis_contracting
+                ),
                 qt.scale,
             ),
+            # Passing scale_non_shard_axis_contracting would be incorrect due to
+            # scale transposition. scale_t is being removed from QTensor anyway
+            # so we just pass scale_non_shard_axis_all.
             scale_t=jax.tree_map(
-                lambda x: axis_metadata_wrapper(x, scale_non_shard_axis),
+                lambda x: axis_metadata_wrapper(x, scale_non_shard_axis_all),
                 qt.scale_t,
             ),
         )
         return qt
 
+      lhs_ca, rhs_ca = contr
       lhs_init_wrapper = functools.partial(
-          init_wrapper, axis_metadata_wrapper=self.lhs_axis_metadata_wrapper
+          init_wrapper,
+          contracting_axis=lhs_ca,
+          axis_metadata_wrapper=self.lhs_axis_metadata_wrapper
       )
       rhs_init_wrapper = functools.partial(
-          init_wrapper, axis_metadata_wrapper=self.rhs_axis_metadata_wrapper
+          init_wrapper,
+          contracting_axis=rhs_ca,
+          axis_metadata_wrapper=self.rhs_axis_metadata_wrapper
       )
 
       lhs_freezer = general_freezer.Freezer(
