@@ -59,6 +59,14 @@ flax_slots_dataclass = functools.partial(
     flax.struct.dataclass, frozen=False, slots=True
 )
 
+# TODO: b/332418233 - Consolidate flax_slots_kw_only_dataclass and
+# flax_slots_dataclass into a single decorator once the migration is
+# done. This will exist only temporarily while completing the
+# migration.
+flax_slots_kw_only_dataclass = functools.partial(
+    flax_slots_dataclass, kw_only=True
+)
+
 
 class QuantMode(enum.Enum):
   TRAIN = 1

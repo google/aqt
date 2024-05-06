@@ -64,7 +64,7 @@ class DequantMode(enum.Enum):
   OTHER_INPUT = 3
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class Tensor:
   """Configuration of quantization of one tensor or one side of tensor op."""
 
@@ -81,7 +81,7 @@ class Tensor:
     return tensor_make(*args, **kwargs)
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class LocalAqt:
   contraction_axis_shard_count: int = utils.static_field()
 
@@ -183,13 +183,13 @@ def dot_general_make(
 # ------------------------------------------------------------------------------
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class MultiTensor:
   x: jnp.ndarray
   qx: aqt_tensor.QTensor
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class TensorRes:
   """All the things we pass from the forward pass to the backward pass."""
 
@@ -197,7 +197,7 @@ class TensorRes:
   quant_grad: aqt_tensor.GradientFn
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class DotGeneralRes:
   lhs: TensorRes
   rhs: TensorRes
@@ -232,7 +232,7 @@ def _get_scale_t(
   return list_scale_t
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class DotGeneralQuantizer(abc.ABC):
   """Abstract class for dot_general quantizer."""
 
@@ -299,7 +299,7 @@ class DotGeneralQuantizer(abc.ABC):
     pass
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
   """Default dot_general quantizer."""
 
@@ -354,7 +354,7 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
     self.rhs.context = rhs_context
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
 
@@ -651,7 +651,7 @@ def _qtensor_dot_general(
   return out
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class DotGeneral:
   """Configuration of quantization of dot_general and its gradients."""
 
