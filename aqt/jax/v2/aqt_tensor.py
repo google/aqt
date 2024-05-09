@@ -165,16 +165,10 @@ def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[utils.AxisIdx],
     *,
-    qdtype: jnp.dtype | None = None,
     container_dtype: jnp.dtype | None = None,
     dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
-  # TODO(jungjw): Remove qdtype once all clients are migrated.
-  assert bool(qdtype) != bool(
-      container_dtype
-  ), 'One and only one of container_dtype and qdtype must be set.'
-  container_dtype = qdtype or container_dtype
   scale_shape = list(shape)
   for axis in calibration_axis:
     scale_shape[axis] = 1
