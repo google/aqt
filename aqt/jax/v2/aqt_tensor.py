@@ -70,9 +70,14 @@ class QTensor:
   scale_t: Optional[list[ArrayT]]
 
   # DType of the tensor before quantized.
+  # NOTE: AQT Users should use the public property, dtype, instead.
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
       pytree_node=False, default=None
   )
+
+  @property
+  def dtype(self) -> jnp.dtype | None:
+    return self.dequant_dtype
 
   def is_full(self) -> bool:
     return self.qvalue is not None
@@ -80,6 +85,9 @@ class QTensor:
   def without_qvalue(self) -> Self:
     """Returns a copy of the QTensor without the qvalue."""
     return self.replace(qvalue=None)  # pytype: disable=attribute-error
+
+  def astype(self, dtype: jnp.dtype) -> Self:
+    return self.replace(dequant_dtype=dtype)  # pytype: disable=attribute-error
 
   def quant(self, x):
     assert not self.is_full(), 'Already quantized QTensor.'
@@ -140,10 +148,13 @@ class QTensor:
 
 
 def zeros(
-    shape: Sequence[int], qdtype: jnp.dtype, dequant_dtype: jnp.dtype
+    shape: Sequence[int],
+    *,
+    container_dtype: jnp.dtype,
+    dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
   return QTensor(
-      qvalue=jnp.zeros(shape, dtype=qdtype),
+      qvalue=jnp.zeros(shape, dtype=container_dtype),
       scale=[],
       scale_t=None,
       dequant_dtype=dequant_dtype,
@@ -153,10 +164,17 @@ def zeros(
 def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[utils.AxisIdx],
-    qdtype: jnp.dtype,
-    dequant_dtype: jnp.dtype,
+    *,
+    qdtype: jnp.dtype | None = None,
+    container_dtype: jnp.dtype | None = None,
+    dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
+  # TODO(jungjw): Remove qdtype once all clients are migrated.
+  assert bool(qdtype) != bool(
+      container_dtype
+  ), 'One and only one of container_dtype and qdtype must be set.'
+  container_dtype = qdtype or container_dtype
   scale_shape = list(shape)
   for axis in calibration_axis:
     scale_shape[axis] = 1
@@ -164,7 +182,7 @@ def zeros_with_scale(
   # TODO(lew): hardcode dequant_dtype to bf16. This requires updating
   # other libraries to not break their functionality.
   return QTensor(
-      jnp.zeros(shape, dtype=qdtype),
+      jnp.zeros(shape, dtype=container_dtype),
       [jnp.ones(scale_shape, dtype=dequant_dtype)],
       None,
       dequant_dtype=dequant_dtype,
