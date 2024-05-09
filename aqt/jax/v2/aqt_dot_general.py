@@ -297,8 +297,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def calibrate(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
+      rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]:
     lhs_input, lhs_ca = lhs_quantization_info
     rhs_input, rhs_ca = rhs_quantization_info
