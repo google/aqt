@@ -166,18 +166,20 @@ def zeros_with_scale(
     calibration_axis: Sequence[utils.AxisIdx],
     *,
     container_dtype: jnp.dtype | None = None,
+    scale_dtype: jnp.dtype | None = None,
     dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
   scale_shape = list(shape)
   for axis in calibration_axis:
     scale_shape[axis] = 1
+  scale_dtype = scale_dtype or dequant_dtype
 
   # TODO(lew): hardcode dequant_dtype to bf16. This requires updating
   # other libraries to not break their functionality.
   return QTensor(
       jnp.zeros(shape, dtype=container_dtype),
-      [jnp.ones(scale_shape, dtype=dequant_dtype)],
+      [jnp.ones(scale_shape, dtype=scale_dtype)],
       None,
       dequant_dtype=dequant_dtype,
   )
