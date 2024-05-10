@@ -28,7 +28,7 @@ _SUM_OF_L1_VALS = "sum_of_l1_vals"
 _SUM_OF_LP_VALS = "sum_of_lp_vals"
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class MeanOfAbsMaxCalibration(calibration.Calibration, nn.Module):
   """State for static range AQT/PTQ/QAT."""
 
@@ -222,5 +222,3 @@ class WeightedStatsCalibration(calibration.Calibration, nn.Module):
         + self.max_dev_coeff * self._max_dev()
         + self.const_bound_coeff
     )
-
-

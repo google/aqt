@@ -19,7 +19,7 @@ from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class NoNumerics(numerics.AqtNumerics):
   """No quantization, use a native type such as bf16."""
 

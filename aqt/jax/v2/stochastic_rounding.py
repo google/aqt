@@ -22,7 +22,7 @@ import jax.numpy as jnp
 NoiseFn = Callable[[tuple[int, ...], jax.Array], jnp.ndarray]
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class JaxUniform:
   """Jax uniform noise."""
 
@@ -30,7 +30,7 @@ class JaxUniform:
     return jax.random.uniform(key, shape) - 0.5
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class RandomCenteredUniform:
   """Customized efficient implementation for random centered uniform noise."""
 

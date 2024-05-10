@@ -55,7 +55,7 @@ def fp_mantissa_round(x, mantissa_bits, key: jax.Array):
   return x
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 

@@ -28,7 +28,7 @@ AbstractAqtNumerics = numerics.AqtNumerics
 AbstractAqtCalibration = calibration.Calibration
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class Quantizer:
   """Configuration of quantization of one tensor."""
 

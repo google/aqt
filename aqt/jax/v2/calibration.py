@@ -19,7 +19,7 @@ from aqt.jax.v2 import utils
 import jax.numpy as jnp
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class Calibration(abc.ABC):
   """Abstract class for calibration."""
 
@@ -33,7 +33,7 @@ class Calibration(abc.ABC):
     pass
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class ConstantCalibration(Calibration):
   """Calibration with a constant value."""
 
@@ -52,7 +52,7 @@ class ConstantCalibration(Calibration):
     return jnp.asarray(self.bound).reshape((1,) * len(x.shape)).astype(x.dtype)
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class AbsMaxCalibration(Calibration):
   """Simple max(abs(x)) calibration.
 

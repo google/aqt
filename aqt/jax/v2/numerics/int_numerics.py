@@ -21,7 +21,7 @@ from jax import lax
 import jax.numpy as jnp
 
 
-@utils.flax_slots_dataclass
+@utils.flax_slots_kw_only_dataclass
 class IntNumerics(numerics.AqtNumerics):
   """Numerics for int8, int4, binary, etc."""
 
