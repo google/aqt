@@ -104,7 +104,7 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
                                       batch['label'])
     # TODO(yichi): replace cross_entropy_loss with KL div loss
     loss = kl_div_loss(logits, teacher_logits)
-    weight_penalty_params = jax.tree_leaves(params)
+    weight_penalty_params = jax.tree.leaves(params)
     weight_decay = hparams.weight_decay
     weight_l2 = sum(
         [jnp.sum(x**2) for x in weight_penalty_params if x.ndim > 1])
@@ -143,11 +143,11 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
     # if is_fin == False the gradients contain Inf/NaNs and the old optimizer
     # state should be restored.
     new_state = new_state.replace(
-        opt_state=jax.tree_map(
+        opt_state=jax.tree.map(
             functools.partial(jnp.where, is_fin),
             new_state.opt_state,
             state.opt_state),
-        params=jax.tree_map(
+        params=jax.tree.map(
             functools.partial(jnp.where, is_fin),
             new_state.params,
             state.params))
@@ -181,7 +181,7 @@ def prepare_tf_data(xs):
     # (local_devices, device_batch_size, height, width, 3)
     return x.reshape((local_device_count, -1) + x.shape[1:])
 
-  return jax.tree_map(_prepare, xs)
+  return jax.tree.map(_prepare, xs)
 
 
 def create_input_iter(batch_size, data_dir, image_size, dtype, train, cache):

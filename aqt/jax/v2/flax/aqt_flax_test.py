@@ -204,8 +204,8 @@ class AqtFlaxTest(parameterized.TestCase):
     init_aqt_params = serve_model_init['aqt']
     init_qtensor = init_aqt_params['AqtEinsum_0']['AqtDotGeneral_0']['qrhs']
 
-    init_leaves, init_treedef = jax.tree_flatten(init_qtensor)
-    converted_leaves, converted_treedef = jax.tree_flatten(w_qtensor)
+    init_leaves, init_treedef = jax.tree.flatten(init_qtensor)
+    converted_leaves, converted_treedef = jax.tree.flatten(w_qtensor)
 
     # 1. Same treestructure.
     self.assertEqual(init_treedef, converted_treedef)

@@ -126,7 +126,7 @@ def param_dtypes_shapes_axes(params: Mapping[str, Any],
       output.append(f'{axis_name}={dim}')
     return output
 
-  return jax.tree_map(_create_entry, params, params_axes)
+  return jax.tree.map(_create_entry, params, params_axes)
 
 
 class ConvAqtTest(parameterized.TestCase):
@@ -1344,7 +1344,7 @@ class LayerNormTest(parameterized.TestCase):
 
 
 def assert_same_tree(a, b):
-  jax.tree_map(
+  jax.tree.map(
       functools.partial(onp.testing.assert_allclose, atol=1e-6, rtol=1e-6), a,
       b)
 

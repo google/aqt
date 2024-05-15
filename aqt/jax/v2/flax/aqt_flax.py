@@ -297,7 +297,7 @@ class AqtDotGeneral(nn.Module):
 
         qt = qt.replace(
             qvalue=axis_metadata_wrapper(qt.qvalue, []),
-            scale=jax.tree_map(
+            scale=jax.tree.map(
                 lambda x: axis_metadata_wrapper(
                     x, scale_non_shard_axis_contracting
                 ),
@@ -306,7 +306,7 @@ class AqtDotGeneral(nn.Module):
             # Passing scale_non_shard_axis_contracting would be incorrect due to
             # scale transposition. scale_t is being removed from QTensor anyway
             # so we just pass scale_non_shard_axis_all.
-            scale_t=jax.tree_map(
+            scale_t=jax.tree.map(
                 lambda x: axis_metadata_wrapper(x, scale_non_shard_axis_all),
                 qt.scale_t,
             ),

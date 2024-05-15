@@ -59,8 +59,8 @@ class TrainTest(parameterized.TestCase):
         train=True)
     x = random.normal(random.PRNGKey(1), (8, 224, 224, 3))
     y, new_state = model.apply(state, x, mutable=True)
-    state = jax.tree_map(onp.shape, state)
-    new_state = jax.tree_map(onp.shape, new_state)
+    state = jax.tree.map(onp.shape, state)
+    new_state = jax.tree.map(onp.shape, new_state)
     self.assertEqual(state, new_state)
     self.assertEqual(y.shape, (8, 1000))
 

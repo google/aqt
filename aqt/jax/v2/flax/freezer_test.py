@@ -68,8 +68,8 @@ class FreezerTest(parameterized.TestCase):
 
   def _assert_same_tree_shape_dtype(self, tree1, tree2):
     """Checks if the two given pytrees have the same structure with the same leaves' shapes and dtypes."""
-    leaves1, treedef1 = jax.tree_flatten(tree1)
-    leaves2, treedef2 = jax.tree_flatten(tree2)
+    leaves1, treedef1 = jax.tree.flatten(tree1)
+    leaves2, treedef2 = jax.tree.flatten(tree2)
 
     # 1. Check if they have the same tree structure.
     self.assertEqual(treedef1, treedef2)

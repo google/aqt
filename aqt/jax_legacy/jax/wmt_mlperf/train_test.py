@@ -144,11 +144,11 @@ class TrainTest(parameterized.TestCase):
     training_state_restored = training_state_initial.restore_checkpoint(
         model_dir=ckpt_dir)
 
-    leaf_equality_tree = jax.tree_map(lambda x, y: jnp.all(x == y),
+    leaf_equality_tree = jax.tree.map(lambda x, y: jnp.all(x == y),
                                            training_state.flax_state,
                                            training_state_restored.flax_state)
     self.assertTrue(
-        all(jax.tree_leaves(leaf_equality_tree)),
+        all(jax.tree.leaves(leaf_equality_tree)),
         'Training state was altered during restoration.')
 
     np.testing.assert_array_equal(training_state.dropout_rngs,

@@ -223,7 +223,7 @@ def restore_checkpoint(state):
 def save_checkpoint(state):
   if jax.host_id() == 0:
     # get train state from the first replica
-    state = jax.device_get(jax.tree_map(lambda x: x[0], state))
+    state = jax.device_get(jax.tree.map(lambda x: x[0], state))
     step = int(state.step)
     checkpoints.save_checkpoint(FLAGS.model_dir, state, step, keep=3)
 
@@ -478,7 +478,7 @@ def main(argv):
     if should_log(step):
       epoch = step // steps_per_epoch
       epoch_metrics = common_utils.get_metrics(epoch_metrics)
-      summary = jax.tree_map(lambda x: x.mean(), epoch_metrics)
+      summary = jax.tree.map(lambda x: x.mean(), epoch_metrics)
       logging.info('train epoch: %d, loss: %.4f, accuracy: %.2f', epoch,
                    summary['loss'], summary['accuracy'] * 100)
       steps_per_sec = (step - last_log_step) / (time.time() - t_loop_start)
@@ -510,7 +510,7 @@ def main(argv):
         metrics = p_eval_step(state, eval_batch, quantize_weights)
         eval_metrics.append(metrics)
       eval_metrics = common_utils.get_metrics(eval_metrics)
-      summary = jax.tree_map(lambda x: x.mean(), eval_metrics)
+      summary = jax.tree.map(lambda x: x.mean(), eval_metrics)
       logging.info('eval epoch: %d, loss: %.4f, accuracy: %.2f', epoch,
                    summary['loss'], summary['accuracy'] * 100)
       if jax.host_id() == 0:

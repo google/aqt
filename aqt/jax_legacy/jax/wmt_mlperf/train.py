@@ -650,15 +650,15 @@ def run_eval(*,
   eval_iter = iter(ds)
   dynamic_context = get_dynamic_context(hparams, step, train=False)
   for _, eval_batch in zip(range(num_steps), eval_iter):
-    eval_batch = jax.tree_map(lambda x: x._numpy(), eval_batch)  # pylint: disable=protected-access
+    eval_batch = jax.tree.map(lambda x: x._numpy(), eval_batch)  # pylint: disable=protected-access
     eval_batch = common_utils.shard(eval_batch)
     metrics = p_eval_step(params, eval_batch, state, transformer_kwargs,
                           hparams.model_hparams, dynamic_context)
     eval_metrics.append(metrics)
   eval_metrics = common_utils.get_metrics(eval_metrics)
-  eval_metrics_sums = jax.tree_map(jnp.sum, eval_metrics)
+  eval_metrics_sums = jax.tree.map(jnp.sum, eval_metrics)
   eval_denominator = eval_metrics_sums.pop('denominator')
-  eval_summary = jax.tree_map(
+  eval_summary = jax.tree.map(
       lambda x: x / eval_denominator,  # pylint: disable=cell-var-from-loop
       eval_metrics_sums)
   eval_summary['perplexity'] = jnp.clip(
@@ -713,12 +713,12 @@ def run_inference(*, ds, transformer_kwargs,
   sources, references, predictions = [], [], []
   dynamic_context = get_dynamic_context(hparams, step, train=False)
   for _, pred_batch in enumerate(predict_iter):
-    pred_batch = jax.tree_map(lambda x: x._numpy(), pred_batch)  # pylint: disable=protected-access
+    pred_batch = jax.tree.map(lambda x: x._numpy(), pred_batch)  # pylint: disable=protected-access
     # Handle final odd-sized batch by padding instead of dropping it.
     cur_pred_batch_size = pred_batch['inputs'].shape[0]
     if cur_pred_batch_size != FLAGS.eval_batch_size:
       logging.info('Translation: uneven batch size %d.', cur_pred_batch_size)
-      pred_batch = jax.tree_map(
+      pred_batch = jax.tree.map(
           lambda x: pad_examples(x, FLAGS.eval_batch_size), pred_batch)
     pred_batch = common_utils.shard(pred_batch)
     per_device_batchsize = pred_batch['inputs'].shape[1]
@@ -901,7 +901,7 @@ def run_train_step(*, training_state: TrainingState, step: int, batch: Any,
   """Run a single step of training."""
   dynamic_context = get_dynamic_context(hparams, step, train=True)
   # Shard data to devices and do a training step.
-  batch = common_utils.shard(jax.tree_map(lambda x: x._numpy(), batch))  # pylint: disable=protected-access
+  batch = common_utils.shard(jax.tree.map(lambda x: x._numpy(), batch))  # pylint: disable=protected-access
   flax_state, optimizer, metrics, dropout_rngs = p_train_step(
       training_state.optimizer,
       batch,
@@ -1233,9 +1233,9 @@ def run_training(
             state_dict_summary_all)
         lr = metrics_all.pop('learning_rate').mean()
 
-        metrics_sums = jax.tree_map(jnp.sum, metrics_all)
+        metrics_sums = jax.tree.map(jnp.sum, metrics_all)
         denominator = metrics_sums.pop('denominator')
-        summary = jax.tree_map(lambda x: x / denominator, metrics_sums)  # pylint: disable=cell-var-from-loop
+        summary = jax.tree.map(lambda x: x / denominator, metrics_sums)  # pylint: disable=cell-var-from-loop
         summary['learning_rate'] = lr
         if FLAGS.log_sparsity_scalars:
           apply_sparsity = metrics_all.pop('apply_sparsity').mean()

@@ -56,7 +56,7 @@ def _restore_from_checkpoint(model, checkpoint_file: str):
       raise ValueError('Invalid checkpoint %s: no top-level "target".' %
                        checkpoint_file)
     checkpoint_model = checkpoint['target']
-    checkpoint_model = jax.tree_map(jnp.array, checkpoint_model)
+    checkpoint_model = jax.tree.map(jnp.array, checkpoint_model)
     return serialization.from_state_dict(model, checkpoint_model)
 
 
