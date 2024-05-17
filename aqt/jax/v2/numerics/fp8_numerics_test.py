@@ -128,6 +128,7 @@ class MyTest(parameterized.TestCase):
                 # different losses under the same training setting.
                 3.167505979537963867187500000000,
                 3.167067050933837890625000000000,  # skylake, cascadelake
+                3.167066574096679687500000000000,  # colab
             ],
             "TPU v2": [3.210080146789550781250000000000],
             "TPU v3": [3.210082530975341796875000000000],
@@ -140,6 +141,7 @@ class MyTest(parameterized.TestCase):
                 # different losses under the same training setting.
                 3.112026929855346679687500000000,
                 3.112026691436767578125000000000,
+                3.112027168273925781250000000000,  # colab s
             ],
             "TPU v2": [3.181228160858154296875000000000],
             "TPU v3": [3.181227684020996093750000000000],

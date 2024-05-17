@@ -61,7 +61,9 @@ def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
     def assert_dtype_eq(dtype1, dtype2):
       assert dtype1 == dtype2, f"dtype1 != dtype2: {dtype1=} != {dtype2=}"
 
-    assert isinstance(dg_raw.dg_quantizer, aqt.DefaultDotGeneralQuantizer)
+    assert isinstance(
+        dg_raw.dg_quantizer, aqt.DefaultDotGeneralQuantizer
+    ), f"Invalid dg_quantizer type. {type(dg_raw.dg_quantizer)=}"
 
     lhs_dtype = dg_raw.dg_quantizer.lhs.numerics.get_dtype()
     rhs_dtype = dg_raw.dg_quantizer.rhs.numerics.get_dtype()

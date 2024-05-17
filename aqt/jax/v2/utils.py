@@ -18,6 +18,7 @@ However, it is acceptable to grow pieces of funcionality in this file and later
 promote them to dedicated files.
 """
 
+import dataclasses
 import difflib
 import enum
 import functools
@@ -66,6 +67,15 @@ flax_slots_dataclass = functools.partial(
 flax_slots_kw_only_dataclass = functools.partial(
     flax_slots_dataclass, kw_only=True
 )
+
+
+def dataclass_field(default='no default value'):
+  # We can't use None as the default's default,
+  # because someone actually might want to have None as default of the field.
+  if default == 'no default value':
+    return dataclasses.field()
+  else:
+    return dataclasses.field(default_factory=default)
 
 
 class QuantMode(enum.Enum):

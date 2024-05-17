@@ -26,7 +26,7 @@
 import copy
 import dataclasses
 import pprint
-from typing import Literal
+from typing import Iterable
 from absl import logging
 from aqt.jax.v2 import utils
 import jax
@@ -172,8 +172,8 @@ def sort_ra_cfg(ra_tiling: list[AxisTiling]) -> list[AxisTiling]:
   return [ra_tiling[i] for i in sorted_idx]
 
 
-def empty_list():
-  return dataclasses.field(default_factory=list)
+def maybe_add_one(i, min_i):
+  return i + int(i >= min_i)
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
@@ -184,75 +184,80 @@ class _Xhs:
 
   # Below are axes indices, similar to dimension_numbers
   # E.g.
-  #   xhs,shape == [10, 20, 30, ...] ca=[0,1,2], ca_tile=[]
-  #   After splitting axis 1 to 2 tiles, sized 10, we get
-  #   xhs,shape == [10, 2, 10, 30, ...], ca=[0,2,3], ca_tile=[1]
-  #   and other axes indices (ra, ra_tile, ba) also can be updated by +1.
-  ca: list[AxisIdx]
-  ra: list[AxisIdx]
+  #   assert xhs.shape == [10, 20, 30, ...],
+  #   assert tile_map == {0:[0], 1:[1], 2:[2], ...}
+  # After splitting axis 1 to 2 tiles, sized 10, we get
+  #   assert xhs.shape == [10, 2, 10, 30, ...]
+  #   assert tile_map == {0:[0], 1:[1,2], 2:[3], ...}
+  tile_map: dict[AxisIdx | str, list[AxisIdx]] = utils.dataclass_field(dict)
 
-  ca_tile: list[AxisIdx] = empty_list()  # to be summed after DG
-  ra_tile: list[AxisIdx] = empty_list()  # to be reshaped after DG
-  ra_tile_other: list[AxisIdx] = empty_list()  # to be reshaped after DG
-  # There is no point in tiling dot_general's batch axes
-  ba: list[AxisIdx] = dataclasses.field(default_factory=list)
+  def __post_init__(self):
+    for i in range(self.x.ndim):
+      # self.x is not yet split at all.
+      self.tile_map[i] = [i]
 
-  # axes waiting to be slitted
-  # tensor_tiling: TensorTiling # TODO(lew): use this
-  ca_to_be_tiled: list[AxisTiling] = empty_list()
-  ra_to_be_tiled: list[AxisTiling] = empty_list()
-
-  def tile_axis(self, at: AxisTiling, tile_axis_name: Literal['ca', 'ra']):
+  def tile_axis(self, at: AxisTiling):
     """Tiles (splits) one axis while maintaining all AxisIdx."""
+    tile_axis = self.tile_map[at.axis]
+    assert len(tile_axis) == 1, "can't tile the same axis twice."
+    tile_axis = tile_axis[0]
+
+    # Reshape self.x
     shape = list(self.x.shape)
-    msg = f'{shape[at.axis]=}, {at.tile_size=}, {at.tile_count=}'
-    assert shape[at.axis] == at.tile_size * at.tile_count, msg
-    shape[at.axis] = at.tile_size
-    shape.insert(at.axis, at.tile_count)
+    msg = f'{shape[tile_axis]=}, {at.tile_size=}, {at.tile_count=}'
+    assert shape[tile_axis] == at.tile_size * at.tile_count, msg
+    shape[tile_axis] = at.tile_size
+    shape.insert(tile_axis, at.tile_count)
     self.x = self.x.reshape(shape)
 
-    def update(axes):
-      for i in range(len(axes)):
-        axes[i] += int(axes[i] >= at.axis)
-
-    def update_tiling(axes):
-      for i in range(len(axes)):
-        axes[i].axis += int(axes[i].axis >= at.axis)
-
-    update(self.ca)
-    update(self.ca_tile)
-    update(self.ra)
-    update(self.ra_tile)
-    update(self.ra_tile_other)
-    update(self.ba)
-
-    update_tiling(self.ca_to_be_tiled)
-    update_tiling(self.ra_to_be_tiled)
-    # Append tile axis index at the beginning. This has to be after the update
-    match tile_axis_name:
-      case 'ca':
-        self.ca_tile.append(at.axis)
-      case 'ra':
-        self.ra_tile.append(at.axis)
+    # Update tile_map
+    for k in self.tile_map:
+      self.tile_map[k] = [
+          maybe_add_one(ai, tile_axis) for ai in self.tile_map[k]
+      ]
+    self.tile_map[at.axis] = [tile_axis, tile_axis + 1]
 
   def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
     """Adds new axes (bcast_shape) on AxisIdx=0."""
-    assert self.ra_tile_other == list(), 'ra_tile_other already set'
-    self.ra_tile_other = list(range(len(bcast_shape)))
     self.x = jnp.broadcast_to(self.x, bcast_shape + self.x.shape)
-
-    def update(axes):
-      for i in range(len(axes)):
-        axes[i] += len(bcast_shape)
-
-    update(self.ca)
-    update(self.ca_tile)
-    update(self.ra)
-    update(self.ra_tile)
-    update(self.ba)
+    for k in self.tile_map:
+      self.tile_map[k] = [ai + len(bcast_shape) for ai in self.tile_map[k]]
+    keys = []
+    for i in range(len(bcast_shape)):
+      k = f'broadcast_{i}'
+      keys.append(k)
+      assert k not in self.tile_map
+      self.tile_map[k] = [i]
+    return keys
 
   def axes_shape(self, axes: list[AxisIdx]) -> tuple[AxisSize, ...]:
     return tuple(map(lambda a: self.x.shape[a], axes))
+
+  def to_tiled_axes_transposed(
+      self,
+      axes: Iterable[AxisIdx | str],
+      tile_level: int,
+  ) -> tuple[list[AxisIdx], ...]:
+    # pylint: disable=g-doc-args,g-doc-return-or-yield
+    """The given 'axes' parameter defines axes in untiled represented Array.
+
+    Function returns the corresponding AxisIdxs in self.x which is tiled. So for
+    each give element of axes we can have multiple tiled axes. Function requires
+    that the tile granularity is the same for all axes and equal to the given
+    tile_level.
+
+    tile_level = 1 for untiled axis
+    tile_level = 2 for normally (one axis split into two) tiled.
+    """
+    lsts = [self.tile_map[ai] for ai in axes]
+    msg = (
+        'all requested axes shoudl have the same tile level, but we have:'
+        f' {lsts=} for {axes=}'
+    )
+    assert all(map(lambda tiled_ais: len(tiled_ais) == tile_level, lsts)), msg
+    if lsts == []:
+      return ([],) * tile_level
+    return tuple(map(list, zip(*lsts)))
 
 
 def print_dimension_numbers(dimension_numbers, lhs, rhs, label) -> None:
@@ -305,28 +310,19 @@ def tiled_dot_general(
       f'tiling cfg: {pprint.pformat(cfg)} \n'
   )
 
-  xlhs = _Xhs(
-      x=lhs,
-      ca=list(lhs_ca),
-      ra=lhs_ra,
-      ba=list(lhs_ba),
-      ca_to_be_tiled=cfg.lhs.contraction_axes,
-      ra_to_be_tiled=sort_ra_cfg(cfg.lhs.remaining_axes),
-  )
-  xrhs = _Xhs(
-      x=rhs,
-      ca=list(rhs_ca),
-      ra=rhs_ra,
-      ba=list(rhs_ba),
-      ca_to_be_tiled=cfg.rhs.contraction_axes,
-      ra_to_be_tiled=sort_ra_cfg(cfg.rhs.remaining_axes),
-  )
+  xlhs_ca_to_be_tiled = list(cfg.lhs.contraction_axes)
+  xlhs_ra_to_be_tiled = list(sort_ra_cfg(cfg.lhs.remaining_axes))
+  xrhs_ca_to_be_tiled = list(cfg.rhs.contraction_axes)
+  xrhs_ra_to_be_tiled = list(sort_ra_cfg(cfg.rhs.remaining_axes))
+
+  xlhs = _Xhs(x=lhs)
+  xrhs = _Xhs(x=rhs)
 
   # First tile_axis CA. CA tile_count axes will be first in xxhs.ba_tile
-  assert len(xlhs.ca_to_be_tiled) == len(xrhs.ca_to_be_tiled), g_msg
-  while len(xlhs.ca_to_be_tiled) > 0:
-    cfg_lhs_ca = xlhs.ca_to_be_tiled.pop(0)
-    cfg_rhs_ca = xrhs.ca_to_be_tiled.pop(0)
+  assert len(xlhs_ca_to_be_tiled) == len(xrhs_ca_to_be_tiled), g_msg
+  while len(xlhs_ca_to_be_tiled) > 0:
+    cfg_lhs_ca = xlhs_ca_to_be_tiled.pop(0)
+    cfg_rhs_ca = xrhs_ca_to_be_tiled.pop(0)
     msg = (
         'Contraction axis tile counts should be the same, but found lhs axis'
         f' {cfg_lhs_ca.axis} has a tile count of {cfg_lhs_ca.tile_count}, and'
@@ -334,23 +330,35 @@ def tiled_dot_general(
         f' {cfg_rhs_ca.tile_count}'
     )
     assert cfg_lhs_ca.tile_count == cfg_rhs_ca.tile_count, msg
-    xlhs.tile_axis(cfg_lhs_ca, 'ca')
-    xrhs.tile_axis(cfg_rhs_ca, 'ca')
+    xlhs.tile_axis(cfg_lhs_ca)
+    xrhs.tile_axis(cfg_rhs_ca)
 
-  while len(xlhs.ra_to_be_tiled) > 0:
-    cfg_lhs_ra = xlhs.ra_to_be_tiled.pop(0)
-    xlhs.tile_axis(cfg_lhs_ra, 'ra')
-  while len(xrhs.ra_to_be_tiled) > 0:
-    cfg_rhs_ra = xrhs.ra_to_be_tiled.pop(0)
-    xrhs.tile_axis(cfg_rhs_ra, 'ra')
+  while len(xlhs_ra_to_be_tiled) > 0:
+    cfg_lhs_ra = xlhs_ra_to_be_tiled.pop(0)
+    xlhs.tile_axis(cfg_lhs_ra)
+  while len(xrhs_ra_to_be_tiled) > 0:
+    cfg_rhs_ra = xrhs_ra_to_be_tiled.pop(0)
+    xrhs.tile_axis(cfg_rhs_ra)
 
-  xlhs.broadcast_to_other(xrhs.axes_shape(xrhs.ra_tile))
-  xrhs.broadcast_to_other(xlhs.axes_shape(xlhs.ra_tile))
+  xlhs_ra_tile, _ = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
+  xrhs_bcast = xrhs.broadcast_to_other(xlhs.axes_shape(xlhs_ra_tile))
 
-  tiled_ca = (xlhs.ca, xrhs.ca)
+  xrhs_ra_tile, _ = xrhs.to_tiled_axes_transposed(rhs_ra, 2)
+  xlhs_bcast = xlhs.broadcast_to_other(xrhs.axes_shape(xrhs_ra_tile))
+
+  xlhs_ca_tile, xlhs_ca = xlhs.to_tiled_axes_transposed(lhs_ca, 2)
+  xlhs_ra_tile, xlhs_ra = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
+  xrhs_ca_tile, xrhs_ca = xrhs.to_tiled_axes_transposed(rhs_ca, 2)
+  xrhs_ra_tile, xrhs_ra = xrhs.to_tiled_axes_transposed(rhs_ra, 2)
+  (xlhs_ra_tile_other,) = xlhs.to_tiled_axes_transposed(xlhs_bcast, 1)
+  (xrhs_ra_tile_other,) = xrhs.to_tiled_axes_transposed(xrhs_bcast, 1)
+  (xlhs_ba,) = xlhs.to_tiled_axes_transposed(lhs_ba, 1)
+  (xrhs_ba,) = xrhs.to_tiled_axes_transposed(rhs_ba, 1)
+
+  tiled_ca = (xlhs_ca, xrhs_ca)
   tiled_ba = (
-      xlhs.ca_tile + xlhs.ba + xlhs.ra_tile + xlhs.ra_tile_other,
-      xrhs.ca_tile + xrhs.ba + xrhs.ra_tile_other + xrhs.ra_tile,
+      xlhs_ca_tile + xlhs_ba + xlhs_ra_tile + xlhs_ra_tile_other,
+      xrhs_ca_tile + xrhs_ba + xrhs_ra_tile_other + xrhs_ra_tile,
   )
   tiled_dimension_numbers = (tiled_ca, tiled_ba)
   tiled_lhs_ra = get_ra(xlhs.x.ndim, tiled_ca[0], tiled_ba[0])
@@ -375,24 +383,24 @@ def tiled_dot_general(
   )
 
   # Some assertions
-  assert xlhs.axes_shape(xlhs.ca_tile) == xrhs.axes_shape(xrhs.ca_tile), g_msg
-  ca_tile_sh = xlhs.axes_shape(xlhs.ca_tile)
+  assert xlhs.axes_shape(xlhs_ca_tile) == xrhs.axes_shape(xrhs_ca_tile), g_msg
+  ca_tile_sh = xlhs.axes_shape(xlhs_ca_tile)
 
-  assert xlhs.axes_shape(xlhs.ba) == xrhs.axes_shape(xrhs.ba), g_msg
-  ba_sh = xlhs.axes_shape(xlhs.ba)
+  assert xlhs.axes_shape(xlhs_ba) == xrhs.axes_shape(xrhs_ba), g_msg
+  ba_sh = xlhs.axes_shape(xlhs_ba)
 
-  assert xlhs.axes_shape(xlhs.ra_tile) == xrhs.axes_shape(
-      xrhs.ra_tile_other
+  assert xlhs.axes_shape(xlhs_ra_tile) == xrhs.axes_shape(
+      xrhs_ra_tile_other
   ), g_msg
-  lhs_ra_tile_sh = xlhs.axes_shape(xlhs.ra_tile)
+  lhs_ra_tile_sh = xlhs.axes_shape(xlhs_ra_tile)
 
-  assert xlhs.axes_shape(xlhs.ra_tile_other) == xrhs.axes_shape(
-      xrhs.ra_tile
+  assert xlhs.axes_shape(xlhs_ra_tile_other) == xrhs.axes_shape(
+      xrhs_ra_tile
   ), g_msg
-  rhs_ra_tile_sh = xlhs.axes_shape(xlhs.ra_tile_other)
+  rhs_ra_tile_sh = xlhs.axes_shape(xlhs_ra_tile_other)
 
-  lhs_ra_sh = xlhs.axes_shape(xlhs.ra)
-  rhs_ra_sh = xrhs.axes_shape(xrhs.ra)
+  lhs_ra_sh = xlhs.axes_shape(xlhs_ra)
+  rhs_ra_sh = xrhs.axes_shape(xrhs_ra)
 
   g_msg += f'Tiled dg {out.shape=} \n'
   assert (
@@ -407,8 +415,8 @@ def tiled_dot_general(
 
   # Sum over ca_tile now.
   # all_ba() returns ca_tile as the first axes in ba.
-  assert len(xlhs.ca_tile) == len(xrhs.ca_tile)
-  out = out.sum(axis=range(len(xlhs.ca_tile)))
+  assert len(xlhs_ca_tile) == len(xrhs_ca_tile)
+  out = out.sum(axis=range(len(xlhs_ca_tile)))
 
   g_msg += f'After sum over tiles {out.shape=} \n'
   assert (
