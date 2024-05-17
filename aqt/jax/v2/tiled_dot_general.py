@@ -31,7 +31,6 @@ from absl import logging
 from aqt.jax.v2 import utils
 import jax
 import jax.numpy as jnp
-import numpy as np
 from typing_extensions import Self  # for python version < 3.11
 
 
@@ -166,12 +165,6 @@ def get_ra(rank, ca, ba) -> list[AxisIdx]:
   return list(a for a in range(rank) if a not in ca + ba)
 
 
-def sort_ra_cfg(ra_tiling: list[AxisTiling]) -> list[AxisTiling]:
-  ra_axes = [a.axis for a in ra_tiling]
-  sorted_idx = np.argsort(ra_axes).tolist()
-  return [ra_tiling[i] for i in sorted_idx]
-
-
 def maybe_add_one(i, min_i):
   return i + int(i >= min_i)
 
@@ -216,6 +209,10 @@ class _Xhs:
           maybe_add_one(ai, tile_axis) for ai in self.tile_map[k]
       ]
     self.tile_map[at.axis] = [tile_axis, tile_axis + 1]
+
+  def tile_axes(self, ats: Iterable[AxisTiling]):
+    for at in ats:
+      self.tile_axis(at)
 
   def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
     """Adds new axes (bcast_shape) on AxisIdx=0."""
@@ -298,6 +295,8 @@ def tiled_dot_general(
   logging.vlog(1, 'Tiling config cfg: %s', cfg)
   print_dimension_numbers(dimension_numbers, lhs, rhs, label='before tiling')
 
+  # Config pre-processing and verification
+
   cfg = copy.deepcopy(cfg)
   cfg = cfg.complete_missing(lhs.shape, rhs.shape, dimension_numbers)
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
@@ -310,19 +309,11 @@ def tiled_dot_general(
       f'tiling cfg: {pprint.pformat(cfg)} \n'
   )
 
-  xlhs_ca_to_be_tiled = list(cfg.lhs.contraction_axes)
-  xlhs_ra_to_be_tiled = list(sort_ra_cfg(cfg.lhs.remaining_axes))
-  xrhs_ca_to_be_tiled = list(cfg.rhs.contraction_axes)
-  xrhs_ra_to_be_tiled = list(sort_ra_cfg(cfg.rhs.remaining_axes))
-
-  xlhs = _Xhs(x=lhs)
-  xrhs = _Xhs(x=rhs)
-
   # First tile_axis CA. CA tile_count axes will be first in xxhs.ba_tile
-  assert len(xlhs_ca_to_be_tiled) == len(xrhs_ca_to_be_tiled), g_msg
-  while len(xlhs_ca_to_be_tiled) > 0:
-    cfg_lhs_ca = xlhs_ca_to_be_tiled.pop(0)
-    cfg_rhs_ca = xrhs_ca_to_be_tiled.pop(0)
+  assert len(cfg.lhs.contraction_axes) == len(cfg.rhs.contraction_axes), g_msg
+  for cfg_lhs_ca, cfg_rhs_ca in zip(
+      cfg.lhs.contraction_axes, cfg.rhs.contraction_axes
+  ):
     msg = (
         'Contraction axis tile counts should be the same, but found lhs axis'
         f' {cfg_lhs_ca.axis} has a tile count of {cfg_lhs_ca.tile_count}, and'
@@ -330,15 +321,15 @@ def tiled_dot_general(
         f' {cfg_rhs_ca.tile_count}'
     )
     assert cfg_lhs_ca.tile_count == cfg_rhs_ca.tile_count, msg
-    xlhs.tile_axis(cfg_lhs_ca)
-    xrhs.tile_axis(cfg_rhs_ca)
 
-  while len(xlhs_ra_to_be_tiled) > 0:
-    cfg_lhs_ra = xlhs_ra_to_be_tiled.pop(0)
-    xlhs.tile_axis(cfg_lhs_ra)
-  while len(xrhs_ra_to_be_tiled) > 0:
-    cfg_rhs_ra = xrhs_ra_to_be_tiled.pop(0)
-    xrhs.tile_axis(cfg_rhs_ra)
+  # Tiling
+
+  xlhs = _Xhs(x=lhs)
+  xlhs.tile_axes(cfg.lhs.contraction_axes + cfg.lhs.remaining_axes)
+  xrhs = _Xhs(x=rhs)
+  xrhs.tile_axes(cfg.rhs.contraction_axes + cfg.rhs.remaining_axes)
+
+  # DotGeneral reshapeing
 
   xlhs_ra_tile, _ = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
   xrhs_bcast = xrhs.broadcast_to_other(xlhs.axes_shape(xlhs_ra_tile))
