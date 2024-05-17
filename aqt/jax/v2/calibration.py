@@ -81,6 +81,8 @@ class AbsMaxCalibration(Calibration):
     # NOTE: If you want to clip, consider using clip and clip_gradient in
     # int_numerics.IntNumerics.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
+    # TODO(yichizh): the zero filtering is not needed anymore because inf is
+    # filtered when calculating the reciprocal of scaline factor
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     if self.scale is not None:
       abs_max = abs_max * self.scale

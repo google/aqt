@@ -90,12 +90,16 @@ class QTensor:
     return self.replace(dequant_dtype=dtype)  # pytype: disable=attribute-error
 
   def quant(self, x):
+    """Quantizes the QTensor."""
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
 
     qvalue = x
     for s in self.scale:
-      qvalue = qvalue * jax.lax.reciprocal(s)
+      # TODO(lew): We could store s_inv for faster activation quantization.
+      s_inv = jax.lax.reciprocal(s)
+      s_inv = jnp.where(jnp.isinf(s_inv), jnp.ones_like(s_inv), s_inv)
+      qvalue = qvalue * s_inv
 
     # TODO(lew): We should apply numerics here, so that 'quant' function
     # Can be considered a part of API.
