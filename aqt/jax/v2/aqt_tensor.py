@@ -169,7 +169,7 @@ def zeros_with_scale(
     shape: Sequence[int],
     calibration_axis: Sequence[utils.AxisIdx],
     *,
-    container_dtype: jnp.dtype | None = None,
+    container_dtype: jnp.dtype,
     scale_dtype: jnp.dtype | None = None,
     dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
