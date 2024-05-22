@@ -24,6 +24,7 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
 from aqt.jax.v2.flax import aqt_flax_calibration
+from aqt.jax.v2.numerics import int_numerics
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -36,6 +37,19 @@ def _dummy_dataset(ds_size, image_rng, label_rng):
           key=label_rng, shape=(ds_size,), minval=0, maxval=10
       ),
   }
+
+
+def _get_numerics(bits):
+  return int_numerics.IntNumerics(
+      bits=bits,
+      preserve_zero=True,
+      preserve_max_val=False,
+      clip=True,
+      round=True,
+      noise_fn=None,
+      clip_gradient=False,
+      dtype=utils.infer_dtype_from_bits(bits),
+  )
 
 
 class MnistTest(parameterized.TestCase):
@@ -129,6 +143,7 @@ class MnistTest(parameterized.TestCase):
 
     dtype = jnp.dtype
     expected_dtype = jnp.int4 if bits == 4 else jnp.int8
+    expected_numerics = _get_numerics(bits)
     expected_aqt_pytree = {
         "aqt": {
             "AqtEinsum_0": {
@@ -138,7 +153,8 @@ class MnistTest(parameterized.TestCase):
                             qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                             scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                             scale_t=None,
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
+                            numerics=expected_numerics,
                         )
                     }
                 }
@@ -158,7 +174,8 @@ class MnistTest(parameterized.TestCase):
                             # After tiling the scale shape is (1, 2, 1, 1, 256),
                             # then transposed to (2, 1, 1, 1, 256).
                             scale_t=None,
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
+                            numerics=expected_numerics,
                         )
                     }
                 }
@@ -178,11 +195,12 @@ class MnistTest(parameterized.TestCase):
                             # After tiling the scale shape is (1, 2, 1, 1, 10),
                             # then transposed to (2, 1, 1, 1, 10).
                             scale_t=None,
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
+                            numerics=expected_numerics,
                         )
                     }
                 }
-            }
+            },
         },
         "batch_stats": {
             "BatchNorm_0": {
@@ -394,6 +412,7 @@ class MnistTest(parameterized.TestCase):
     )
     dtype = jnp.dtype
     expected_dtype = dtype("int4") if bits == 4 else dtype("int8")
+    expected_numerics = _get_numerics(bits)
     expected_aqt_pytree = {
         "AqtEinsum_0": {
             "AqtDotGeneral_0": {
@@ -402,7 +421,8 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
                 "qrhs": {
@@ -410,9 +430,10 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
-                }
+                },
             }
         },
         "Dense_0": {
@@ -422,7 +443,8 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
                 "qrhs": {
@@ -430,9 +452,10 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
-                }
+                },
             }
         },
         "Dense_1": {
@@ -442,7 +465,8 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
                 "qrhs": {
@@ -450,11 +474,12 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
-                }
+                },
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(
@@ -605,6 +630,7 @@ class MnistTest(parameterized.TestCase):
     )
     dtype = jnp.dtype
     expected_dtype = dtype("int4") if bits == 4 else dtype("int8")
+    expected_numerics = _get_numerics(bits)
     expected_aqt_pytree = {
         "AqtEinsum_0": {
             "AqtDotGeneral_0": {
@@ -613,7 +639,8 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
                 "qrhs": {
@@ -621,9 +648,10 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
-                }
+                },
             }
         },
         "Dense_0": {
@@ -633,7 +661,8 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
                 "qrhs": {
@@ -641,9 +670,10 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
-                }
+                },
             }
         },
         "Dense_1": {
@@ -653,7 +683,8 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
                 "qrhs": {
@@ -661,11 +692,12 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
-                }
+                },
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(

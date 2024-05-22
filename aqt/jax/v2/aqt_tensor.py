@@ -25,6 +25,9 @@
 import typing
 from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import int_numerics
+from aqt.jax.v2.numerics import no_numerics
+from aqt.jax.v2.numerics import numerics
 import flax.cursor
 import flax.struct
 import jax
@@ -32,6 +35,7 @@ import jax.numpy as jnp
 import jax.typing as jax_typing
 from typing_extensions import Self  # for python version < 3.11
 
+AbstractAqtNumerics = numerics.AqtNumerics
 GradientFn = Callable[..., Any] | None  # None when there is no numerics
 _MSG_NO_QVALUE = (
     'QTensor does not have qvalue, but it is asked to access the qvalue.'
@@ -75,6 +79,9 @@ class QTensor:
       pytree_node=False, default=None
   )
 
+  # Numerics of the QTensor.
+  numerics: AbstractAqtNumerics = utils.static_field(default=None)
+
   @property
   def dtype(self) -> jnp.dtype | None:
     return self.dequant_dtype
@@ -89,8 +96,12 @@ class QTensor:
   def astype(self, dtype: jnp.dtype) -> Self:
     return self.replace(dequant_dtype=dtype)  # pytype: disable=attribute-error
 
-  def quant(self, x):
-    """Quantizes the QTensor."""
+  def quant(self, x, context: utils.Context) -> tuple[Self, GradientFn]:
+    """Uses the quantization parameters in qt to quantize x."""
+    assert self.numerics is not None, 'Missing numerics used for quantization.'
+    if isinstance(self.numerics, no_numerics.NoNumerics):
+      return self, None
+
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
 
@@ -101,9 +112,10 @@ class QTensor:
       s_inv = jnp.where(jnp.isinf(s_inv), jnp.ones_like(s_inv), s_inv)
       qvalue = qvalue * s_inv
 
-    # TODO(lew): We should apply numerics here, so that 'quant' function
-    # Can be considered a part of API.
-    return self.replace(qvalue=qvalue)  # pytype: disable=attribute-error
+    x_q, res = self.numerics.vjp_fwd(qvalue, context)
+    quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
+
+    return self.replace(qvalue=x_q), quant_grad  # pytype: disable=attribute-error
 
   def dequant(self) -> jnp.ndarray:
     """Dequantizes the QTensor."""
@@ -153,25 +165,13 @@ class QTensor:
 
 def zeros(
     shape: Sequence[int],
-    *,
-    container_dtype: jnp.dtype,
-    dequant_dtype: jnp.dtype = jnp.bfloat16,
-) -> QTensor:
-  return QTensor(
-      qvalue=jnp.zeros(shape, dtype=container_dtype),
-      scale=[],
-      scale_t=None,
-      dequant_dtype=dequant_dtype,
-  )
-
-
-def zeros_with_scale(
-    shape: Sequence[int],
     calibration_axis: Sequence[utils.AxisIdx],
     *,
     container_dtype: jnp.dtype,
     scale_dtype: jnp.dtype | None = None,
     dequant_dtype: jnp.dtype = jnp.bfloat16,
+    n_bits: int | None = None,
+    preserve_max_val: bool = False,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
   scale_shape = list(shape)
@@ -186,6 +186,7 @@ def zeros_with_scale(
       scale=[jnp.ones(scale_shape, dtype=scale_dtype)],
       scale_t=None,
       dequant_dtype=dequant_dtype,
+      numerics=_get_numerics(n_bits, preserve_max_val),
   )
 
 
@@ -193,6 +194,8 @@ def partition_spec(
     partitions: Sequence[Any],
     calibration_axis: Sequence[utils.AxisIdx],
     dtype: jnp.dtype,
+    n_bits: int | None,
+    preserve_max_val: bool = False,
 ) -> QTensor:
   """Returns a QTensor filled with partition specs."""
   scale_partitions = list(partitions)
@@ -203,6 +206,26 @@ def partition_spec(
       scale=[jax.sharding.PartitionSpec(*scale_partitions)],
       scale_t=None,
       dequant_dtype=dtype,
+      numerics=_get_numerics(n_bits, preserve_max_val),
+  )
+
+
+def _get_numerics(
+    n_bits: int | None, preserve_max_val: bool = False
+) -> numerics.AqtNumerics:
+  if n_bits is None:
+    return no_numerics.NoNumerics()
+  pz = False if n_bits == 1 else True
+  dtype = utils.infer_dtype_from_bits(n_bits) if pz else None
+  return int_numerics.IntNumerics(
+      bits=n_bits,
+      preserve_zero=pz,
+      preserve_max_val=preserve_max_val,
+      clip=True,
+      round=True,
+      noise_fn=None,
+      clip_gradient=False,  # This can be disabled when using abs-max scaling.
+      dtype=dtype,
   )
 
 
@@ -242,6 +265,7 @@ def dynamic_slice(
       scale=[get_sliced_scales(s) for s in operand.scale],
       scale_t=None,
       dequant_dtype=operand.dequant_dtype,
+      numerics=operand.numerics,
   )
 
 
@@ -290,6 +314,7 @@ def dynamic_update_slice(
       scale=scales,
       scale_t=None,
       dequant_dtype=operand.dequant_dtype,
+      numerics=operand.numerics,
   )
 
 
@@ -306,4 +331,5 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
       ],
       scale_t=None,
       dequant_dtype=operand.dequant_dtype,
+      numerics=operand.numerics,
   )
