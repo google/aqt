@@ -560,7 +560,15 @@ class AqtEinsum(nn.Module):
     # from being rejected by assertions in aqt_dot_general.py, line 522-526 and
     # 414.
     # TODO: b/322111904 - Handle this in more proper way.
-    lhs_in, rhs_in = nn.dtypes.promote_dtype(lhs_in, rhs_in)
+    # We hand-hold int4 because promote_dtype(int4, x) fails.
+    # (To avoid unintended promotion, 4-bit integers do not support
+    # implicit promotion.)
+    if lhs_in.dtype == jnp.int4:
+      lhs_in = jnp.float32(lhs_in)
+    if rhs_in.dtype == jnp.int4:
+      rhs_in = jnp.float32(rhs_in)
+    if lhs_in.dtype != jnp.int4 and rhs_in.dtype != jnp.int4:
+      lhs_in, rhs_in = nn.dtypes.promote_dtype(lhs_in, rhs_in)
 
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
     einsum = functools.partial(aqt_dot_general.einsum, eqn=eqn)
