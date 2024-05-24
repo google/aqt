@@ -14,6 +14,7 @@
 
 """Tests for transpose."""
 
+import math
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import transpose
@@ -21,6 +22,20 @@ import jax.numpy as jnp
 
 
 class AqtTransposeTest(parameterized.TestCase):
+
+  @parameterized.parameters(
+      ((10, 1, 10), (0, 2, 1)),
+      ((10, 1, 5), (1, 0, 2)),
+      ((5, 1, 10), (0, 1, 2)),
+      ((10, 20, 30), (1, 2, 0)),
+      ((10, 1, 1), (0, 2, 1)),
+      ((10, 1, 1), (2, 1, 0)),
+      ((10, 1, 1), (1, 2, 0)),
+  )
+  def test_transpose(self, tensor_shape, transpose_axes):
+    t = jnp.arange(math.prod(tensor_shape)).reshape(tensor_shape)
+    t_t = transpose.transpose(t, transpose_axes)
+    self.assertTrue((t_t == jnp.transpose(t, transpose_axes)).all())
 
   @parameterized.parameters(
       # 'bmnts,bsnh->bmtnh'
