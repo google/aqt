@@ -38,6 +38,14 @@ NoShardingAxes = Sequence[utils.AxisIdx]
 AxisMetadataWrapper = Callable[
     [jnp.ndarray, NoShardingAxes], nn_meta.AxisMetadata
 ]
+DotGeneralTilingFn = Callable[
+    [jnp.ndarray, jnp.ndarray, jax.lax.DotDimensionNumbers],
+    tiled_dot_general.Cfg
+]
+EinsumTilingFn = Callable[
+    [tiled_dot_general.EinsumEqnLetter, jnp.ndarray, jnp.ndarray],
+    tiled_dot_general.Cfg
+]
 
 
 class FreezerMode(enum.Enum):
@@ -213,7 +221,10 @@ class AqtDotGeneral(nn.Module):
   # If you want use 'params' make sure that there is another mechanism to hide
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
+
+  # Tiling configs. tilling_fn is valid only when tiling_cfg is None.
   tiling_cfg: Optional[tiled_dot_general.Cfg] = None
+  tiling_fn: Optional[DotGeneralTilingFn] = None
 
   # If set to True, use the current Freezer. Otherwise, use the new
   # QuantFreezer.
@@ -450,11 +461,15 @@ class AqtDotGeneral(nn.Module):
       precision,
       preferred_element_type=None,
   ):
-    if self.tiling_cfg is not None:
+    tiling_cfg = self.tiling_cfg
+    if tiling_cfg is None and self.tiling_fn is not None:
+      tiling_cfg = self.tiling_fn(lhs, rhs, dimension_numbers)
+
+    if tiling_cfg is not None:
       # Extract tiled input shapes and dimension numbers from jaxpr
       def dummy_tiled_dg(lhs_in, rhs_in):
         return tiled_dot_general.tiled_dot_general(
-            self.tiling_cfg, lhs_in, rhs_in, dimension_numbers
+            tiling_cfg, lhs_in, rhs_in, dimension_numbers
         )
 
       tiled_dg_jaxpr = jax.make_jaxpr(dummy_tiled_dg)(lhs, rhs)
@@ -473,7 +488,7 @@ class AqtDotGeneral(nn.Module):
       # observe tiled shapes.
       ret_dg = functools.partial(
           tiled_dot_general.tiled_dot_general,
-          self.tiling_cfg,
+          tiling_cfg,
           dot_general=aqt_dg,
       )
     else:
@@ -524,6 +539,7 @@ class AqtEinsum(nn.Module):
   assert_lhs_shape: Optional[utils.ShapeTemplate] = None
   assert_rhs_shape: Optional[utils.ShapeTemplate] = None
   tile_sizes: Optional[tiled_dot_general.EinsumTileSizes] = None
+  tiling_fn: Optional[EinsumTilingFn] = None
 
   # If set to True, use the current Freezer. Otherwise, use the new
   # QTensorFreezer.
@@ -602,6 +618,8 @@ class AqtEinsum(nn.Module):
     tiling_config = None
     if self.tile_sizes is not None:
       tiling_config = tiled_dot_general.Cfg.from_einsum(eqn, self.tile_sizes)
+    elif self.tiling_fn is not None:
+      tiling_config = self.tiling_fn(eqn, lhs_in, rhs_in)
 
     if yes_swap:
       if cfg is not None:

@@ -1,3 +1,4 @@
+# UPDATE ME
 # Copyright 2022 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +19,10 @@ import functools
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
+from aqt.jax.v2 import tiled_dot_general
+from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
 import flax.linen as nn
 import jax
@@ -223,6 +227,170 @@ class AqtFlaxTest(parameterized.TestCase):
 
     np.testing.assert_allclose(inference_result, quantized_result)
 
+  def test_dot_general_tiling_fn(self):
+    def _tiling_fn(lhs, rhs, dimension_numbers, tile_size=2):
+      del lhs, rhs
+      (lhs_ca, rhs_ca), _ = dimension_numbers
+      ret = tiled_dot_general.Cfg(
+          lhs=tiled_dot_general.TensorTiling(
+              contraction_axes=[], remaining_axes=[]
+          ),
+          rhs=tiled_dot_general.TensorTiling(
+              contraction_axes=[], remaining_axes=[]
+          ),
+      )
+      for lhs_idx, rhs_idx in zip(lhs_ca, rhs_ca):
+        ret.lhs.contraction_axes.append(
+            tiled_dot_general.AxisTiling(
+                axis=lhs_idx, tile_size=tile_size, tile_count=None
+            )
+        )
+        ret.rhs.contraction_axes.append(
+            tiled_dot_general.AxisTiling(
+                axis=rhs_idx, tile_size=tile_size, tile_count=None
+            )
+        )
+
+      return ret
+
+    class Model(nn.Module):
+      aqt_cfg: config.DotGeneral | None
+      lhs_quant_mode: aqt_flax.QuantMode
+      rhs_quant_mode: aqt_flax.QuantMode
+
+      @nn.compact
+      def __call__(self, lhs):
+        kernel = self.param(
+            'kernel', nn.initializers.lecun_normal(), shape=(2, 6, 10)
+        )
+        dot_general = aqt_flax.AqtDotGeneral(
+            cfg=self.aqt_cfg,
+            lhs_quant_mode=self.lhs_quant_mode,
+            rhs_quant_mode=self.rhs_quant_mode,
+            lhs_freeze_mode=aqt_flax.FreezerMode.NONE,
+            rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
+            tiling_fn=_tiling_fn,
+            use_legacy_freezer=False
+        )
+        out = dot_general(lhs, kernel, (((1, 2), (1, 2)), ((), ())), None)
+        return out
+
+    key = jax.random.PRNGKey(0)
+    subkeys = jax.random.split(key, num=6)
+    lhs = jax.random.uniform(subkeys[0], shape=(7, 6, 10))
+
+    aqt_cfg = config.config_v4()
+    train_model = Model(
+        aqt_cfg,
+        lhs_quant_mode=aqt_flax.QuantMode.TRAIN,
+        rhs_quant_mode=aqt_flax.QuantMode.TRAIN
+    )
+
+    # Consider the initialized params as the already-trained params,
+    # since we are testing Freezers which do nothing during training.
+    train_model_params = train_model.init(subkeys[1], lhs)
+
+    # Convert test.
+    convert_model = Model(
+        aqt_cfg,
+        lhs_quant_mode=aqt_flax.QuantMode.TRAIN,
+        rhs_quant_mode=aqt_flax.QuantMode.CONVERT,
+    )
+    _, converted_params = convert_model.apply(
+        train_model_params, lhs, mutable=True, rngs={'params': subkeys[3]}
+    )
+
+    dtype = jnp.dtype
+    expected_pytree = {
+        'AqtDotGeneral_0': {
+            'qrhs': {
+                'frozen': aqt_tensor.QTensor(
+                    qvalue=(dtype('int8'), (1, 1, 2, 3, 2, 5, 2)),
+                    scale=[(dtype('float32'), (1, 1, 2, 3, 1, 5, 1))],
+                    scale_t=None,
+                    dequant_dtype=dtype('float32'),
+                )
+            }
+        }
+    }
+
+    converted_pytree = jax.tree.map(
+        lambda x: (x.dtype, x.shape), converted_params['aqt']
+    )
+    utils.test_pprint_eq(expected_pytree, converted_pytree)
+
+  def test_einsum_tiling_fn(self):
+    def _tiling_fn(eqn, lhs, rhs, tile_size=2):
+      del lhs, rhs
+      return tiled_dot_general.Cfg.from_einsum(eqn, {'d': tile_size})
+
+    class Model(nn.Module):
+      aqt_cfg: config.DotGeneral | None
+      lhs_quant_mode: aqt_flax.QuantMode
+      rhs_quant_mode: aqt_flax.QuantMode
+
+      @nn.compact
+      def __call__(self, lhs):
+        kernel = self.param(
+            'kernel', nn.initializers.lecun_normal(), shape=(3, 6, 10)
+        )
+        einsum = aqt_flax.AqtEinsum(
+            cfg=self.aqt_cfg,
+            lhs_quant_mode=self.lhs_quant_mode,
+            rhs_quant_mode=self.rhs_quant_mode,
+            lhs_freeze_mode=aqt_flax.FreezerMode.NONE,
+            rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
+            tiling_fn=_tiling_fn,
+            use_legacy_freezer=False
+        )
+        out = einsum('abd,cbd->ac', lhs, kernel)
+        return out
+
+    key = jax.random.PRNGKey(0)
+    subkeys = jax.random.split(key, num=6)
+    lhs = jax.random.uniform(subkeys[0], shape=(7, 6, 10))
+
+    aqt_cfg = config.config_v4()
+    train_model = Model(
+        aqt_cfg,
+        lhs_quant_mode=aqt_flax.QuantMode.TRAIN,
+        rhs_quant_mode=aqt_flax.QuantMode.TRAIN
+    )
+
+    # Consider the initialized params as the already-trained params,
+    # since we are testing Freezers which do nothing during training.
+    train_model_params = train_model.init(subkeys[1], lhs)
+
+    # Convert test.
+    convert_model = Model(
+        aqt_cfg,
+        lhs_quant_mode=aqt_flax.QuantMode.TRAIN,
+        rhs_quant_mode=aqt_flax.QuantMode.CONVERT,
+    )
+    _, converted_params = convert_model.apply(
+        train_model_params, lhs, mutable=True, rngs={'params': subkeys[3]}
+    )
+
+    dtype = jnp.dtype
+    expected_pytree = {
+        'AqtEinsum_0': {
+            'AqtDotGeneral_0': {
+                'qrhs': {
+                    'frozen': aqt_tensor.QTensor(
+                        qvalue=(dtype('int8'), (1, 1, 3, 1, 6, 5, 2)),
+                        scale=[(dtype('float32'), (1, 1, 3, 1, 1, 5, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype('float32'),
+                    )
+                }
+            }
+        }
+    }
+
+    converted_pytree = jax.tree.map(
+        lambda x: (x.dtype, x.shape), converted_params['aqt']
+    )
+    utils.test_pprint_eq(expected_pytree, converted_pytree)
 
 if __name__ == '__main__':
   absltest.main()
