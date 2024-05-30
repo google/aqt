@@ -23,6 +23,7 @@ from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
 from aqt.jax.v2.flax import aqt_flax_calibration
+from aqt.jax.v2.flax import transformer_engine_calibration
 from flax import linen as nn
 from flax import struct
 from flax.metrics import tensorboard
@@ -35,9 +36,12 @@ import tensorflow_datasets as tfds
 
 Dataset = dict[str, jnp.ndarray]
 
+MUTABLE_ARRAY_COLLECTIONS = (transformer_engine_calibration.FP8_STATS,)
+
 
 class CNN(nn.Module):
   """A simple CNN model."""
+
   bn_use_stats: bool
   aqt_cfg: aqt_config.DotGeneral
   weights_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
@@ -121,18 +125,32 @@ def apply_model(model_params, images, labels, apply_fn):
   """Computes gradients, loss and accuracy for a single batch."""
 
   def loss_fn(model):
+    # Although we don't differentiate MutableArrays, we still need to pass them
+    # to the apply_fn so the model has access to them.
+    for mutable_collection in MUTABLE_ARRAY_COLLECTIONS:
+      if mutable_collection in model_params:
+        model = model | {mutable_collection: model_params[mutable_collection]}
     logits, updated_var = apply_fn(
         model,
         images,
         rngs={'params': jax.random.PRNGKey(0)},
-        mutable=True,
+        mutable=nn.DenyList(
+            MUTABLE_ARRAY_COLLECTIONS
+        ),  # MutableArrays cannot be marked as mutable in Flax.
     )
     one_hot = jax.nn.one_hot(labels, 10)
     loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
     return loss, (logits, updated_var)
 
   grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
-  aux, grads = grad_fn(model_params)
+  # We cannot differentiate MutableArrays, so we remove them from the params
+  # passed to the grad_fn
+  filtered_model = {
+      key: model_params[key]
+      for key in model_params
+      if key not in MUTABLE_ARRAY_COLLECTIONS
+  }
+  aux, grads = grad_fn(filtered_model)
   loss, (logits, updated_var) = aux
   accuracy = jnp.mean(jnp.argmax(logits, -1) == labels) * 100
   return grads, loss, accuracy, updated_var
@@ -175,7 +193,15 @@ def train_epoch(state, train_ds, batch_size, rng):
     grads, loss, accuracy, updated_var = apply_model(
         state.model, batch_images, batch_labels, state.cnn_train.apply
     )
+    # MutableArrays are updated in place and JITTed functions cannot return
+    # them. So we need to handle them separately.
+    mutable_array_collections = {
+        key: state.model.get(key) for key in MUTABLE_ARRAY_COLLECTIONS
+    }
     state = update_model(state, grads, updated_var)
+    for key, value in mutable_array_collections.items():
+      if value is not None:
+        state.model[key] = value
     epoch_loss.append(loss)
     epoch_accuracy.append(accuracy)
   train_loss = np.mean(epoch_loss)
@@ -276,7 +302,7 @@ def serving_conversion(
     train_state: TrainState,
     weight_only: bool = True,
     legacy_for_freeze: bool = False,
-    legacy_for_serve: bool = False
+    legacy_for_serve: bool = False,
 ) -> tuple[Callable[..., Any], dict[str, Any]]:
   """Model conversion (quantized weights freezing).
 
@@ -302,7 +328,7 @@ def serving_conversion(
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.CONVERT,
       activation_quant_mode=activation_quant_mode,
-      use_legacy_freezer=legacy_for_freeze
+      use_legacy_freezer=legacy_for_freeze,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -319,7 +345,7 @@ def serving_conversion(
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.SERVE,
       activation_quant_mode=activation_quant_mode,
-      use_legacy_freezer=legacy_for_serve
+      use_legacy_freezer=legacy_for_serve,
   )
 
   return cnn_serve.apply, model_serving
@@ -371,6 +397,7 @@ def calibration_conversion(
 
   Args:
     train_state: TrainState containing model definitions and params.
+
   Returns:
     A tuple of calibration function, and an updated model parameters with new
     variables to store the gathered quantization statistics.
@@ -461,11 +488,16 @@ def serve_fn_hlo(state):
   # serving
   serve_fn, model_serving = serving_conversion(state)
   # The following XLA graph is only needed for debugging purpose
-  hlo = jax.jit(serve_fn).lower(
-      model_serving,
-      sample_image,
-      rngs={'params': jax.random.PRNGKey(0)},
-  ).compiler_ir('hlo').as_hlo_module()
+  hlo = (
+      jax.jit(serve_fn)
+      .lower(
+          model_serving,
+          sample_image,
+          rngs={'params': jax.random.PRNGKey(0)},
+      )
+      .compiler_ir('hlo')
+      .as_hlo_module()
+  )
   return hlo
 
 
