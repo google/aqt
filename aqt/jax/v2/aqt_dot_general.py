@@ -343,6 +343,9 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
     self.rhs.context = rhs_context
 
 
+# 1. Originally this was wrapped with custom_vjp. After update, this should be
+# merely a "wrapper" to group the three different functions - quant,
+# quantized_dot_general, and dequant.
 @utils.flax_slots_kw_only_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
@@ -381,12 +384,21 @@ class DotGeneralRaw:
   ):
     """A quantized dot_general function without custom gradient."""
     with jax.named_scope(self.jax_scope_name):
+      # 2. In this function body, configurations for quant, dequant, and
+      # quantized_dot_general are all mixed. The first step will be to separate
+      # those three functions, with explicit arguments. The types of arguments
+      # should either be QTensor, dimension numbers, python base types or jax
+      # arrays. (No other objects to make them independent as possible)
+      # Qtensor's role can then be more clarified inside quant / dequant
+      # functions.
       (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
       # TODO(lew):
       #  - Use qx.value with the int type.
       #  - Handle qx.value with the int type in an optimized way.
       #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
       #  - Can we carry untransposed scale and transpose here?
+      # This code segment should not exist here; maybe in the gradient code?
+      # Should be gradually removed.
       if isinstance(rhs, MultiTensor):
         # We are in gradient code.
         fwd_quantized = rhs.qx.scale is not None and len(rhs.qx.scale) == 1  # pytype: disable=attribute-error
@@ -411,6 +423,7 @@ class DotGeneralRaw:
         else:
           rhs = rhs.x  # pytype: disable=attribute-error
 
+      # Will not consider this one, since this will be deprecated anyway.
       if self.local_aqt is not None:
         local_aqt = self.local_aqt
         factor = local_aqt.contraction_axis_shard_count  # pytype: disable=attribute-error
@@ -480,6 +493,7 @@ class DotGeneralRaw:
       lhs_calib_axes = _get_calibration_axes(self.lhs, lhs.ndim, lhs_ca, lhs_ba)
       rhs_calib_axes = _get_calibration_axes(self.rhs, rhs.ndim, rhs_ca, rhs_ba)
 
+      # quant() from here....
       lhs_incomplete_qt, rhs_incomplete_qt = self.dg_quantizer.calibrate(
           (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
       )
@@ -496,9 +510,13 @@ class DotGeneralRaw:
       lhs_quantized, rhs_quantized = self.dg_quantizer.calculate_qvalue(
           lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
       )
+      # To here.
+
+      # The quant_grads should not exist here. Maybe quant's custom_vjp.
       lhs_qt_calculated, lhs_quant_grad = lhs_quantized
       rhs_qt_calculated, rhs_quant_grad = rhs_quantized
 
+      # Obviously _postprocess_qtensor should not be here also.
       lhs_qt, lhs_quant_grad = _postprocess_qtensor(
           lhs_qt,
           lhs_qt_calculated,
@@ -777,6 +795,9 @@ def _dg_core(
 # The cfg (DotGeneral) contains the key used for stochastic rounding,
 # which are traceable dynamic variables. It needs to be an input argument
 # to prevent the jax side effect.
+# 3. After separating the dot_general function into three - quantize,
+# quantized_dot_general, dequantize - function, the gradient functions for each
+# function component should be defined.
 def dg_core_vjp_fwd(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,

@@ -19,6 +19,10 @@ import jax
 from jax import numpy as jnp
 
 
+# 4. This lifted code should also be updated. This could either:
+# - Remain as one function which calls three functions separately - quant,
+# qdotgeneral, dequant.
+# - Provide three different lifted version.
 def dg_core_flax_lifted(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
