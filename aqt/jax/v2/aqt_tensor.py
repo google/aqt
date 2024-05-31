@@ -77,7 +77,11 @@ class QTensor:
 
   @property
   def dtype(self) -> jnp.dtype | None:
-    return self.dequant_dtype
+    # As some dequant_dtype could actually be not a jnp.dtype (e.g.,
+    # jnp.float16), even though it's not supposed to be, we need to
+    # wrap with a redundant dtype call to make sure the returned
+    # dtype is a instance of `jnp.dtype`
+    return jnp.dtype(self.dequant_dtype) if self.dequant_dtype else None
 
   def is_full(self) -> bool:
     return self.qvalue is not None

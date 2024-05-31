@@ -92,10 +92,12 @@ class AqtTensorTest(parameterized.TestCase):
         shape=(1,), container_dtype=jnp.int8, dequant_dtype=jnp.float32
     )
     self.assertEqual(qt.dtype, jnp.float32)
+    self.assertIsInstance(qt.dtype, jnp.dtype)
     self.assertEqual(qt.dequant_dtype, jnp.float32)
 
     qt = qt.astype(jnp.bfloat16)
     self.assertEqual(qt.dtype, jnp.bfloat16)
+    self.assertIsInstance(qt.dtype, jnp.dtype)
     self.assertEqual(qt.dequant_dtype, jnp.bfloat16)
 
 
