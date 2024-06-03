@@ -91,10 +91,12 @@ def dot_general_raw_make(
     jax_scope_name='aqt',
 ) -> 'DotGeneralRaw':
   """Create quantization configs for input matrices to a matmul."""
+  # TODO: b/343490088 - Move all the parameters to dataclass defaults,
+  #   provide setters to modify the configuration.
   lhs_cfg = Tensor()
   rhs_cfg = Tensor()
 
-  # Binary uses 0.5 right now.
+  # TODO(lew): Binary uses 0.5 right now, it should use -1 and 1.
   if (
       lhs_bits is not None
       and rhs_bits is not None
@@ -105,6 +107,8 @@ def dot_general_raw_make(
   else:
     dg_accumulator_dtype = None
 
+  # DotGeneralRaw should create a this quantizer on defualt.
+  # Then setter can change it.
   lhs = aqt_quantizer.quantizer_make(lhs_bits)
   rhs = aqt_quantizer.quantizer_make(rhs_bits)
   dg_quantizer = DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
@@ -119,6 +123,7 @@ def dot_general_raw_make(
   )
 
 
+# TODO(lew): This should be moved to aqt_conv_general file
 def conv_general_dilated_make(
     spatial_dimensions=2,
     lhs_bits: Optional[int] = None,
@@ -141,6 +146,8 @@ def conv_general_dilated_make(
   return config
 
 
+# TODO: b/343490088 - Move all the parameters to dataclass defaults,
+#   provide setters to modify the configuration.
 def dot_general_make(
     lhs_bits: Optional[int] = None,
     rhs_bits: Optional[int] = None,
@@ -207,6 +214,7 @@ def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
   )
 
 
+# TODO(lew): Inline and simplify, perhaps using list comprehension.
 def _get_scale_t(
     qt: aqt_tensor.QTensor,
     transpose_fn: Any,
@@ -249,6 +257,8 @@ class DotGeneralQuantizer(abc.ABC):
     """Calculates incomplete QTensor from the given inputs."""
     pass
 
+  # TODO(lew): There is only one meaningful implementation of
+  # calculate_qvalue. Does not have to be an overridable method.
   @abc.abstractmethod
   def calculate_qvalue(
       self,
@@ -288,6 +298,7 @@ class DotGeneralQuantizer(abc.ABC):
     pass
 
 
+# TODO(lew): Find a better name instead of Default* (Factored?, Separated?)
 @utils.flax_slots_kw_only_dataclass
 class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
   """Default dot_general quantizer."""
@@ -362,14 +373,17 @@ class DotGeneralRaw:
       default=jax.lax.dot_general
   )
 
+  # TODO(lew): Remove this function.
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
     return dot_general_raw_make(*args, **kwargs)
 
+  # TODO(lew): Remove this function.
   @classmethod
   def make_conv_general_dilated(cls, *args, **kwargs) -> Self:
     return conv_general_dilated_make(*args, **kwargs)
 
+  # TODO(lew): Can we remove MutliTensor and pass rhs_qt instead?
   def __call__(
       self,
       lhs: jnp.ndarray,
@@ -411,6 +425,7 @@ class DotGeneralRaw:
         else:
           rhs = rhs.x  # pytype: disable=attribute-error
 
+      # TODO(lew): Define cutsom_vjp on tiled_dot_general and replace local_aqt.
       if self.local_aqt is not None:
         local_aqt = self.local_aqt
         factor = local_aqt.contraction_axis_shard_count  # pytype: disable=attribute-error
@@ -464,6 +479,9 @@ class DotGeneralRaw:
           quant_grad: aqt_tensor.GradientFn,
       ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
         """Compute qtensor from input or input_qtensor."""
+        # TODO(lew): moving this if out of DotGeneralRaw into v2.flax.DotGeneral
+        # would induce huge code simplification here.
+        # E.g. this file would not have to know about DotGeneralQuantizer.
         if input_qtensor is not None:
           if not self.allow_dummy_gradient_into_qtensor:
             quant_grad = (
@@ -569,6 +587,7 @@ def _qtensor_dot_general(
     ), dtype_ms
 
   dtypes_can_be_scaled = [jnp.bfloat16, jnp.float32, jnp.float64]
+
   if cfg.lhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert rhs_qin.dtype in dtypes_can_be_scaled
     for scale in lhs_qt.scale:
@@ -577,6 +596,7 @@ def _qtensor_dot_general(
       )
       assert isinstance(transposed_scale, jnp.ndarray)  # make pytype quiet
       rhs_qin = rhs_qin * transposed_scale.astype(rhs_qin.dtype)
+
   if cfg.rhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert lhs_qin.dtype in dtypes_can_be_scaled
     for scale in rhs_qt.scale:
@@ -601,6 +621,7 @@ def _qtensor_dot_general(
     if lhs_qin.dtype == jnp.int4 and rhs_qin.dtype == jnp.int4:
       lhs_qin = lhs_qin.astype(jnp.int8)
       rhs_qin = rhs_qin.astype(jnp.int8)
+
   out = cfg.dot_general(
       lhs_qin,
       rhs_qin,
