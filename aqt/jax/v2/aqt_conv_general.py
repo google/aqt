@@ -22,14 +22,14 @@
 
 # pylint: disable=protected-access
 
+from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
-from aqt.jax.v2 import config
 import jax
 from jax import lax
 import jax.numpy as jnp
 
 
-def make_conv_general_dilated(cfg: config.DotGeneralRaw):
+def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
   """Makes quantized lax.make_conv_general_dilated replacement."""
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific cfg.
   assert cfg is not None, "Missing config for make_conv_general_dilated"
@@ -66,7 +66,12 @@ However if there is any other use, we will drop that assumption."""
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
 
     # Flax assumptions.
-    msg = "Convolution formula does not follow flax assumption."
+    msg = (
+        "Convolution formula does not follow flax assumption. This could be"
+        " because spatial dimensions was incorrectly set during DotGeneralRaw"
+        " creation. Please double check the parameter in"
+        " #conv_general_dilated_make()."
+    )
     # TODO(lew): Perhaps we should rely only on passing  passing calib shared
     # axes value instead of setting it in config. (we pass None below)
     cfg.dg_quantizer.assert_calib_shared_axes_value(
@@ -124,3 +129,37 @@ However if there is any other use, we will drop that assumption."""
     return out
 
   return my_conv_general_dilated
+
+
+def conv_general_dilated_make(
+    spatial_dimensions: int,
+    lhs_bits: int | None = None,
+    rhs_bits: int | None = None,
+) -> aqt_dot_general.DotGeneralRaw:
+  """Create quantization config conv_general_dilated.
+
+  Args:
+    spatial_dimensions: The number of dimensions of the base area that the
+      convolutional window moves across.
+    lhs_bits: The precision for quantization for lhs
+    rhs_bits: The precision for quantization for rhs
+
+  Returns:
+    DotGeneralRaw object to be injected into nn.Conv as conv_general_dilated.
+  """
+  config = aqt_dot_general.dot_general_raw_make(lhs_bits, rhs_bits)
+  # Hardcoding flax assumptions.
+  lhs_calib_shared_axes = (
+      list(range(1, spatial_dimensions + 2)) if config.lhs else None
+  )
+  rhs_calib_shared_axes = (
+      list(range(0, spatial_dimensions + 2 - 1)) if config.rhs else None
+  )
+
+  assert isinstance(
+      config.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  config.dg_quantizer.lhs.calib_shared_axes = lhs_calib_shared_axes
+  config.dg_quantizer.rhs.calib_shared_axes = rhs_calib_shared_axes
+
+  return config

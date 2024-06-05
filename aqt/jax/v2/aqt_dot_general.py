@@ -123,29 +123,6 @@ def dot_general_raw_make(
   )
 
 
-# TODO(lew): This should be moved to aqt_conv_general file
-def conv_general_dilated_make(
-    spatial_dimensions=2,
-    lhs_bits: Optional[int] = None,
-    rhs_bits: Optional[int] = None,
-) -> 'DotGeneralRaw':
-  """Create quantization config conv_general_dilated."""
-  config = dot_general_raw_make(lhs_bits, rhs_bits)
-  # Hardcoding flax assumptions.
-  lhs_calib_shared_axes = (
-      list(range(1, spatial_dimensions + 2)) if config.lhs else None
-  )
-  rhs_calib_shared_axes = (
-      list(range(0, spatial_dimensions + 2 - 1)) if config.rhs else None
-  )
-
-  assert isinstance(config.dg_quantizer, DefaultDotGeneralQuantizer)
-  config.dg_quantizer.lhs.calib_shared_axes = lhs_calib_shared_axes
-  config.dg_quantizer.rhs.calib_shared_axes = rhs_calib_shared_axes
-
-  return config
-
-
 # TODO: b/343490088 - Move all the parameters to dataclass defaults,
 #   provide setters to modify the configuration.
 def dot_general_make(
@@ -377,11 +354,6 @@ class DotGeneralRaw:
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
     return dot_general_raw_make(*args, **kwargs)
-
-  # TODO(lew): Remove this function.
-  @classmethod
-  def make_conv_general_dilated(cls, *args, **kwargs) -> Self:
-    return conv_general_dilated_make(*args, **kwargs)
 
   # TODO(lew): Can we remove MutliTensor and pass rhs_qt instead?
   def __call__(
