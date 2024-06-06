@@ -127,6 +127,16 @@ class QTensor:
     assert self.is_full(), _MSG_NO_QVALUE
     return self.replace(qvalue=self.qvalue.astype(dtype))  # pytype: disable=attribute-error
 
+  def remove_leading_ones_from_scale(self) -> Self:
+    """Utility function to remove leading 1s from the scale."""
+    if self.scale is None:
+      return self
+
+    ret = self.replace(  # pytype: disable=attribute-error
+        scale=[utils.remove_leading_ones(s) for s in self.scale]
+    )
+    return ret
+
   def __getitem__(self, idx: jax_typing.ArrayLike) -> Self:
     """Returns the indexed subtensor on the first axis."""
     assert self.scale_t is None, 'scale_t is not supported in __getitem__'

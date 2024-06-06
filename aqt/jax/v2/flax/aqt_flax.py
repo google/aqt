@@ -141,6 +141,7 @@ def _maybe_recover_scale_from_scale_t(
     is_rhs: bool,
     lhs_shape: Sequence[int],
     rhs_shape: Sequence[int],
+    dequant_mode
 ) -> aqt_tensor.QTensor:
   """Recovers scale from scale_t if necessary."""
   if qt is None or qt.scale is not None or qt.scale_t is None:
@@ -148,6 +149,11 @@ def _maybe_recover_scale_from_scale_t(
 
   transpose_fn = transpose.lhs_recover_scale_from_scale_t
   if is_rhs:
+    if dequant_mode == aqt_dot_general.DequantMode.OUTPUT:
+      if utils.is_reducable(len(rhs_shape), dimension_numbers):
+        return qt.replace(
+            scale=[scale_t for scale_t in qt.scale_t], scale_t=None
+        )
     transpose_fn = transpose.rhs_recover_scale_from_scale_t
 
   return qt.replace(
@@ -165,6 +171,7 @@ def _populate_scale_t(
     is_rhs: bool,
     lhs_shape: Sequence[int],
     rhs_shape: Sequence[int],
+    dequant_mode
 ) -> aqt_tensor.QTensor:
   """Populates scale_t from scale."""
   if qt.scale is None:
@@ -172,6 +179,9 @@ def _populate_scale_t(
 
   transpose_fn = transpose.lhs_scale_transpose_to_output
   if is_rhs:
+    if dequant_mode == aqt_dot_general.DequantMode.OUTPUT:
+      if utils.is_reducable(len(rhs_shape), dimension_numbers):
+        return qt.replace(scale_t=[scale for scale in qt.scale])
     transpose_fn = transpose.rhs_scale_transpose_to_output
 
   return qt.replace(
@@ -234,7 +244,7 @@ class AqtDotGeneral(nn.Module):
       self,
       lhs_shape,
       rhs_shape,
-      dimension_numbers: tuple[Iterable[int], Iterable[int]],
+      dimension_numbers
   ):
     if self.cfg is None:
       return jax.lax.dot_general
@@ -251,11 +261,24 @@ class AqtDotGeneral(nn.Module):
     )
     assert lhs_scale is not None
     lhs_scale_shape = lhs_scale.shape
-    rhs_scale = transpose.rhs_scale_transpose_to_output(
-        jnp.zeros(rhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
-    )
-    assert rhs_scale is not None
-    rhs_scale_shape = rhs_scale.shape
+
+    if cfg.fwd.rhs.dequant_mode == aqt_dot_general.DequantMode.OUTPUT:
+      if utils.is_reducable(len(rhs_shape), dimension_numbers):
+        rhs_scale_shape = utils.remove_leading_ones(
+            jnp.zeros(rhs_scale_shape)
+        ).shape
+      else:
+        rhs_scale = transpose.rhs_scale_transpose_to_output(
+            jnp.zeros(rhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
+        )
+        assert rhs_scale is not None
+        rhs_scale_shape = rhs_scale.shape
+    else:
+      rhs_scale = transpose.rhs_scale_transpose_to_output(
+          jnp.zeros(rhs_scale_shape), dimension_numbers, lhs_shape, rhs_shape
+      )
+      assert rhs_scale is not None
+      rhs_scale_shape = rhs_scale.shape
     rhs_qm = self.rhs_quant_mode
     lhs_qm = self.lhs_quant_mode
 
@@ -390,11 +413,21 @@ class AqtDotGeneral(nn.Module):
       # Recover scale from scale_t, if necessary.
       # The quantized tensor loaded from the legacy freezer has only scale_t.
       lhs_qt = _maybe_recover_scale_from_scale_t(
-          lhs_qt, dimension_numbers, False, lhs_shape, rhs_shape
+          lhs_qt, dimension_numbers, False, lhs_shape, rhs_shape,
+          cfg.fwd.lhs.dequant_mode
       )
       rhs_qt = _maybe_recover_scale_from_scale_t(
-          rhs_qt, dimension_numbers, True, lhs_shape, rhs_shape
+          rhs_qt, dimension_numbers, True, lhs_shape, rhs_shape,
+          cfg.fwd.rhs.dequant_mode
       )
+
+      # Optimize rhs scale.
+      if (
+          cfg.fwd.rhs.dequant_mode == aqt_dot_general.DequantMode.OUTPUT
+          and rhs_qt
+      ):
+        if utils.is_reducable(rhs.ndim, dimension_numbers):
+          rhs_qt = rhs_qt.remove_leading_ones_from_scale()
 
       cfg.apply_custom_vjp_on_jax = False
       out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(
@@ -436,11 +469,21 @@ class AqtDotGeneral(nn.Module):
         # We need to populate the stored QTensor with scale_t.
         if cfg.fwd.lhs.calibration_mode == calib_contracting_axis:
           out_lhs_qt = _populate_scale_t(
-              out_lhs_qt, dimension_numbers, False, lhs_shape, rhs_shape
+              out_lhs_qt,
+              dimension_numbers,
+              False,
+              lhs_shape,
+              rhs_shape,
+              cfg.fwd.lhs.dequant_mode,
           )
         if cfg.fwd.rhs.calibration_mode == calib_contracting_axis:
           out_rhs_qt = _populate_scale_t(
-              out_rhs_qt, dimension_numbers, True, lhs_shape, rhs_shape
+              out_rhs_qt,
+              dimension_numbers,
+              True,
+              lhs_shape,
+              rhs_shape,
+              cfg.fwd.rhs.dequant_mode,
           )
 
       if self.lhs_apply_quant_mode:
