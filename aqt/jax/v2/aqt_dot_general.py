@@ -347,8 +347,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
   ]:
     """Calculates qvalues from the given inputs."""
-    lhs_qt, lhs_grad = self.lhs.calculate_qvalue(lhs, lhs_qt)
-    rhs_qt, rhs_grad = self.rhs.calculate_qvalue(rhs, rhs_qt)
+    lhs_qt, lhs_grad = self.lhs.calculate_qvalue_with_custom_grad(lhs, lhs_qt)
+    rhs_qt, rhs_grad = self.rhs.calculate_qvalue_with_custom_grad(rhs, rhs_qt)
 
     return (lhs_qt, lhs_grad), (rhs_qt, rhs_grad)
 

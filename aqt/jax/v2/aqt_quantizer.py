@@ -97,26 +97,74 @@ class Quantizer:
     )
     return qt
 
-  def calculate_qvalue(
-      self,
-      x,
-      qt: aqt_tensor.QTensor
+  def calculate_qvalue(self, x, qt: aqt_tensor.QTensor) -> aqt_tensor.QTensor:
+    """Uses the quantization parameters in qt to quantize x."""
+    qt, _ = self.calculate_qvalue_with_custom_grad(x, qt)
+    return qt
+
+  def calculate_qvalue_with_custom_grad(
+      self, x, qt: aqt_tensor.QTensor
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """Uses the quantization parameters in qt to quantize x."""
-    if isinstance(self.numerics, no_numerics.NoNumerics):
-      return qt, None
+    calculate_qvalue_with_custom_grad = jax.custom_vjp(_calculate_qvalue)
+    calculate_qvalue_with_custom_grad.defvjp(
+        _calculate_qvalue_fwd, _calculate_qvalue_bwd
+    )
+    return calculate_qvalue_with_custom_grad(x, qt, self.context, self.numerics)
 
-    # TODO: b/333984742 - make numeric as a member of QTensor, and put
-    # numerics-related logics into the QTensor.
-    qt = qt.quant(x)
 
-    # TODO(lew): A logical thing would be if this call was part of
-    # QTensor.quant.
-    x_q, res = self.numerics.vjp_fwd(qt.qvalue, self.context)
-    quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
+def _calculate_qvalue(
+    x: jnp.ndarray,
+    qt: aqt_tensor.QTensor,
+    context: utils.Context,
+    quant_numerics: AbstractAqtNumerics
+) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
+  return _calculate_qvalue_fwd(x, qt, context, quant_numerics)
 
-    qt = qt.replace(qvalue=x_q)
-    return qt, quant_grad
+
+def _calculate_qvalue_fwd(
+    x: jnp.ndarray,
+    qt: aqt_tensor.QTensor,
+    context: utils.Context,
+    quant_numerics: AbstractAqtNumerics
+) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
+  """Forward pass of the quantization.
+
+  If the incomplete_qt is None, scales are calculated using the quantizer.
+  Otherwise, the scales from the incomplete_qt are used.
+
+  Args:
+    x: The input tensor.
+    qt: The incomplete QTensor with only scales.
+    context: Running context, such as quantization mode, random key, etc.
+    quant_numerics: Numerics used to convert the qvalue.
+  Returns:
+    A tuple of the quantized tensor and the gradient function.
+  """
+  if isinstance(quant_numerics, no_numerics.NoNumerics):
+    return qt, None
+
+  # TODO: b/333984742 - make numeric as a member of QTensor, and put
+  # numerics-related logics into the QTensor.
+  qt = qt.quant(x)
+
+  # TODO(lew): A logical thing would be if this call was part of
+  # QTensor.quant.
+  x_q, res = quant_numerics.vjp_fwd(qt.qvalue, context)
+  quant_grad = jax.tree_util.Partial(quant_numerics.vjp_bwd, res)
+
+  qt = qt.replace(qvalue=x_q)
+  return qt, quant_grad
+
+
+def _calculate_qvalue_bwd(res, g: aqt_tensor.QTensor):
+  quant_grad = res
+
+  # Shouldn't we first apply quant_grad on g.qvalue?
+  g = g.dequant()
+  if quant_grad is not None:
+    g = quant_grad(g)[0]
+  return (g, None, None, None)
 
 
 def quantizer_make(
