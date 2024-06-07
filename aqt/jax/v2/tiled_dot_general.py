@@ -39,6 +39,8 @@ AxisSize = utils.AxisSize
 EinsumEqnLetter = str
 EinsumTileSizes = dict[EinsumEqnLetter, AxisSize]
 
+BROADCAST_PREFIX = 'broadcast_'
+
 
 @dataclasses.dataclass(frozen=False, slots=True)
 class AxisTiling:
@@ -170,10 +172,10 @@ def maybe_add_one(i, min_i):
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
-class _Xhs:
+class TilingState:
   """Structure for bookkeeping of AxisIdx while tiling."""
 
-  x: jnp.ndarray
+  untiled_shape: tuple[AxisSize, ...]
 
   # Below are axes indices, similar to dimension_numbers
   # E.g.
@@ -184,24 +186,26 @@ class _Xhs:
   #   assert tile_map == {0:[0], 1:[1,2], 2:[3], ...}
   tile_map: dict[AxisIdx | str, list[AxisIdx]] = utils.dataclass_field(dict)
 
+  tiled_shape: list[AxisSize] = utils.dataclass_field(list)
+
   def __post_init__(self):
-    for i in range(self.x.ndim):
-      # self.x is not yet split at all.
+    for i in range(len(self.untiled_shape)):
+      # No axis is split at all yet.
       self.tile_map[i] = [i]
+    self.tiled_shape = list(self.untiled_shape)
 
   def tile_axis(self, at: AxisTiling):
     """Tiles (splits) one axis while maintaining all AxisIdx."""
+    msg = "Can't tile as all tiling must be done before broadcast operations."
+    assert len(self.get_broadcasted_tile_map_indexes()) == 0, msg
     tile_axis = self.tile_map[at.axis]
     assert len(tile_axis) == 1, "can't tile the same axis twice."
     tile_axis = tile_axis[0]
 
-    # Reshape self.x
-    shape = list(self.x.shape)
-    msg = f'{shape[tile_axis]=}, {at.tile_size=}, {at.tile_count=}'
-    assert shape[tile_axis] == at.tile_size * at.tile_count, msg
-    shape[tile_axis] = at.tile_size
-    shape.insert(tile_axis, at.tile_count)
-    self.x = self.x.reshape(shape)
+    msg = f'{self.tiled_shape[tile_axis]=}, {at.tile_size=}, {at.tile_count=}'
+    assert self.tiled_shape[tile_axis] == at.tile_size * at.tile_count, msg
+    self.tiled_shape[tile_axis] = at.tile_size
+    self.tiled_shape.insert(tile_axis, at.tile_count)
 
     # Update tile_map
     for k in self.tile_map:
@@ -214,21 +218,36 @@ class _Xhs:
     for at in ats:
       self.tile_axis(at)
 
+  def _is_broadcasted_ax(self, tile_map_idx: AxisIdx | str) -> bool:
+    return isinstance(tile_map_idx, str) and tile_map_idx.startswith(
+        BROADCAST_PREFIX
+    )
+
+  def get_broadcasted_tile_map_indexes(self):
+    """Returns the list of keys in `self.tile_map` associated with broadcasting axes."""
+    return [ax for ax in self.tile_map if self._is_broadcasted_ax(ax)]
+
+  def apply(self, x: jnp.ndarray) -> jnp.ndarray:
+    num_bcast_axes = len(self.get_broadcasted_tile_map_indexes())
+    tiled_x = x.reshape(self.tiled_shape[num_bcast_axes:])
+    tiled_x = jnp.broadcast_to(tiled_x, self.tiled_shape)
+    return tiled_x
+
   def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
     """Adds new axes (bcast_shape) on AxisIdx=0."""
-    self.x = jnp.broadcast_to(self.x, bcast_shape + self.x.shape)
     for k in self.tile_map:
       self.tile_map[k] = [ai + len(bcast_shape) for ai in self.tile_map[k]]
     keys = []
     for i in range(len(bcast_shape)):
-      k = f'broadcast_{i}'
+      k = f'{BROADCAST_PREFIX}{i}'
       keys.append(k)
       assert k not in self.tile_map
       self.tile_map[k] = [i]
+    self.tiled_shape = list(bcast_shape) + self.tiled_shape
     return keys
 
   def axes_shape(self, axes: list[AxisIdx]) -> tuple[AxisSize, ...]:
-    return tuple(map(lambda a: self.x.shape[a], axes))
+    return tuple(map(lambda a: self.tiled_shape[a], axes))
 
   def to_tiled_axes_transposed(
       self,
@@ -248,7 +267,7 @@ class _Xhs:
     """
     lsts = [self.tile_map[ai] for ai in axes]
     msg = (
-        'all requested axes shoudl have the same tile level, but we have:'
+        'all requested axes should have the same tile level, but we have:'
         f' {lsts=} for {axes=}'
     )
     assert all(map(lambda tiled_ais: len(tiled_ais) == tile_level, lsts)), msg
@@ -281,17 +300,25 @@ def print_dimension_numbers(dimension_numbers, lhs, rhs, label) -> None:
   logging.vlog(1, f'rhs_ra={rhs_ra}')
 
 
-def tiled_dot_general(
+def generate_tiling_states_for_dot_general(
     cfg: Cfg,
     lhs,
     rhs,
-    dimension_numbers,
-    precision=None,
-    preferred_element_type=None,
-    dot_general=jax.lax.dot_general,
-):
-  """local dot_general."""
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+) -> tuple[TilingState, TilingState]:
+  """Do tiling for `lhs` and `rhs` and returns the intermediate tiling states.
 
+  Args:
+    cfg: Configuration to define how tiling should be done
+    lhs: The left operand of dot general
+    rhs: The right operand of dot general
+    dimension_numbers: dimension numbers to indicate batch dimensions and
+      contracting dimensions
+
+  Returns:
+    xlhs: Tiling state of the left operand `lhs` after the tiling
+    xrhs: Tiling state of the left operand `rhs` after the tiling
+  """
   logging.vlog(1, 'Tiling config cfg: %s', cfg)
   print_dimension_numbers(dimension_numbers, lhs, rhs, label='before tiling')
 
@@ -324,23 +351,44 @@ def tiled_dot_general(
 
   # Tiling
 
-  xlhs = _Xhs(x=lhs)
+  xlhs = TilingState(untiled_shape=lhs.shape)
   xlhs.tile_axes(cfg.lhs.contraction_axes + cfg.lhs.remaining_axes)
-  xrhs = _Xhs(x=rhs)
+  xrhs = TilingState(untiled_shape=rhs.shape)
   xrhs.tile_axes(cfg.rhs.contraction_axes + cfg.rhs.remaining_axes)
 
   # DotGeneral reshapeing
 
   xlhs_ra_tile, _ = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
-  xrhs_bcast = xrhs.broadcast_to_other(xlhs.axes_shape(xlhs_ra_tile))
+  xrhs.broadcast_to_other(xlhs.axes_shape(xlhs_ra_tile))
 
   xrhs_ra_tile, _ = xrhs.to_tiled_axes_transposed(rhs_ra, 2)
-  xlhs_bcast = xlhs.broadcast_to_other(xrhs.axes_shape(xrhs_ra_tile))
+  xlhs.broadcast_to_other(xrhs.axes_shape(xrhs_ra_tile))
 
+  return xlhs, xrhs
+
+
+def tiled_dot_general_with_tiling_states(
+    lhs: jnp.ndarray,
+    xlhs: TilingState,
+    rhs: jnp.ndarray,
+    xrhs: TilingState,
+    untiled_dimension_numbers: jax.lax.DotDimensionNumbers,
+    precision=None,
+    preferred_element_type=None,
+    dot_general=jax.lax.dot_general,
+):
+  """local dot_general with tiling states."""
+  xlhs_x = xlhs.apply(lhs)
+  xrhs_x = xrhs.apply(rhs)
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = untiled_dimension_numbers
+  lhs_ra = get_ra(lhs.ndim, lhs_ca, lhs_ba)
+  rhs_ra = get_ra(rhs.ndim, rhs_ca, rhs_ba)
   xlhs_ca_tile, xlhs_ca = xlhs.to_tiled_axes_transposed(lhs_ca, 2)
   xlhs_ra_tile, xlhs_ra = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
   xrhs_ca_tile, xrhs_ca = xrhs.to_tiled_axes_transposed(rhs_ca, 2)
   xrhs_ra_tile, xrhs_ra = xrhs.to_tiled_axes_transposed(rhs_ra, 2)
+  xlhs_bcast = xlhs.get_broadcasted_tile_map_indexes()
+  xrhs_bcast = xrhs.get_broadcasted_tile_map_indexes()
   (xlhs_ra_tile_other,) = xlhs.to_tiled_axes_transposed(xlhs_bcast, 1)
   (xrhs_ra_tile_other,) = xrhs.to_tiled_axes_transposed(xrhs_bcast, 1)
   (xlhs_ba,) = xlhs.to_tiled_axes_transposed(lhs_ba, 1)
@@ -352,25 +400,27 @@ def tiled_dot_general(
       xrhs_ca_tile + xrhs_ba + xrhs_ra_tile_other + xrhs_ra_tile,
   )
   tiled_dimension_numbers = (tiled_ca, tiled_ba)
-  tiled_lhs_ra = get_ra(xlhs.x.ndim, tiled_ca[0], tiled_ba[0])
-  tiled_rhs_ra = get_ra(xrhs.x.ndim, tiled_ca[1], tiled_ba[1])
-  g_msg += (
+
+  tiled_lhs_ra = get_ra(lhs.ndim, tiled_ca[0], tiled_ba[0])
+  tiled_rhs_ra = get_ra(rhs.ndim, tiled_ca[1], tiled_ba[1])
+  g_msg = (
       'After tiling: \n'
-      f' lhs: lhs.shape={xlhs.x.shape}, lhs_ca={tiled_ca[0]},'
+      f' lhs: lhs.shape={xlhs_x.shape}, lhs_ca={tiled_ca[0]},'
       f' lhs_ba={tiled_ba[0]}, lhs_ra={tiled_lhs_ra} \n'
-      f' rhs: rhs.shape={xrhs.x.shape}, rhs_ca={tiled_ca[1]},'
+      f' rhs: rhs.shape={xrhs_x.shape}, rhs_ca={tiled_ca[1]},'
       f' rhs_ba={tiled_ba[1]}, rhs_ra={tiled_rhs_ra} \n'
   )
   for axis in tiled_ca[0] + tiled_ba[0]:
-    assert axis >= 0 and axis < xlhs.x.ndim, g_msg
+    assert axis >= 0 and axis < xlhs_x.ndim, g_msg
   for axis in tiled_ca[1] + tiled_ba[1]:
-    assert axis >= 0 and axis < xrhs.x.ndim, g_msg
+    assert axis >= 0 and axis < xrhs_x.ndim, g_msg
+
   out = dot_general(
-      xlhs.x, xrhs.x, tiled_dimension_numbers, precision, preferred_element_type
+      xlhs_x, xrhs_x, tiled_dimension_numbers, precision, preferred_element_type
   )
 
   print_dimension_numbers(
-      tiled_dimension_numbers, xlhs.x, xrhs.x, label='after tiling'
+      tiled_dimension_numbers, xlhs_x, xrhs_x, label='after tiling'
   )
 
   # Some assertions
@@ -450,3 +500,28 @@ def tiled_dot_general(
   out = out.reshape(ba_sh + lhs_ra_sh_flattened + rhs_ra_sh_flattened)
 
   return out
+
+
+def tiled_dot_general(
+    cfg: Cfg,
+    lhs,
+    rhs,
+    dimension_numbers,
+    precision=None,
+    preferred_element_type=None,
+    dot_general=jax.lax.dot_general,
+):
+  """local dot_general."""
+  xlhs, xrhs = generate_tiling_states_for_dot_general(
+      cfg, lhs, rhs, dimension_numbers
+  )
+  return tiled_dot_general_with_tiling_states(
+      lhs,
+      xlhs,
+      rhs,
+      xrhs,
+      dimension_numbers,
+      precision,
+      preferred_element_type,
+      dot_general,
+  )
