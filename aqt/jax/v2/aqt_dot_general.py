@@ -382,8 +382,12 @@ class DotGeneralRaw:
         )
         if self.rhs.use_fwd_quant:
           assert fwd_quantized, msg
+          rhs_scale = rhs.qx.scale[0]  # pytype: disable=attribute-error
+          ndim_diff = rhs.qx.qvalue.ndim - rhs_scale.ndim  # pytype: disable=attribute-error
+          if ndim_diff > 0:
+            rhs_scale = jnp.expand_dims(rhs_scale, axis=list(range(ndim_diff)))
           scale_t = transpose.rhs_scale_transpose_for_lhs_input(
-              rhs.qx.scale[0], dimension_numbers, lhs.shape  # pytype: disable=attribute-error
+              rhs_scale, dimension_numbers, lhs.shape
           )
 
           # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
@@ -482,6 +486,23 @@ class DotGeneralRaw:
         # Incomplete QTensor is provided as rhs_qt.
         rhs_incomplete_qt = rhs_qt
         rhs_qt = None
+
+      # Optimization: Remove leading 1s of rhs scales if the rhs dequant mode is
+      # OUTPUT.
+      # In this case, the rhs scales will be transposed to
+      # (rhs_ba, [1] * lhs_ra, rhs_ra).
+      # if rhs_ba is empty (which is mostly the case), then removing the leading
+      # 1s will not give any overhead.
+      # we need a validity checker for this!
+      # 1. rhs. 2. All ras are at the final dimension. 3. No ba
+      # (This could be softened). 4. OUTPUT.
+      # If all the above conditions are met, then we can just remove the ras,
+      # and we do not need to transpose.
+      # We do NOT need calibration axes - we only need the dimension numbers!
+
+      if self.rhs.dequant_mode == DequantMode.OUTPUT:
+        if utils.is_reducable(rhs.ndim, dimension_numbers):
+          rhs_incomplete_qt = rhs_incomplete_qt.remove_leading_ones_from_scale()
 
       lhs_quantized, rhs_quantized = self.dg_quantizer.calculate_qvalue(
           lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
@@ -622,14 +643,18 @@ def _qtensor_dot_general(
 
     out.scale.extend(extend_scale)
   if cfg.rhs.dequant_mode == DequantMode.OUTPUT:
-    extend_scale = _get_scale_t(
-        qt=rhs_qt,
-        transpose_fn=transpose.rhs_scale_transpose_to_output,
-        dimension_numbers=dimension_numbers,
-        lhs_shape=lhs_qin.shape,
-        rhs_shape=rhs_qin.shape,
-    )
-    out.scale.extend(extend_scale)
+    if utils.is_reducable(rhs_qin.ndim, dimension_numbers):
+      # No need to transpose.
+      out.scale.extend(rhs_qt.scale)
+    else:
+      extend_scale = _get_scale_t(
+          qt=rhs_qt,
+          transpose_fn=transpose.rhs_scale_transpose_to_output,
+          dimension_numbers=dimension_numbers,
+          lhs_shape=lhs_qin.shape,
+          rhs_shape=rhs_qin.shape,
+      )
+      out.scale.extend(extend_scale)
   return out
 
 

@@ -143,6 +143,22 @@ def get_remaining_axes(
   return ret
 
 
+def is_reducable(rhs_ndim, dimension_numbers):
+
+  (_, rhs_ca), (_, rhs_ba) = dimension_numbers
+  rhs_ra = get_remaining_axes(rhs_ndim, rhs_ca, rhs_ba)
+  return rhs_ra and not rhs_ba and min(rhs_ra) == len(rhs_ca)
+
+
+def remove_leading_ones(array: jnp.ndarray):
+  squeeze_axes = []
+  for i, dim in enumerate(array.shape):
+    if dim != 1:
+      break
+    squeeze_axes.append(i)
+  return jnp.squeeze(array, axis=tuple(squeeze_axes))
+
+
 @flax_slots_dataclass
 class Context:
   key: jax.Array | None = dynamic_field()
