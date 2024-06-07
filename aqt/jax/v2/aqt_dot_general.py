@@ -206,6 +206,48 @@ def _get_scale_t(
   return list_scale_t
 
 
+def _apply_local_aqt(
+    contraction_axis_shard_count: int,
+    lhs: jnp.ndarray,
+    rhs: jnp.ndarray,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+) -> tuple[jnp.ndarray, jnp.ndarray, jax.lax.DotDimensionNumbers]:
+  """Applies local AQT if the configuration is given.
+
+  Args:
+    contraction_axis_shard_count: Local AQT configuration.
+    lhs: Left hand side of the dot_general.
+    rhs: Right hand side of the dot_general.
+    dimension_numbers: Dot_general dimension numbers.
+  Returns:
+    A tuple of (lhs, rhs, dimension_numbers) with local AQT applied.
+  """
+
+  factor = contraction_axis_shard_count
+
+  def factor_reshape(x, ca, ba):
+    assert factor is not None
+    if not ca:
+      return x, ca, ba
+    shape = list(x.shape)
+    ax = ca[0]
+    orig_size = shape[ax]
+    assert orig_size % factor == 0
+    shape[ax] = factor
+    shape.insert(ax + 1, orig_size // factor)
+    new_ca = [(b + int(b >= ax)) for b in ca]
+    assert new_ca[0] == ax + 1
+    new_ba = [ax] + [(b + int(b > ax)) for b in ba]
+    return x.reshape(shape), new_ca, new_ba
+
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+  lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba)
+  rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba)
+
+  dimension_numbers = (lhs_ca, rhs_ca), (lhs_ba, rhs_ba)
+  return lhs, rhs, dimension_numbers
+
+
 @utils.flax_slots_kw_only_dataclass
 class DotGeneralQuantizer(abc.ABC):
   """Abstract class for dot_general quantizer."""
@@ -367,7 +409,6 @@ class DotGeneralRaw:
   ):
     """A quantized dot_general function without custom gradient."""
     with jax.named_scope(self.jax_scope_name):
-      (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
       # TODO(lew):
       #  - Use qx.value with the int type.
       #  - Handle qx.value with the int type in an optimized way.
@@ -399,31 +440,18 @@ class DotGeneralRaw:
 
       # TODO(lew): Define cutsom_vjp on tiled_dot_general and replace local_aqt.
       if self.local_aqt is not None:
-        local_aqt = self.local_aqt
-        factor = local_aqt.contraction_axis_shard_count  # pytype: disable=attribute-error
         msg = 'Custom calib_shared_axes not implemented for local AQT.'
         if isinstance(self.dg_quantizer, DefaultDotGeneralQuantizer):
           self.dg_quantizer.assert_calib_shared_axes_value(None, None, msg)
 
-        def factor_reshape(x, ca, ba):
-          assert factor is not None
-          if len(ca) == 0:
-            return x, ca, ba
-          shape = list(x.shape)
-          ax = ca[0]
-          orig_size = shape[ax]
-          assert orig_size % factor == 0
-          shape[ax] = factor
-          shape.insert(ax + 1, orig_size // factor)
-          new_ca = [(b + int(b >= ax)) for b in ca]
-          assert new_ca[0] == ax + 1
-          new_ba = [ax] + [(b + int(b > ax)) for b in ba]
-          return x.reshape(shape), new_ca, new_ba
+        lhs, rhs, dimension_numbers = _apply_local_aqt(
+            self.local_aqt.contraction_axis_shard_count,  # pytype: disable=attribute-error
+            lhs,
+            rhs,
+            dimension_numbers,
+        )
 
-        lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba)
-        rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba)
-
-        dimension_numbers = (lhs_ca, rhs_ca), (lhs_ba, rhs_ba)
+      (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
 
       assert isinstance(rhs, jnp.ndarray)
 
