@@ -454,11 +454,11 @@ def serve_fn_hlo(state):
   # serving
   serve_fn, model_serving = serving_conversion(state)
   # The following XLA graph is only needed for debugging purpose
-  hlo = jax.xla_computation(serve_fn)(
+  hlo = jax.jit(serve_fn).lower(
       model_serving,
       sample_image,
       rngs={'params': jax.random.PRNGKey(0)},
-  ).as_hlo_module()
+  ).compiler_ir('hlo').as_hlo_module()
   return hlo
 
 
