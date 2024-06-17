@@ -36,7 +36,8 @@ import jax.numpy as jnp
 
 NoShardingAxes = Sequence[utils.AxisIdx]
 AxisMetadataWrapper = Callable[
-    [jnp.ndarray, NoShardingAxes], nn_meta.AxisMetadata
+    [jnp.ndarray, tiled_dot_general.AqtTileMap | None, NoShardingAxes],
+    nn_meta.AxisMetadata,
 ]
 DotGeneralTilingFn = Callable[
     [jnp.ndarray, jnp.ndarray, jax.lax.DotDimensionNumbers],
@@ -235,6 +236,8 @@ class AqtDotGeneral(nn.Module):
       lhs_shape,
       rhs_shape,
       dimension_numbers: tuple[Iterable[int], Iterable[int]],
+      lhs_tile_map: tiled_dot_general.AqtTileMap | None = None,
+      rhs_tile_map: tiled_dot_general.AqtTileMap | None = None,
   ):
     if self.cfg is None:
       return jax.lax.dot_general
@@ -299,6 +302,7 @@ class AqtDotGeneral(nn.Module):
           qt: aqt_tensor.QTensor,
           contracting_axis: Sequence[utils.AxisIdx],
           axis_metadata_wrapper: Optional[AxisMetadataWrapper],
+          tile_map: tiled_dot_general.AqtTileMap,
       ):
         if axis_metadata_wrapper is None:
           return qt
@@ -307,10 +311,14 @@ class AqtDotGeneral(nn.Module):
         scale_non_shard_axis_contracting = list(contracting_axis)
 
         qt = qt.replace(
-            qvalue=axis_metadata_wrapper(qt.qvalue, []),
+            qvalue=axis_metadata_wrapper(
+                qt.qvalue,
+                tile_map,
+                [],
+            ),
             scale=jax.tree.map(
                 lambda x: axis_metadata_wrapper(
-                    x, scale_non_shard_axis_contracting
+                    x, tile_map, scale_non_shard_axis_contracting
                 ),
                 qt.scale,
             ),
@@ -318,7 +326,9 @@ class AqtDotGeneral(nn.Module):
             # scale transposition. scale_t is being removed from QTensor anyway
             # so we just pass scale_non_shard_axis_all.
             scale_t=jax.tree.map(
-                lambda x: axis_metadata_wrapper(x, scale_non_shard_axis_all),
+                lambda x: axis_metadata_wrapper(
+                    x, tile_map, scale_non_shard_axis_all
+                ),
                 qt.scale_t,
             ),
         )
@@ -328,12 +338,14 @@ class AqtDotGeneral(nn.Module):
       lhs_init_wrapper = functools.partial(
           init_wrapper,
           contracting_axis=lhs_ca,
-          axis_metadata_wrapper=self.lhs_axis_metadata_wrapper
+          axis_metadata_wrapper=self.lhs_axis_metadata_wrapper,
+          tile_map=lhs_tile_map,
       )
       rhs_init_wrapper = functools.partial(
           init_wrapper,
           contracting_axis=rhs_ca,
-          axis_metadata_wrapper=self.rhs_axis_metadata_wrapper
+          axis_metadata_wrapper=self.rhs_axis_metadata_wrapper,
+          tile_map=rhs_tile_map,
       )
 
       lhs_freezer = general_freezer.Freezer(
@@ -466,6 +478,9 @@ class AqtDotGeneral(nn.Module):
       tiling_cfg = self.tiling_fn(lhs, rhs, dimension_numbers)
 
     if tiling_cfg is not None:
+      xlhs, xrhs = tiled_dot_general.generate_tiling_states_for_dot_general(
+          tiling_cfg, lhs, rhs, dimension_numbers
+      )
       # Extract tiled input shapes and dimension numbers from jaxpr
       def dummy_tiled_dg(lhs_in, rhs_in):
         return tiled_dot_general.tiled_dot_general(
@@ -482,7 +497,11 @@ class AqtDotGeneral(nn.Module):
       # Use tiled input shapes and dimension numbers to create aqt_dg that
       # will be injected to tiled_dot_general
       aqt_dg = self.make_aqt_dg(
-          tiled_lhs_shape, tiled_rhs_shape, tiled_dimension_numbers
+          tiled_lhs_shape,
+          tiled_rhs_shape,
+          tiled_dimension_numbers,
+          lhs_tile_map=xlhs.tile_map,
+          rhs_tile_map=xrhs.tile_map,
       )
       # We integrate tiling here and not on Jax level, so that the Freezers
       # observe tiled shapes.

@@ -36,6 +36,7 @@ from typing_extensions import Self  # for python version < 3.11
 
 AxisIdx = utils.AxisIdx
 AxisSize = utils.AxisSize
+AqtTileMap = dict[AxisIdx | str, list[AxisIdx]]
 EinsumEqnLetter = str
 EinsumTileSizes = dict[EinsumEqnLetter, AxisSize]
 
@@ -184,7 +185,7 @@ class TilingState:
   # After splitting axis 1 to 2 tiles, sized 10, we get
   #   assert xhs.shape == [10, 2, 10, 30, ...]
   #   assert tile_map == {0:[0], 1:[1,2], 2:[3], ...}
-  tile_map: dict[AxisIdx | str, list[AxisIdx]] = utils.dataclass_field(dict)
+  tile_map: AqtTileMap = utils.dataclass_field(dict)
 
   tiled_shape: list[AxisSize] = utils.dataclass_field(list)
 
