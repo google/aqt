@@ -40,10 +40,17 @@ class Quantizer:
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
   calibration: type[AbstractAqtCalibration] = utils.static_field()
+  _calibrator: AbstractAqtCalibration | None = utils.static_field(default=None)
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool = utils.static_field()
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   context: utils.Context
+
+  # we need to speed up this initialization for the backward pass to happen
+  # outside of bwd pass.
+  def init_calibration(self):
+    assert self._calibrator is None, "second call to self.init_calibration()"
+    self._calibrator = self.calibration()
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(
@@ -74,8 +81,8 @@ class Quantizer:
     else:
       shared_axes = self.calib_shared_axes or calibration_axes
 
-    calibrator = self.calibration()
-    bound = calibrator.get_bound(x, shared_axes, self.context)
+    assert self._calibrator is not None, "forgot self.init_calibration()?"
+    bound = self._calibrator.get_bound(x, shared_axes, self.context)
     abs_max_mapped_to = self.numerics.abs_val_mapped_to()
     scale = bound / abs_max_mapped_to
 
@@ -120,7 +127,9 @@ class Quantizer:
 
 
 def quantizer_make(
-    n_bits: int | None, preserve_max_val: bool = False
+    n_bits: int | None,
+    preserve_max_val: bool = False,
+    initialize_calibration: bool = True,
 ) -> Quantizer:
   """Makes Quantizer."""
   if n_bits is None:
@@ -138,7 +147,7 @@ def quantizer_make(
         clip_gradient=False,  # This can be disabled when using abs-max scaling.
         dtype=dtype,
     )
-  return Quantizer(
+  quantizer = Quantizer(
       numerics=effective_numerics,
       calib_shared_axes=None,
       scale_stop_grad=True,
@@ -146,6 +155,11 @@ def quantizer_make(
       po2_scale=False,
       context=utils.Context(key=None, train_step=None),
   )
+  # TODO(lew): We should try to move to to class constructor or post-init.
+  # We currently need to call because bwd pass is too late for initialization.
+  if initialize_calibration:
+    quantizer.init_calibration()
+  return quantizer
 
 
 def make_fake_quant(quantizer: Quantizer, calibration_axes=None):

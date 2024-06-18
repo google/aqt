@@ -89,6 +89,7 @@ def dot_general_raw_make(
     rhs_bits=None,
     local_aqt=None,
     jax_scope_name='aqt',
+    initialize_calibration=True,
 ) -> 'DotGeneralRaw':
   """Create quantization configs for input matrices to a matmul."""
   # TODO: b/343490088 - Move all the parameters to dataclass defaults,
@@ -109,8 +110,15 @@ def dot_general_raw_make(
 
   # DotGeneralRaw should create a this quantizer on defualt.
   # Then setter can change it.
-  lhs = aqt_quantizer.quantizer_make(lhs_bits)
-  rhs = aqt_quantizer.quantizer_make(rhs_bits)
+
+  # initialize_calibration=False because that has to be delayed to be called
+  # *inside* of flax.nn.custom_vjp
+  lhs = aqt_quantizer.quantizer_make(
+      lhs_bits, initialize_calibration=initialize_calibration
+  )
+  rhs = aqt_quantizer.quantizer_make(
+      rhs_bits, initialize_calibration=initialize_calibration
+  )
   dg_quantizer = DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
 
   return DotGeneralRaw(
@@ -134,12 +142,25 @@ def dot_general_make(
     drhs_local_aqt=None,
 ) -> 'DotGeneral':
   """Create quantization configs for input matrices to a matmul."""
-  fwd = dot_general_raw_make(lhs_bits, rhs_bits, jax_scope_name='aqt_fwd')
+  fwd = dot_general_raw_make(
+      lhs_bits,
+      rhs_bits,
+      jax_scope_name='aqt_fwd',
+      initialize_calibration=False,
+  )
   dlhs = dot_general_raw_make(
-      bwd_bits, bwd_bits, local_aqt=dlhs_local_aqt, jax_scope_name='aqt_dlhs'
+      bwd_bits,
+      bwd_bits,
+      local_aqt=dlhs_local_aqt,
+      jax_scope_name='aqt_dlhs',
+      initialize_calibration=False,
   )
   drhs = dot_general_raw_make(
-      bwd_bits, bwd_bits, local_aqt=drhs_local_aqt, jax_scope_name='aqt_drhs'
+      bwd_bits,
+      bwd_bits,
+      local_aqt=drhs_local_aqt,
+      jax_scope_name='aqt_drhs',
+      initialize_calibration=False,
   )
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
@@ -268,6 +289,10 @@ class DotGeneralQuantizer(abc.ABC):
     return self.calculate_qvalue(lhs, lhs_qt, rhs, rhs_qt)
 
   @abc.abstractmethod
+  def init_calibration(self):
+    pass
+
+  @abc.abstractmethod
   def calibrate(
       self,
       lhs_quantization_info: tuple[jax.Array, Sequence[int]],
@@ -324,6 +349,10 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   lhs: aqt_quantizer.Quantizer
   rhs: aqt_quantizer.Quantizer
+
+  def init_calibration(self):
+    self.lhs.init_calibration()
+    self.rhs.init_calibration()
 
   def calibrate(
       self,
@@ -810,6 +839,9 @@ def dg_core_vjp_fwd(
   assert (
       lhs.dtype == rhs.dtype
   ), f'Unmatched lhs and rhs dtype: {lhs.dtype} vs {rhs.dtype}'
+  cfg.fwd.dg_quantizer.init_calibration()
+  cfg.dlhs.dg_quantizer.init_calibration()
+  cfg.drhs.dg_quantizer.init_calibration()
   ret, res = cfg.fwd(
       lhs,
       rhs,

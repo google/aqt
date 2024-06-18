@@ -113,6 +113,3 @@ def dg_core_flax_lifted(
   return dg_core_with_custom_vjp(
       mdl, lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg
   )
-
-
-

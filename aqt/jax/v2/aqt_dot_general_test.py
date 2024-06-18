@@ -59,9 +59,14 @@ def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
     def assert_dtype_eq(dtype1, dtype2):
       assert dtype1 == dtype2, f"dtype1 != dtype2: {dtype1=} != {dtype2=}"
 
-    assert isinstance(
-        dg_raw.dg_quantizer, aqt.DefaultDotGeneralQuantizer
-    ), f"Invalid dg_quantizer type. {type(dg_raw.dg_quantizer)=}"
+    # Using str instead of isinstance to work with adhoc import.
+    assert (
+        str(type(dg_raw.dg_quantizer))
+        == "<class 'aqt.jax.v2.aqt_dot_general.DefaultDotGeneralQuantizer'>"
+    ), f"Invalid dg_quantizer type. {str(type(dg_raw.dg_quantizer))=}"
+    # assert isinstance(
+    #     dg_raw.dg_quantizer, aqt.DefaultDotGeneralQuantizer
+    # ), f"Invalid dg_quantizer type. {type(dg_raw.dg_quantizer)=}"
 
     lhs_dtype = dg_raw.dg_quantizer.lhs.numerics.get_dtype()
     rhs_dtype = dg_raw.dg_quantizer.rhs.numerics.get_dtype()
@@ -348,6 +353,7 @@ def _aqt_dg_raw_lr_diff(
       rhs_calibration_mode=rhs_calibration_mode,
   )
   dg = config.set_context(dg, key=jax.random.PRNGKey(4), train_step=None)
+  dg.fwd.dg_quantizer.init_calibration()
   return lambda lhs, rhs: dg.fwd(lhs, rhs, None, None, dims)[0]
 
 
@@ -1069,6 +1075,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         po2_scale=False,
         context=utils.Context(key=None, train_step=None),
     )
+    # TODO(lew): Perhaps post_init call could work?
+    quantizer.init_calibration()
 
     x = jnp.array([
         [1, 2, 3, 4],

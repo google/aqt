@@ -477,18 +477,25 @@ def config_v3(
     drhs_accumulator_dtype: ... = None,
 ) -> DotGeneral:
   """Fully Quantized Training."""
-  fwd = dot_general_raw_make(fwd_bits, fwd_bits, jax_scope_name='aqt_fwd')
+  fwd = dot_general_raw_make(
+      fwd_bits,
+      fwd_bits,
+      jax_scope_name='aqt_fwd',
+      initialize_calibration=False,
+  )
   dlhs = dot_general_raw_make(
       dlhs_bits,
       dlhs_bits,
       local_aqt=dlhs_local_aqt,
       jax_scope_name='aqt_dlhs',
+      initialize_calibration=False,
   )
   drhs = dot_general_raw_make(
       drhs_bits,
       drhs_bits,
       local_aqt=drhs_local_aqt,
       jax_scope_name='aqt_drhs',
+      initialize_calibration=False,
   )
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 

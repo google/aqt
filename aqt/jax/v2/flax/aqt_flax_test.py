@@ -16,6 +16,7 @@
 """Test for AQT flax."""
 
 import functools
+from typing import Callable
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -34,7 +35,7 @@ class AqtFlaxTest(parameterized.TestCase):
 
   def test_aqt_einsum(self):
     class Model(nn.Module):
-      aqt_cfg: config.DotGeneral | None
+      aqt_cfg: Callable[[], config.DotGeneral] | None
       lhs_qt_external: bool = False
       rhs_qt_external: bool = False
 
@@ -45,20 +46,23 @@ class AqtFlaxTest(parameterized.TestCase):
             (self.lhs_qt_external or self.rhs_qt_external)
             and (self.aqt_cfg is None)
         ), 'aqt_cfg cannot be None when providing qtensor as inputs to einsum'
+        aqt_cfg = self.aqt_cfg() if self.aqt_cfg is not None else None
         if self.lhs_qt_external or self.rhs_qt_external:
-          (lhs_q, _), (rhs_q, _) = self.aqt_cfg.fwd.dg_quantizer(
-              (lhs, (2, 3)), (rhs, (1, 2))
-          )
-
-          lhs_dtype = self.aqt_cfg.fwd.dg_quantizer.lhs.numerics.get_dtype()
-          rhs_dtype = self.aqt_cfg.fwd.dg_quantizer.rhs.numerics.get_dtype()
+          # We are calling a config instantiation here again to get an
+          # copy of the dg_quantized for this test setup that does not share
+          # state with the one used in the einsum.
+          dg_quantizer = self.aqt_cfg().fwd.dg_quantizer
+          dg_quantizer.init_calibration()
+          (lhs_q, _), (rhs_q, _) = dg_quantizer((lhs, (2, 3)), (rhs, (1, 2)))
+          lhs_dtype = aqt_cfg.fwd.dg_quantizer.lhs.numerics.get_dtype()
+          rhs_dtype = aqt_cfg.fwd.dg_quantizer.rhs.numerics.get_dtype()
           if self.lhs_qt_external:
             lhs_in = lhs_q.qvalue_astype(lhs_dtype)
           if self.rhs_qt_external:
             rhs_in = rhs_q.qvalue_astype(rhs_dtype)
 
         einsum = aqt_flax.AqtEinsum(
-            cfg=self.aqt_cfg,
+            cfg=aqt_cfg,
             lhs_freeze_mode=aqt_flax.FreezerMode.NONE,
             rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
         )
@@ -73,24 +77,26 @@ class AqtFlaxTest(parameterized.TestCase):
     lhs = jax.random.uniform(subkey1, shape=(3, 4, 5, 6))
     rhs = jax.random.uniform(subkey2, shape=(2, 5, 6))
 
-    def test(model_cls, cfg):
-      model = model_cls(cfg)
+    def test(model_cls, aqt_cfg):
+      model = model_cls(aqt_cfg=aqt_cfg)
       out = model.apply({}, lhs, rhs, rngs={'params': jax.random.PRNGKey(0)})
       # print(f'{out.shape=}')
       # print(f'{out=}')
       return out
 
-    out_float = test(Model, None)
-    out_int8 = test(Model, config.config_v4())
+    out_float = test(Model, lambda: None)
+    out_int8 = test(Model, config.config_v4)
     out_int8_lqt = test(
-        functools.partial(Model, lhs_qt_external=True), config.config_v4()
+        functools.partial(Model, lhs_qt_external=True),
+        config.config_v4,
     )
     out_int8_rqt = test(
-        functools.partial(Model, rhs_qt_external=True), config.config_v4()
+        functools.partial(Model, rhs_qt_external=True),
+        config.config_v4,
     )
     out_int8_qt = test(
         functools.partial(Model, lhs_qt_external=True, rhs_qt_external=True),
-        config.config_v4(),
+        config.config_v4,
     )
 
     assert (out_int8 == out_int8_lqt).all(), 'lhs external qt failed'
