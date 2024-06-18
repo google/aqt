@@ -402,6 +402,145 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
     self.rhs.context = rhs_context
 
 
+def quant(
+    lhs: jnp.ndarray,
+    rhs: jnp.ndarray,
+    lhs_qt: aqt_tensor.QTensor | None,
+    rhs_qt: aqt_tensor.QTensor | None,
+    dg_quantizer: DotGeneralQuantizer,
+    lhs_cfg: Tensor,
+    rhs_cfg: Tensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    allow_dummy_gradient_into_qtensor: bool
+) -> tuple[
+    tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+    tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+]:
+  """Quantizes the given lhs and rhs using dg_quantizer."""
+  def _get_calibration_axes(
+      tensor_cfg: Tensor,
+      ndim: int,
+      ca: Sequence[utils.AxisIdx],
+      ba: Sequence[utils.AxisIdx],
+  ) -> Sequence[utils.AxisIdx]:
+    """Computes calibration axes for the given Tensor."""
+    match tensor_cfg.calibration_mode:
+      case CalibrationMode.REMAINING_AXIS:
+        calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
+      case CalibrationMode.CONTRACTING_AXIS:
+        calibration_axes = ca
+      case _:
+        raise ValueError(
+            f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
+        )
+    return calibration_axes
+
+  def _postprocess_qtensor(
+      input_qtensor: Optional[aqt_tensor.QTensor],
+      calculated_qtensor: aqt_tensor.QTensor,
+      quant_grad: aqt_tensor.GradientFn,
+  ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
+    """Compute qtensor from input or input_qtensor."""
+    # TODO(lew): moving this if out of DotGeneralRaw into v2.flax.DotGeneral
+    # would induce huge code simplification here.
+    # E.g. this file would not have to know about DotGeneralQuantizer.
+    if input_qtensor is not None:
+      if not allow_dummy_gradient_into_qtensor:
+        quant_grad = (
+            'Poison. '
+            + 'Gradients are not generally expected in serving. '
+            + 'Please set allow_dummy_gradient_into_qtensor to True '
+            + 'if this is the intended behavior.'
+        )
+      output_qtensor = input_qtensor
+    else:
+      output_qtensor = calculated_qtensor
+
+    return output_qtensor, quant_grad
+
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+
+  lhs_calib_axes = _get_calibration_axes(lhs_cfg, lhs.ndim, lhs_ca, lhs_ba)
+  rhs_calib_axes = _get_calibration_axes(rhs_cfg, rhs.ndim, rhs_ca, rhs_ba)
+
+  lhs_incomplete_qt, rhs_incomplete_qt = dg_quantizer.calibrate(
+      (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
+  )
+  if lhs_qt is not None and not lhs_qt.is_full():
+    # Incomplete QTensor is provided as lhs_qt.
+    lhs_incomplete_qt = lhs_qt
+    lhs_qt = None
+
+  if rhs_qt is not None and not rhs_qt.is_full():
+    # Incomplete QTensor is provided as rhs_qt.
+    rhs_incomplete_qt = rhs_qt
+    rhs_qt = None
+
+  lhs_quantized, rhs_quantized = dg_quantizer.calculate_qvalue(
+      lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
+  )
+  lhs_qt_calculated, lhs_quant_grad = lhs_quantized
+  rhs_qt_calculated, rhs_quant_grad = rhs_quantized
+
+  lhs_qt, lhs_quant_grad = _postprocess_qtensor(
+      lhs_qt,
+      lhs_qt_calculated,
+      lhs_quant_grad,
+  )
+
+  rhs_qt, rhs_quant_grad = _postprocess_qtensor(
+      rhs_qt,
+      rhs_qt_calculated,
+      rhs_quant_grad,
+  )
+  return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)
+
+
+def _maybe_use_fwd_quant(
+    lhs: jnp.ndarray,
+    rhs: MultiTensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    use_fwd_quant: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+  """Applies already quantized value for backpropagation, if the flag is set.
+
+  Note that we cannot directly use the quantized rhs for gradient calculation,
+  since the dimension numbers are changed.
+
+  Args:
+    lhs: Left hand size of gradient dot_general.
+    rhs: Right hand size of gradient dot_general.
+    dimension_numbers: Dot_general dimension numbers.
+    use_fwd_quant: Flag to use forward quantization.
+  Returns:
+    A tuple of updated (lhs, rhs). If use_fwd_quant is True, lhs is multiplied
+    with rhs scale, while rhs is set to the original rhs's qvalue.
+  """
+  fwd_quantized = rhs.qx.scale is not None and len(rhs.qx.scale) == 1
+  msg = (
+      f'Found use_fwd_quant is {use_fwd_quant} in bwd, but fwd is not'
+      ' quantized.'
+  )
+  if use_fwd_quant:
+    assert fwd_quantized, msg
+    scale_t = transpose.rhs_scale_transpose_for_lhs_input(
+        rhs.qx.scale[0], dimension_numbers, lhs.shape
+    )
+
+    # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
+    # avoid an unexpected upcast when rhs is float32 but lhs is float16.
+    lhs = lhs * scale_t.astype(lhs.dtype)
+
+    # rhs qvalue may be integer. It will be quantized again later, so cast
+    # its dtype back to dequant dtype.
+    # TODO(yichizh): avoid double quantization and evaluate model quality.
+    rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)
+  else:
+    rhs = rhs.x
+
+  return lhs, rhs
+
+
 @utils.flax_slots_kw_only_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
@@ -427,6 +566,9 @@ class DotGeneralRaw:
     return dot_general_raw_make(*args, **kwargs)
 
   # TODO(lew): Can we remove MutliTensor and pass rhs_qt instead?
+  # TODO(dhchoi): We can remove this whole function; just maintain this to not
+  # to fail the TAP test. Deal with this when the role of DotGeneralRaw gets
+  # clarified.
   def __call__(
       self,
       lhs: jnp.ndarray,
@@ -444,28 +586,10 @@ class DotGeneralRaw:
       #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
       #  - Can we carry untransposed scale and transpose here?
       if isinstance(rhs, MultiTensor):
-        # We are in gradient code.
-        fwd_quantized = rhs.qx.scale is not None and len(rhs.qx.scale) == 1  # pytype: disable=attribute-error
-        msg = (
-            f'Found use_fwd_quant is {self.rhs.use_fwd_quant} in bwd, but fwd'
-            ' is not quantized.'
+        lhs, rhs = _maybe_use_fwd_quant(
+            lhs, rhs, dimension_numbers, self.rhs.use_fwd_quant
         )
-        if self.rhs.use_fwd_quant:
-          assert fwd_quantized, msg
-          scale_t = transpose.rhs_scale_transpose_for_lhs_input(
-              rhs.qx.scale[0], dimension_numbers, lhs.shape  # pytype: disable=attribute-error
-          )
-
-          # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
-          # avoid an unexpected upcast when rhs is float32 but lhs is float16.
-          lhs = lhs * scale_t.astype(lhs.dtype)  # pytype: disable=attribute-error
-
-          # rhs qvalue may be integer. It will be quantized again later, so cast
-          # its dtype back to dequant dtype.
-          # TODO(yichizh): avoid double quantization and evaluate model quality.
-          rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)  # pytype: disable=attribute-error
-        else:
-          rhs = rhs.x  # pytype: disable=attribute-error
+      assert isinstance(rhs, jnp.ndarray)
 
       # TODO(lew): Define cutsom_vjp on tiled_dot_general and replace local_aqt.
       if self.local_aqt is not None:
@@ -480,90 +604,25 @@ class DotGeneralRaw:
             dimension_numbers,
         )
 
-      (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-
-      assert isinstance(rhs, jnp.ndarray)
-
-      def _get_calibration_axes(
-          tensor_cfg: Tensor,
-          ndim: int,
-          ca: Sequence[utils.AxisIdx],
-          ba: Sequence[utils.AxisIdx],
-      ) -> Sequence[utils.AxisIdx]:
-        """Computes calibration axes for the given Tensor."""
-        match tensor_cfg.calibration_mode:
-          case CalibrationMode.REMAINING_AXIS:
-            calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
-          case CalibrationMode.CONTRACTING_AXIS:
-            calibration_axes = ca
-          case _:
-            raise ValueError(
-                f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
-            )
-        return calibration_axes
-
-      def _postprocess_qtensor(
-          input_qtensor: Optional[aqt_tensor.QTensor],
-          calculated_qtensor: aqt_tensor.QTensor,
-          quant_grad: aqt_tensor.GradientFn,
-      ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
-        """Compute qtensor from input or input_qtensor."""
-        # TODO(lew): moving this if out of DotGeneralRaw into v2.flax.DotGeneral
-        # would induce huge code simplification here.
-        # E.g. this file would not have to know about DotGeneralQuantizer.
-        if input_qtensor is not None:
-          if not self.allow_dummy_gradient_into_qtensor:
-            quant_grad = (
-                'Poison. '
-                + 'Gradients are not generally expected in serving. '
-                + 'Please set allow_dummy_gradient_into_qtensor to True '
-                + 'if this is the intended behavior.'
-            )
-          output_qtensor = input_qtensor
-        else:
-          output_qtensor = calculated_qtensor
-        return output_qtensor, quant_grad
-
-      lhs_calib_axes = _get_calibration_axes(self.lhs, lhs.ndim, lhs_ca, lhs_ba)
-      rhs_calib_axes = _get_calibration_axes(self.rhs, rhs.ndim, rhs_ca, rhs_ba)
-
-      lhs_incomplete_qt, rhs_incomplete_qt = self.dg_quantizer.calibrate(
-          (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
-      )
-      if lhs_qt is not None and not lhs_qt.is_full():
-        # Incomplete QTensor is provided as lhs_qt.
-        lhs_incomplete_qt = lhs_qt
-        lhs_qt = None
-
-      if rhs_qt is not None and not rhs_qt.is_full():
-        # Incomplete QTensor is provided as rhs_qt.
-        rhs_incomplete_qt = rhs_qt
-        rhs_qt = None
-
-      lhs_quantized, rhs_quantized = self.dg_quantizer.calculate_qvalue(
-          lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
-      )
-      lhs_qt_calculated, lhs_quant_grad = lhs_quantized
-      rhs_qt_calculated, rhs_quant_grad = rhs_quantized
-
-      lhs_qt, lhs_quant_grad = _postprocess_qtensor(
+      (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad) = quant(
+          lhs,
+          rhs,
           lhs_qt,
-          lhs_qt_calculated,
-          lhs_quant_grad,
+          rhs_qt,
+          self.dg_quantizer,
+          self.lhs,
+          self.rhs,
+          dimension_numbers,
+          self.allow_dummy_gradient_into_qtensor
       )
+
       lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
       lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
-      rhs_qt, rhs_quant_grad = _postprocess_qtensor(
-          rhs_qt,
-          rhs_qt_calculated,
-          rhs_quant_grad,
-      )
       rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
       rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
       # TODO(lew): mt.x above should be clipped for clipping calibrations
-
       out = _qtensor_dot_general(
           lhs_qt, rhs_qt, dimension_numbers, self, jnp.promote_types(lhs, rhs)
       )
@@ -572,6 +631,7 @@ class DotGeneralRaw:
 
       res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
       if self.local_aqt is not None:
+        (lhs_ca, rhs_ca), _ = dimension_numbers
         assert len(lhs_ca) == len(rhs_ca)
         if len(lhs_ca) > 0:
           out = jnp.sum(out, axis=0)
@@ -842,18 +902,107 @@ def dg_core_vjp_fwd(
   cfg.fwd.dg_quantizer.init_calibration()
   cfg.dlhs.dg_quantizer.init_calibration()
   cfg.drhs.dg_quantizer.init_calibration()
-  ret, res = cfg.fwd(
-      lhs,
-      rhs,
-      lhs_qt,
-      rhs_qt,
-      dimension_numbers,
-  )
-  ret = ret.astype(lhs.dtype)
+
+  with jax.named_scope(cfg.fwd.jax_scope_name):
+    if cfg.fwd.local_aqt is not None:
+      msg = 'Custom calib_shared_axes not implemented for local AQT.'
+      if isinstance(cfg.fwd.dg_quantizer, DefaultDotGeneralQuantizer):
+        cfg.fwd.dg_quantizer.assert_calib_shared_axes_value(None, None, msg)
+
+      lhs, rhs, dimension_numbers = _apply_local_aqt(
+          cfg.fwd.local_aqt.contraction_axis_shard_count,  # pytype: disable=attribute-error
+          lhs,
+          rhs,
+          dimension_numbers,
+      )
+
+    (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad) = quant(
+        lhs,
+        rhs,
+        lhs_qt,
+        rhs_qt,
+        cfg.fwd.dg_quantizer,
+        cfg.fwd.lhs,
+        cfg.fwd.rhs,
+        dimension_numbers,
+        cfg.fwd.allow_dummy_gradient_into_qtensor
+    )
+
+    lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
+    lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
+
+    rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
+    rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
+
+    # TODO(lew): mt.x above should be clipped for clipping calibrations
+    out = _qtensor_dot_general(
+        lhs_qt, rhs_qt, dimension_numbers, cfg.fwd, jnp.promote_types(lhs, rhs)
+    )
+
+    out = out.dequant()
+
+    res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
+    if cfg.fwd.local_aqt is not None:
+      (lhs_ca, rhs_ca), _ = dimension_numbers
+      assert len(lhs_ca) == len(rhs_ca)
+      if len(lhs_ca) > 0:
+        out = jnp.sum(out, axis=0)
+      # We are not supporting local AQT in fwd pass, so no res needed.
+      res = None
+
+  ret = out.astype(lhs.dtype)
   # We return these values to allow for materialization.
   assert res is not None, 'res cannot be None in fwd pass.'
   qret = (res.lhs.mt.qx, res.rhs.mt.qx)
   return ((ret, qret), (res, cfg))
+
+
+def _update_dimension_numbers_for_backward(
+    fwd_dimension_numbers: jax.lax.DotDimensionNumbers,
+    y_is_lhs: bool,
+    gradient_rank: int,
+    y_rank: int,
+) -> tuple[jax.lax.DotDimensionNumbers, tuple[int, ...]]:
+  """Generates a new dimension number for backward pass.
+
+  For dot_general(lhs, rhs), the gradients for lhs and rhs are calculated by
+  dot_general(g, rhs) and dot_general(g, lhs). This function generates proper
+  dimension numbers for the dot_generals used for gradient calculation.
+
+  Args:
+    fwd_dimension_numbers: Dimension number used during forward pass
+    y_is_lhs: If set, the function calculates dimension numbers for dlhs.
+    gradient_rank: Rank of the gradient.
+    y_rank: Rank of the other side input.
+  Returns:
+    A tuple of (dimension numbers for gradient dot_general, transpose axes to be
+    applied on the gradient dot_generals output to match with the original
+    argument dimension).
+  """
+  def ranges_like(*xs):
+    start = 0
+    for x in xs:
+      yield tuple(range(start, start + len(x)))
+      start += len(x)
+
+  (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
+  if y_is_lhs:
+    (y_ca, x_ca) = (x_ca, y_ca)
+    (y_ba, x_ba) = (x_ba, y_ba)
+
+  gradient_rank = gradient_rank - y_rank + len(x_ba) + 2 * len(x_ca)
+  x_ra = tuple(utils.get_remaining_axes(gradient_rank, x_ca, x_ba))
+  y_ra = tuple(utils.get_remaining_axes(y_rank, y_ca, y_ba))
+  if y_is_lhs:
+    g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
+  else:
+    g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
+  dims = ((g_ca, y_ra), (g_ba, y_ba))
+
+  x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
+  out_transpose_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
+
+  return dims, out_transpose_axes
 
 
 def dg_core_vjp_bwd(
@@ -867,54 +1016,79 @@ def dg_core_vjp_bwd(
   assert dg_res is not None, msg
   g = g[0]  # g[1] is gradient with respect to qret which we are ignoring.
 
-  def ranges_like(*xs):
-    start = 0
-    for x in xs:
-      yield tuple(range(start, start + len(x)))
-      start += len(x)
-
   def grad_dot_general(
+      grad: jnp.ndarray,
       y_res: TensorRes,
       quant_grad: aqt_tensor.GradientFn,
       dg_raw: DotGeneralRaw,
       y_is_lhs,
   ):
-    y_ndim = y_res.mt.x.ndim
+    # Get dimension numbers for gradient calculation.
+    dims, out_transpose_axes = _update_dimension_numbers_for_backward(
+        fwd_dimension_numbers, y_is_lhs, grad.ndim, y_res.mt.x.ndim
+    )
 
-    (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
-    if y_is_lhs:
-      (y_ca, x_ca) = (x_ca, y_ca)
-      (y_ba, x_ba) = (x_ba, y_ba)
-    g_ndim = g.ndim - y_ndim + len(x_ba) + 2 * len(x_ca)
-    x_ra = tuple(utils.get_remaining_axes(g_ndim, x_ca, x_ba))
-    y_ra = tuple(utils.get_remaining_axes(y_ndim, y_ca, y_ba))
-    if y_is_lhs:
-      g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
-    else:
-      g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
-    dims = ((g_ca, y_ra), (g_ba, y_ba))
+    grad, y = _maybe_use_fwd_quant(
+        grad, y_res.mt, dims, dg_raw.rhs.use_fwd_quant
+    )
 
-    out, _ = dg_raw(g, y_res.mt, None, None, dims)
+    if dg_raw.local_aqt is not None:
+      msg = 'Custom calib_shared_axes not implemented for local AQT.'
+      if isinstance(dg_raw.dg_quantizer, DefaultDotGeneralQuantizer):
+        dg_raw.dg_quantizer.assert_calib_shared_axes_value(None, None, msg)
 
-    x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
-    out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
-    transposed_out = jax.lax.transpose(out, out_axes)
+      grad, y, dims = _apply_local_aqt(
+          dg_raw.local_aqt.contraction_axis_shard_count,
+          grad,
+          y,
+          dims,
+      )
+
+    # Quantize both gradient and y.
+    (grad_qt, _), (y_qt, _) = quant(
+        grad,
+        y,
+        None,
+        None,
+        dg_raw.dg_quantizer,
+        dg_raw.lhs,
+        dg_raw.rhs,
+        dims,
+        False
+    )
+
+    out = _qtensor_dot_general(
+        grad_qt, y_qt, dims, dg_raw, jnp.promote_types(grad, y)
+    )
+
+    out = out.dequant()
+    if dg_raw.local_aqt is not None:
+      (lhs_ca, rhs_ca), _ = dims
+      assert len(lhs_ca) == len(rhs_ca)
+      if len(lhs_ca) > 0:
+        out = jnp.sum(out, axis=0)
+
+    transposed_out = jax.lax.transpose(out, out_transpose_axes)
     if quant_grad is not None:
       transposed_out = quant_grad(transposed_out)[0]
     return transposed_out
 
-  dlhs = grad_dot_general(
-      dg_res.rhs,
-      dg_res.lhs.quant_grad,
-      cfg.dlhs,
-      False,
-  )
-  drhs = grad_dot_general(
-      dg_res.lhs,
-      dg_res.rhs.quant_grad,
-      cfg.drhs,
-      True,
-  )
+  with jax.named_scope(cfg.dlhs.jax_scope_name):
+    dlhs = grad_dot_general(
+        g,
+        dg_res.rhs,
+        dg_res.lhs.quant_grad,
+        cfg.dlhs,
+        False,
+    )
+  with jax.named_scope(cfg.drhs.jax_scope_name):
+    drhs = grad_dot_general(
+        g,
+        dg_res.lhs,
+        dg_res.rhs.quant_grad,
+        cfg.drhs,
+        True,
+    )
   # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
   # None as grad to it. This is because it is a tuple of Python integers
   # that cannot be traced by Jax.
