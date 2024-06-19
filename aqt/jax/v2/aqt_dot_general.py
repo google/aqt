@@ -402,6 +402,100 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
     self.rhs.context = rhs_context
 
 
+def quant(
+    lhs: jnp.ndarray,
+    rhs: jnp.ndarray,
+    lhs_qt: aqt_tensor.QTensor | None,
+    rhs_qt: aqt_tensor.QTensor | None,
+    dg_quantizer: DotGeneralQuantizer,
+    lhs_cfg: Tensor,
+    rhs_cfg: Tensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    allow_dummy_gradient_into_qtensor: bool
+) -> tuple[
+    tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+    tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
+]:
+  """Quantizes the given lhs and rhs using dg_quantizer."""
+  def _get_calibration_axes(
+      tensor_cfg: Tensor,
+      ndim: int,
+      ca: Sequence[utils.AxisIdx],
+      ba: Sequence[utils.AxisIdx],
+  ) -> Sequence[utils.AxisIdx]:
+    """Computes calibration axes for the given Tensor."""
+    match tensor_cfg.calibration_mode:
+      case CalibrationMode.REMAINING_AXIS:
+        calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
+      case CalibrationMode.CONTRACTING_AXIS:
+        calibration_axes = ca
+      case _:
+        raise ValueError(
+            f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
+        )
+    return calibration_axes
+
+  def _postprocess_qtensor(
+      input_qtensor: Optional[aqt_tensor.QTensor],
+      calculated_qtensor: aqt_tensor.QTensor,
+      quant_grad: aqt_tensor.GradientFn,
+  ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
+    """Compute qtensor from input or input_qtensor."""
+    # TODO(lew): moving this if out of DotGeneralRaw into v2.flax.DotGeneral
+    # would induce huge code simplification here.
+    # E.g. this file would not have to know about DotGeneralQuantizer.
+    if input_qtensor is not None:
+      if not allow_dummy_gradient_into_qtensor:
+        quant_grad = (
+            'Poison. '
+            + 'Gradients are not generally expected in serving. '
+            + 'Please set allow_dummy_gradient_into_qtensor to True '
+            + 'if this is the intended behavior.'
+        )
+      output_qtensor = input_qtensor
+    else:
+      output_qtensor = calculated_qtensor
+
+    return output_qtensor, quant_grad
+
+  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+
+  lhs_calib_axes = _get_calibration_axes(lhs_cfg, lhs.ndim, lhs_ca, lhs_ba)
+  rhs_calib_axes = _get_calibration_axes(rhs_cfg, rhs.ndim, rhs_ca, rhs_ba)
+
+  lhs_incomplete_qt, rhs_incomplete_qt = dg_quantizer.calibrate(
+      (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
+  )
+  if lhs_qt is not None and not lhs_qt.is_full():
+    # Incomplete QTensor is provided as lhs_qt.
+    lhs_incomplete_qt = lhs_qt
+    lhs_qt = None
+
+  if rhs_qt is not None and not rhs_qt.is_full():
+    # Incomplete QTensor is provided as rhs_qt.
+    rhs_incomplete_qt = rhs_qt
+    rhs_qt = None
+
+  lhs_quantized, rhs_quantized = dg_quantizer.calculate_qvalue(
+      lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
+  )
+  lhs_qt_calculated, lhs_quant_grad = lhs_quantized
+  rhs_qt_calculated, rhs_quant_grad = rhs_quantized
+
+  lhs_qt, lhs_quant_grad = _postprocess_qtensor(
+      lhs_qt,
+      lhs_qt_calculated,
+      lhs_quant_grad,
+  )
+
+  rhs_qt, rhs_quant_grad = _postprocess_qtensor(
+      rhs_qt,
+      rhs_qt_calculated,
+      rhs_quant_grad,
+  )
+  return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)
+
+
 @utils.flax_slots_kw_only_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
@@ -480,90 +574,27 @@ class DotGeneralRaw:
             dimension_numbers,
         )
 
-      (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-
       assert isinstance(rhs, jnp.ndarray)
 
-      def _get_calibration_axes(
-          tensor_cfg: Tensor,
-          ndim: int,
-          ca: Sequence[utils.AxisIdx],
-          ba: Sequence[utils.AxisIdx],
-      ) -> Sequence[utils.AxisIdx]:
-        """Computes calibration axes for the given Tensor."""
-        match tensor_cfg.calibration_mode:
-          case CalibrationMode.REMAINING_AXIS:
-            calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
-          case CalibrationMode.CONTRACTING_AXIS:
-            calibration_axes = ca
-          case _:
-            raise ValueError(
-                f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
-            )
-        return calibration_axes
-
-      def _postprocess_qtensor(
-          input_qtensor: Optional[aqt_tensor.QTensor],
-          calculated_qtensor: aqt_tensor.QTensor,
-          quant_grad: aqt_tensor.GradientFn,
-      ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
-        """Compute qtensor from input or input_qtensor."""
-        # TODO(lew): moving this if out of DotGeneralRaw into v2.flax.DotGeneral
-        # would induce huge code simplification here.
-        # E.g. this file would not have to know about DotGeneralQuantizer.
-        if input_qtensor is not None:
-          if not self.allow_dummy_gradient_into_qtensor:
-            quant_grad = (
-                'Poison. '
-                + 'Gradients are not generally expected in serving. '
-                + 'Please set allow_dummy_gradient_into_qtensor to True '
-                + 'if this is the intended behavior.'
-            )
-          output_qtensor = input_qtensor
-        else:
-          output_qtensor = calculated_qtensor
-        return output_qtensor, quant_grad
-
-      lhs_calib_axes = _get_calibration_axes(self.lhs, lhs.ndim, lhs_ca, lhs_ba)
-      rhs_calib_axes = _get_calibration_axes(self.rhs, rhs.ndim, rhs_ca, rhs_ba)
-
-      lhs_incomplete_qt, rhs_incomplete_qt = self.dg_quantizer.calibrate(
-          (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
-      )
-      if lhs_qt is not None and not lhs_qt.is_full():
-        # Incomplete QTensor is provided as lhs_qt.
-        lhs_incomplete_qt = lhs_qt
-        lhs_qt = None
-
-      if rhs_qt is not None and not rhs_qt.is_full():
-        # Incomplete QTensor is provided as rhs_qt.
-        rhs_incomplete_qt = rhs_qt
-        rhs_qt = None
-
-      lhs_quantized, rhs_quantized = self.dg_quantizer.calculate_qvalue(
-          lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
-      )
-      lhs_qt_calculated, lhs_quant_grad = lhs_quantized
-      rhs_qt_calculated, rhs_quant_grad = rhs_quantized
-
-      lhs_qt, lhs_quant_grad = _postprocess_qtensor(
+      (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad) = quant(
+          lhs,
+          rhs,
           lhs_qt,
-          lhs_qt_calculated,
-          lhs_quant_grad,
+          rhs_qt,
+          self.dg_quantizer,
+          self.lhs,
+          self.rhs,
+          dimension_numbers,
+          self.allow_dummy_gradient_into_qtensor
       )
+
       lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
       lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
 
-      rhs_qt, rhs_quant_grad = _postprocess_qtensor(
-          rhs_qt,
-          rhs_qt_calculated,
-          rhs_quant_grad,
-      )
       rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
       rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
 
       # TODO(lew): mt.x above should be clipped for clipping calibrations
-
       out = _qtensor_dot_general(
           lhs_qt, rhs_qt, dimension_numbers, self, jnp.promote_types(lhs, rhs)
       )
@@ -572,6 +603,7 @@ class DotGeneralRaw:
 
       res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
       if self.local_aqt is not None:
+        (lhs_ca, rhs_ca), _ = dimension_numbers
         assert len(lhs_ca) == len(rhs_ca)
         if len(lhs_ca) > 0:
           out = jnp.sum(out, axis=0)
