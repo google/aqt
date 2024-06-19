@@ -888,6 +888,54 @@ def dg_core_vjp_fwd(
   return ((ret, qret), (res, cfg))
 
 
+def _update_dimension_numbers_for_backward(
+    fwd_dimension_numbers: jax.lax.DotDimensionNumbers,
+    y_is_lhs: bool,
+    gradient_rank: int,
+    y_rank: int,
+) -> tuple[jax.lax.DotDimensionNumbers, tuple[int, ...]]:
+  """Generates a new dimension number for backward pass.
+
+  For dot_general(lhs, rhs), the gradients for lhs and rhs are calculated by
+  dot_general(g, rhs) and dot_general(g, lhs). This function generates proper
+  dimension numbers for the dot_generals used for gradient calculation.
+
+  Args:
+    fwd_dimension_numbers: Dimension number used during forward pass
+    y_is_lhs: If set, the function calculates dimension numbers for dlhs.
+    gradient_rank: Rank of the gradient.
+    y_rank: Rank of the other side input.
+  Returns:
+    A tuple of (dimension numbers for gradient dot_general, transpose axes to be
+    applied on the gradient dot_generals output to match with the original
+    argument dimension).
+  """
+  def ranges_like(*xs):
+    start = 0
+    for x in xs:
+      yield tuple(range(start, start + len(x)))
+      start += len(x)
+
+  (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
+  if y_is_lhs:
+    (y_ca, x_ca) = (x_ca, y_ca)
+    (y_ba, x_ba) = (x_ba, y_ba)
+
+  gradient_rank = gradient_rank - y_rank + len(x_ba) + 2 * len(x_ca)
+  x_ra = tuple(utils.get_remaining_axes(gradient_rank, x_ca, x_ba))
+  y_ra = tuple(utils.get_remaining_axes(y_rank, y_ca, y_ba))
+  if y_is_lhs:
+    g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
+  else:
+    g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
+  dims = ((g_ca, y_ra), (g_ba, y_ba))
+
+  x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
+  out_transpose_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
+
+  return dims, out_transpose_axes
+
+
 def dg_core_vjp_bwd(
     fwd_dimension_numbers: lax.DotDimensionNumbers,
     res: tuple[Optional[DotGeneralRes], DotGeneral],
@@ -899,38 +947,19 @@ def dg_core_vjp_bwd(
   assert dg_res is not None, msg
   g = g[0]  # g[1] is gradient with respect to qret which we are ignoring.
 
-  def ranges_like(*xs):
-    start = 0
-    for x in xs:
-      yield tuple(range(start, start + len(x)))
-      start += len(x)
-
   def grad_dot_general(
       y_res: TensorRes,
       quant_grad: aqt_tensor.GradientFn,
       dg_raw: DotGeneralRaw,
       y_is_lhs,
   ):
-    y_ndim = y_res.mt.x.ndim
-
-    (x_ca, y_ca), (x_ba, y_ba) = fwd_dimension_numbers
-    if y_is_lhs:
-      (y_ca, x_ca) = (x_ca, y_ca)
-      (y_ba, x_ba) = (x_ba, y_ba)
-    g_ndim = g.ndim - y_ndim + len(x_ba) + 2 * len(x_ca)
-    x_ra = tuple(utils.get_remaining_axes(g_ndim, x_ca, x_ba))
-    y_ra = tuple(utils.get_remaining_axes(y_ndim, y_ca, y_ba))
-    if y_is_lhs:
-      g_ba, g_ca, _ = ranges_like(x_ba, y_ra, x_ra)
-    else:
-      g_ba, _, g_ca = ranges_like(x_ba, x_ra, y_ra)
-    dims = ((g_ca, y_ra), (g_ba, y_ba))
+    dims, out_transpose_axes = _update_dimension_numbers_for_backward(
+        fwd_dimension_numbers, y_is_lhs, g.ndim, y_res.mt.x.ndim
+    )
 
     out, _ = dg_raw(g, y_res.mt, None, None, dims)
 
-    x_ca_sorted_by_y = tuple(onp.take(x_ca, onp.argsort(y_ca)))
-    out_axes = tuple(onp.argsort(tuple(x_ba) + x_ra + x_ca_sorted_by_y))
-    transposed_out = jax.lax.transpose(out, out_axes)
+    transposed_out = jax.lax.transpose(out, out_transpose_axes)
     if quant_grad is not None:
       transposed_out = quant_grad(transposed_out)[0]
     return transposed_out
