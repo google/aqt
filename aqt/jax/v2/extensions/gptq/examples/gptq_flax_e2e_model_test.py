@@ -22,6 +22,7 @@ from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.extensions.gptq.examples import gptq_flax_e2e_model
+from aqt.jax.v2.numerics import int_numerics
 import jax
 import jax.numpy as jnp
 
@@ -33,6 +34,19 @@ def _dummy_dataset(ds_size, image_rng, label_rng):
           key=label_rng, shape=(ds_size,), minval=0, maxval=10
       ),
   }
+
+
+def _get_numerics(bits):
+  return int_numerics.IntNumerics(
+      bits=bits,
+      preserve_zero=True,
+      preserve_max_val=False,
+      clip=True,
+      round=True,
+      noise_fn=None,
+      clip_gradient=False,
+      dtype=utils.infer_dtype_from_bits(bits),
+  )
 
 
 class GptqTest(parameterized.TestCase):
@@ -121,6 +135,7 @@ class GptqTest(parameterized.TestCase):
     serve_fn, model_serving = gptq_flax_e2e_model.serving_conversion(state)
     dtype = jnp.dtype
     expected_dtype = dtype("int8")
+    expected_numerics = _get_numerics(8)
     expected_aqt_pytree = {
         "AqtEinsum_0": {
             "AqtDotGeneral_0": {
@@ -129,7 +144,8 @@ class GptqTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 },
             }
@@ -141,7 +157,8 @@ class GptqTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 }
             }
@@ -153,11 +170,12 @@ class GptqTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
                         scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
+                        numerics=expected_numerics,
                     )
                 }
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(

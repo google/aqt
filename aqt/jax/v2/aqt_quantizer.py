@@ -61,16 +61,18 @@ class Quantizer:
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """The core quantizing function."""
     qt = self.calibrate(x, calibration_axes=calibration_axes)
-    qt, quant_grad = self.calculate_qvalue(x, qt)
-    return qt, quant_grad
+    return self.calculate_qvalue(x, qt)
 
   def calibrate(self, x, *, calibration_axes) -> aqt_tensor.QTensor:
     """Create incomplete QTensor with only quantization parameters."""
     if isinstance(self.numerics, no_numerics.NoNumerics):
-      qt = aqt_tensor.QTensor(
-          qvalue=x, scale=[], scale_t=None, dequant_dtype=x.dtype
+      return aqt_tensor.QTensor(
+          qvalue=x,
+          scale=[],
+          scale_t=None,
+          dequant_dtype=x.dtype,
+          numerics=self.numerics,
       )
-      return qt
 
     dequant_dtype = x.dtype
     # TODO(lew): We should cast earlier. xhs_q should be in cfg.xhs.dtype
@@ -101,6 +103,7 @@ class Quantizer:
         scale=[scale],
         scale_t=None,
         dequant_dtype=dequant_dtype,
+        numerics=self.numerics,
     )
     return qt
 
@@ -110,20 +113,7 @@ class Quantizer:
       qt: aqt_tensor.QTensor
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """Uses the quantization parameters in qt to quantize x."""
-    if isinstance(self.numerics, no_numerics.NoNumerics):
-      return qt, None
-
-    # TODO: b/333984742 - make numeric as a member of QTensor, and put
-    # numerics-related logics into the QTensor.
-    qt = qt.quant(x)
-
-    # TODO(lew): A logical thing would be if this call was part of
-    # QTensor.quant.
-    x_q, res = self.numerics.vjp_fwd(qt.qvalue, self.context)
-    quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
-
-    qt = qt.replace(qvalue=x_q)
-    return qt, quant_grad
+    return qt.quant(x, self.context)
 
 
 def quantizer_make(
