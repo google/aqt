@@ -511,6 +511,51 @@ def quant(
   return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)
 
 
+def _maybe_use_fwd_quant(
+    lhs: jnp.ndarray,
+    rhs: MultiTensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers,
+    use_fwd_quant: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+  """Applies already quantized value for backpropagation, if the flag is set.
+
+  Note that we cannot directly use the quantized rhs for gradient calculation,
+  since the dimension numbers are changed.
+
+  Args:
+    lhs: Left hand size of gradient dot_general.
+    rhs: Right hand size of gradient dot_general.
+    dimension_numbers: Dot_general dimension numbers.
+    use_fwd_quant: Flag to use forward quantization.
+  Returns:
+    A tuple of updated (lhs, rhs). If use_fwd_quant is True, lhs is multiplied
+    with rhs scale, while rhs is set to the original rhs's qvalue.
+  """
+  fwd_quantized = rhs.qx.scale is not None and len(rhs.qx.scale) == 1
+  msg = (
+      f'Found use_fwd_quant is {use_fwd_quant} in bwd, but fwd is not'
+      ' quantized.'
+  )
+  if use_fwd_quant:
+    assert fwd_quantized, msg
+    scale_t = transpose.rhs_scale_transpose_for_lhs_input(
+        rhs.qx.scale[0], dimension_numbers, lhs.shape
+    )
+
+    # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
+    # avoid an unexpected upcast when rhs is float32 but lhs is float16.
+    lhs = lhs * scale_t.astype(lhs.dtype)
+
+    # rhs qvalue may be integer. It will be quantized again later, so cast
+    # its dtype back to dequant dtype.
+    # TODO(yichizh): avoid double quantization and evaluate model quality.
+    rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)
+  else:
+    rhs = rhs.x
+
+  return lhs, rhs
+
+
 @utils.flax_slots_kw_only_dataclass
 class DotGeneralRaw:
   """Configuration of quantization of one dot_general without gradient."""
@@ -553,28 +598,10 @@ class DotGeneralRaw:
       #  - Add a "FQ" case we multiply qx.value*qx.value_scale (not transposed).
       #  - Can we carry untransposed scale and transpose here?
       if isinstance(rhs, MultiTensor):
-        # We are in gradient code.
-        fwd_quantized = rhs.qx.scale is not None and len(rhs.qx.scale) == 1  # pytype: disable=attribute-error
-        msg = (
-            f'Found use_fwd_quant is {self.rhs.use_fwd_quant} in bwd, but fwd'
-            ' is not quantized.'
+        lhs, rhs = _maybe_use_fwd_quant(
+            lhs, rhs, dimension_numbers, self.rhs.use_fwd_quant
         )
-        if self.rhs.use_fwd_quant:
-          assert fwd_quantized, msg
-          scale_t = transpose.rhs_scale_transpose_for_lhs_input(
-              rhs.qx.scale[0], dimension_numbers, lhs.shape  # pytype: disable=attribute-error
-          )
-
-          # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
-          # avoid an unexpected upcast when rhs is float32 but lhs is float16.
-          lhs = lhs * scale_t.astype(lhs.dtype)  # pytype: disable=attribute-error
-
-          # rhs qvalue may be integer. It will be quantized again later, so cast
-          # its dtype back to dequant dtype.
-          # TODO(yichizh): avoid double quantization and evaluate model quality.
-          rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)  # pytype: disable=attribute-error
-        else:
-          rhs = rhs.x  # pytype: disable=attribute-error
+      assert isinstance(rhs, jnp.ndarray)
 
       # TODO(lew): Define cutsom_vjp on tiled_dot_general and replace local_aqt.
       if self.local_aqt is not None:
@@ -588,8 +615,6 @@ class DotGeneralRaw:
             rhs,
             dimension_numbers,
         )
-
-      assert isinstance(rhs, jnp.ndarray)
 
       (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad) = quant(
           lhs,
