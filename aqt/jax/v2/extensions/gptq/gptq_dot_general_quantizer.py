@@ -341,7 +341,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
     # lhs and rhs should be quantized separately here with the updated values.
     lhs_qt = self.lhs.calibrate(lhs, calibration_axes=lhs_ca)
     rhs_qt = self.rhs.calibrate(rhs, calibration_axes=rhs_ca)
-    return (lhs_qt, rhs_qt)
+    return ((lhs, lhs_qt), (rhs, rhs_qt))
 
   def swap_lhs_and_rhs(self) -> None:
     """Swaps lhs and rhs configuration."""

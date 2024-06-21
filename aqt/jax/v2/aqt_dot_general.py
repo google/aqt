@@ -281,9 +281,7 @@ class DotGeneralQuantizer(abc.ABC):
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
   ]:
-    lhs, _ = lhs_quantization_info
-    rhs, _ = rhs_quantization_info
-    lhs_qt, rhs_qt = self.calibrate(
+    (lhs, lhs_qt), (rhs, rhs_qt) = self.calibrate(
         lhs_quantization_info, rhs_quantization_info
     )
     return self.calculate_qvalue(lhs, lhs_qt, rhs, rhs_qt)
@@ -297,8 +295,22 @@ class DotGeneralQuantizer(abc.ABC):
       self,
       lhs_quantization_info: tuple[jax.Array, Sequence[int]],
       rhs_quantization_info: tuple[jax.Array, Sequence[int]],
-  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]:
-    """Calculates incomplete QTensor from the given inputs."""
+  ) -> tuple[
+      tuple[jax.Array, aqt_tensor.QTensor],
+      tuple[jax.Array, aqt_tensor.QTensor]
+  ]:
+    """Calculates incomplete QTensor from the given inputs.
+
+    The function calculates incomplete QTensor from the given inputs. It also
+    returns the updated lhs and rhs during calibration.
+
+    Args:
+      lhs_quantization_info: left argument and its contracting axis.
+      rhs_quantization_info: right argument and its contracting axis:
+    Returns:
+      A tuple of (lhs, lhs_qt), (rhs, rhs_qt) where lhs and rhs are updated
+      arguments and lhs_qt and rhs_qt are incomplete QTensor.
+    """
     pass
 
   # TODO(lew): There is only one meaningful implementation of
@@ -358,12 +370,15 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
       self,
       lhs_quantization_info: tuple[jax.Array, Sequence[int]],
       rhs_quantization_info: tuple[jax.Array, Sequence[int]],
-  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]:
+  ) -> tuple[
+      tuple[jax.Array, aqt_tensor.QTensor],
+      tuple[jax.Array, aqt_tensor.QTensor]
+  ]:
     lhs_input, lhs_ca = lhs_quantization_info
     rhs_input, rhs_ca = rhs_quantization_info
     lhs_qt = self.lhs.calibrate(lhs_input, calibration_axes=lhs_ca)
     rhs_qt = self.rhs.calibrate(rhs_input, calibration_axes=rhs_ca)
-    return (lhs_qt, rhs_qt)
+    return ((lhs_input, lhs_qt), (rhs_input, rhs_qt))
 
   def calculate_qvalue(
       self,
@@ -463,7 +478,7 @@ def quant(
   lhs_calib_axes = _get_calibration_axes(lhs_cfg, lhs.ndim, lhs_ca, lhs_ba)
   rhs_calib_axes = _get_calibration_axes(rhs_cfg, rhs.ndim, rhs_ca, rhs_ba)
 
-  lhs_incomplete_qt, rhs_incomplete_qt = dg_quantizer.calibrate(
+  (lhs, lhs_incomplete_qt), (rhs, rhs_incomplete_qt) = dg_quantizer.calibrate(
       (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
   )
   if lhs_qt is not None and not lhs_qt.is_full():
