@@ -43,6 +43,7 @@ class Quantizer:
   _calibrator: AbstractAqtCalibration | None = utils.static_field(default=None)
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool = utils.static_field()
+  scale_dtype: jnp.dtype | None = utils.static_field(default=None)
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   context: utils.Context
 
@@ -85,6 +86,8 @@ class Quantizer:
     bound = self._calibrator.get_bound(x, shared_axes, self.context)
     abs_max_mapped_to = self.numerics.abs_val_mapped_to()
     scale = bound / abs_max_mapped_to
+    if self.scale_dtype:
+      scale = scale.astype(self.scale_dtype)
 
     if self.po2_scale:
       # With floor the biggest value (we are using jnp.max) is in the range of
