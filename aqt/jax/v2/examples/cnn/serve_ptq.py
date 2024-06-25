@@ -50,10 +50,6 @@ def run(train_ds: dict[str, jax.Array], test_ds: dict[str, jax.Array]) -> None:
       aqt_cfg,
       fwd_lhs_bit=None if _WEIGHT_ONLY.value else 8,
       fwd_rhs_bit=8,
-      dlhs_lhs_bit=None,
-      dlhs_rhs_bit=None,
-      drhs_lhs_bit=None,
-      drhs_rhs_bit=None,
   )
   loss = aqt_utils.serve_quantized(
       cnn_model.CNN, test_ds, aqt_cfg, state.model_vars, act_calibrated=False
