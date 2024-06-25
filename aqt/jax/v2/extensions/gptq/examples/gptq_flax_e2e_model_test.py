@@ -126,10 +126,10 @@ class GptqTest(parameterized.TestCase):
             "AqtDotGeneral_0": {
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        qvalue=(expected_dtype, (2, 5, 10)),
+                        scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
             }
@@ -138,10 +138,10 @@ class GptqTest(parameterized.TestCase):
             "AqtDotGeneral_0": {
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                        qvalue=(expected_dtype, (2, 1568, 256)),
+                        scale=[(dtype("float32"), (2, 1, 256))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 }
             }
@@ -150,14 +150,14 @@ class GptqTest(parameterized.TestCase):
             "AqtDotGeneral_0": {
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        qvalue=(expected_dtype, (2, 128, 10)),
+                        scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 }
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(

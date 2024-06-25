@@ -113,15 +113,11 @@ class Cfg:
       self,
       lhs_shape: tuple[AxisSize, ...],
       rhs_shape: tuple[AxisSize, ...],
-      dimension_numbers: jax.lax.DotDimensionNumbers,
   ) -> Self:
     """Makes lhs and rhs to cover all the axes."""
     new_cfg = copy.deepcopy(self)
-    (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-    lhs_ra = get_ra(len(lhs_shape), lhs_ca, lhs_ba)
-    rhs_ra = get_ra(len(rhs_shape), rhs_ca, rhs_ba)
 
-    def f(axes_cfg, axes, shape):
+    def f(axes_cfg, shape):
       # add missing tile_count
       for axis_tiling in axes_cfg:
         tc = axis_tiling.tile_count
@@ -136,32 +132,35 @@ class Cfg:
             f' {axis_tiling.tile_count} tiles.'
         )
         assert axis_tiling.tile_size * axis_tiling.tile_count == axis_shape, msg
-      # add missing tiled axis
-      axis_in_cfg = [ax.axis for ax in axes_cfg]
-      for axis in axes:
-        if axis not in axis_in_cfg:
-          axes_cfg.append(
-              AxisTiling(axis=axis, tile_count=1, tile_size=shape[axis])
-          )
 
-    f(new_cfg.lhs.contraction_axes, lhs_ca, lhs_shape)
-    f(new_cfg.lhs.remaining_axes, lhs_ra, lhs_shape)
-    f(new_cfg.rhs.contraction_axes, rhs_ca, rhs_shape)
-    f(new_cfg.rhs.remaining_axes, rhs_ra, rhs_shape)
+    f(new_cfg.lhs.contraction_axes, lhs_shape)
+    f(new_cfg.lhs.remaining_axes, lhs_shape)
+    f(new_cfg.rhs.contraction_axes, rhs_shape)
+    f(new_cfg.rhs.remaining_axes, rhs_shape)
     return new_cfg
 
 
-def interleave(ls, rs):
-  assert len(ls) == len(rs)
+def interleave(tile_count, tile_size, tile_map, remaining_axes, product=False):
+  """Interleave the tile_count and tile_size of remaining axes."""
+  tile_count = list(tile_count)
+  tile_size = list(tile_size)
   ret = []
-  for l, r in zip(ls, rs):
-    ret.append(l)
-    ret.append(r)
+  # For each tile size, check if the length of the tile_map is 1 or 2.
+  # If 1, the axis is not tiled. Directly append the tile size to ret.
+  # If 2, the axis is tiled. Populate a tile count and append it to ret.
+  for i in range(len(tile_size)):
+    ts = tile_size[i]
+    if len(tile_map[remaining_axes[i]]) > 1:
+      tc = tile_count.pop(0)
+    else:
+      tc = None  # None means not tiled. It is different from tiled but tc=1.
+    if product:
+      ret.append(ts if tc is None else tc * ts)
+    else:
+      ret.extend((ts,) if tc is None else (tc, ts))
+  msg = 'Remaining axes tile count and tile size are not fully interleaved.'
+  assert len(tile_count) == 0, msg
   return ret
-
-
-def zip_product(l, r):
-  return map(lambda x, y: x * y, l, r)
 
 
 def get_ra(rank, ca, ba) -> list[AxisIdx]:
@@ -253,28 +252,27 @@ class TilingState:
   def to_tiled_axes_transposed(
       self,
       axes: Iterable[AxisIdx | str],
-      tile_level: int,
-  ) -> tuple[list[AxisIdx], ...]:
+  ) -> tuple[list[AxisIdx], list[AxisIdx] | None]:
     # pylint: disable=g-doc-args,g-doc-return-or-yield
     """The given 'axes' parameter defines axes in untiled represented Array.
 
-    Function returns the corresponding AxisIdxs in self.x which is tiled. So for
-    each give element of axes we can have multiple tiled axes. Function requires
-    that the tile granularity is the same for all axes and equal to the given
-    tile_level.
-
-    tile_level = 1 for untiled axis
-    tile_level = 2 for normally (one axis split into two) tiled.
+    Function returns the corresponding tile count and tile size AxisIdxs in
+    self.x which is tiled.
+    The return value depends on the length of the tile_map[ai].
+    If the length is 2, 1st element is tile count and 2nd element is tile size
+    If the length is 1, the only element is tile size.
     """
-    lsts = [self.tile_map[ai] for ai in axes]
-    msg = (
-        'all requested axes should have the same tile level, but we have:'
-        f' {lsts=} for {axes=}'
-    )
-    assert all(map(lambda tiled_ais: len(tiled_ais) == tile_level, lsts)), msg
-    if lsts == []:
-      return ([],) * tile_level
-    return tuple(map(list, zip(*lsts)))
+    tile_count = []
+    tile_size = []
+    for ai in axes:
+      tiled = self.tile_map[ai]
+      match len(tiled):
+        case 1:
+          tile_size.append(tiled[0])
+        case 2:
+          tile_count.append(tiled[0])
+          tile_size.append(tiled[1])
+    return tile_count, tile_size
 
 
 def print_dimension_numbers(dimension_numbers, lhs, rhs, label) -> None:
@@ -326,7 +324,7 @@ def generate_tiling_states_for_dot_general(
   # Config pre-processing and verification
 
   cfg = copy.deepcopy(cfg)
-  cfg = cfg.complete_missing(lhs.shape, rhs.shape, dimension_numbers)
+  cfg = cfg.complete_missing(lhs.shape, rhs.shape)
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
   lhs_ra = get_ra(lhs.ndim, lhs_ca, lhs_ba)
   rhs_ra = get_ra(rhs.ndim, rhs_ca, rhs_ba)
@@ -359,10 +357,10 @@ def generate_tiling_states_for_dot_general(
 
   # DotGeneral reshapeing
 
-  xlhs_ra_tile, _ = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
+  xlhs_ra_tile, _ = xlhs.to_tiled_axes_transposed(lhs_ra)
   xrhs.broadcast_to_other(xlhs.axes_shape(xlhs_ra_tile))
 
-  xrhs_ra_tile, _ = xrhs.to_tiled_axes_transposed(rhs_ra, 2)
+  xrhs_ra_tile, _ = xrhs.to_tiled_axes_transposed(rhs_ra)
   xlhs.broadcast_to_other(xrhs.axes_shape(xrhs_ra_tile))
 
   return xlhs, xrhs
@@ -384,16 +382,18 @@ def tiled_dot_general_with_tiling_states(
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = untiled_dimension_numbers
   lhs_ra = get_ra(lhs.ndim, lhs_ca, lhs_ba)
   rhs_ra = get_ra(rhs.ndim, rhs_ca, rhs_ba)
-  xlhs_ca_tile, xlhs_ca = xlhs.to_tiled_axes_transposed(lhs_ca, 2)
-  xlhs_ra_tile, xlhs_ra = xlhs.to_tiled_axes_transposed(lhs_ra, 2)
-  xrhs_ca_tile, xrhs_ca = xrhs.to_tiled_axes_transposed(rhs_ca, 2)
-  xrhs_ra_tile, xrhs_ra = xrhs.to_tiled_axes_transposed(rhs_ra, 2)
+  xlhs_ca_tile, xlhs_ca = xlhs.to_tiled_axes_transposed(lhs_ca)
+  xlhs_ra_tile, xlhs_ra = xlhs.to_tiled_axes_transposed(lhs_ra)
+  xrhs_ca_tile, xrhs_ca = xrhs.to_tiled_axes_transposed(rhs_ca)
+  xrhs_ra_tile, xrhs_ra = xrhs.to_tiled_axes_transposed(rhs_ra)
   xlhs_bcast = xlhs.get_broadcasted_tile_map_indexes()
   xrhs_bcast = xrhs.get_broadcasted_tile_map_indexes()
-  (xlhs_ra_tile_other,) = xlhs.to_tiled_axes_transposed(xlhs_bcast, 1)
-  (xrhs_ra_tile_other,) = xrhs.to_tiled_axes_transposed(xrhs_bcast, 1)
-  (xlhs_ba,) = xlhs.to_tiled_axes_transposed(lhs_ba, 1)
-  (xrhs_ba,) = xrhs.to_tiled_axes_transposed(rhs_ba, 1)
+  # We can pattern match against [] because batch axes can't be tiled and
+  # all of them will be returned as tile sizes.
+  [], xlhs_ra_tile_other = xlhs.to_tiled_axes_transposed(xlhs_bcast)
+  [], xrhs_ra_tile_other = xrhs.to_tiled_axes_transposed(xrhs_bcast)
+  [], xlhs_ba = xlhs.to_tiled_axes_transposed(lhs_ba)
+  [], xrhs_ba = xrhs.to_tiled_axes_transposed(rhs_ba)
 
   tiled_ca = (xlhs_ca, xrhs_ca)
   tiled_ba = (
@@ -402,8 +402,8 @@ def tiled_dot_general_with_tiling_states(
   )
   tiled_dimension_numbers = (tiled_ca, tiled_ba)
 
-  tiled_lhs_ra = get_ra(lhs.ndim, tiled_ca[0], tiled_ba[0])
-  tiled_rhs_ra = get_ra(rhs.ndim, tiled_ca[1], tiled_ba[1])
+  tiled_lhs_ra = get_ra(xlhs_x.ndim, tiled_ca[0], tiled_ba[0])
+  tiled_rhs_ra = get_ra(xrhs_x.ndim, tiled_ca[1], tiled_ba[1])
   g_msg = (
       'After tiling: \n'
       f' lhs: lhs.shape={xlhs_x.shape}, lhs_ca={tiled_ca[0]},'
@@ -485,14 +485,22 @@ def tiled_dot_general_with_tiling_states(
 
   out = out.transpose(
       new_ba
-      + interleave(new_lhs_ra_tile, new_lhs_ra)
-      + interleave(new_rhs_ra_tile, new_rhs_ra)
+      + interleave(new_lhs_ra_tile, new_lhs_ra, xlhs.tile_map, lhs_ra)
+      + interleave(new_rhs_ra_tile, new_rhs_ra, xrhs.tile_map, rhs_ra)
   )
 
-  lhs_ra_sh_interleaved = tuple(interleave(lhs_ra_tile_sh, lhs_ra_sh))
-  rhs_ra_sh_interleaved = tuple(interleave(rhs_ra_tile_sh, rhs_ra_sh))
-  lhs_ra_sh_flattened = tuple(zip_product(lhs_ra_tile_sh, lhs_ra_sh))
-  rhs_ra_sh_flattened = tuple(zip_product(rhs_ra_tile_sh, rhs_ra_sh))
+  lhs_ra_sh_interleaved = tuple(
+      interleave(lhs_ra_tile_sh, lhs_ra_sh, xlhs.tile_map, lhs_ra)
+  )
+  rhs_ra_sh_interleaved = tuple(
+      interleave(rhs_ra_tile_sh, rhs_ra_sh, xrhs.tile_map, rhs_ra)
+  )
+  lhs_ra_sh_flattened = tuple(
+      interleave(lhs_ra_tile_sh, lhs_ra_sh, xlhs.tile_map, lhs_ra, product=True)
+  )
+  rhs_ra_sh_flattened = tuple(
+      interleave(rhs_ra_tile_sh, rhs_ra_sh, xrhs.tile_map, rhs_ra, product=True)
+  )
 
   g_msg += f'After transpose {out.shape=} \n'
   assert (

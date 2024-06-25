@@ -135,10 +135,10 @@ class MnistTest(parameterized.TestCase):
                 "AqtDotGeneral_0": {
                     "qlhs": {
                         "frozen": aqt_tensor.QTensor(
-                            qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
-                            scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                            qvalue=(expected_dtype, (2, 5, 10)),
+                            scale=[(dtype("float32"), (2, 1, 10))],
                             scale_t=None,
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
                         )
                     }
                 }
@@ -148,17 +148,16 @@ class MnistTest(parameterized.TestCase):
                     "qrhs": {
                         "frozen": aqt_tensor.QTensor(
                             # The weight shape was (3136, 256) before tiling.
-                            # After tiling it is (2, 1568, 1, 256).
+                            # After tiling it is (2, 1568, 256).
                             # Contraction shape 3136 is tiled to (2, 1568).
-                            # The remaining shape 256 is not tiled, so (1, 256).
-                            # Broadcast to other side adds a leading shape of 1.
-                            qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
-                            scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                            # The remaining shape 256 is not tiled.
+                            qvalue=(expected_dtype, (2, 1568, 256)),
+                            scale=[(dtype("float32"), (2, 1, 256))],
                             # The scale_t shape was (1, 256) before tiling.
-                            # After tiling the scale shape is (1, 2, 1, 1, 256),
-                            # then transposed to (2, 1, 1, 1, 256).
+                            # After tiling the scale shape is (2, 1, 256),
+                            # then transposed to (2, 1, 256).
                             scale_t=None,
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
                         )
                     }
                 }
@@ -168,21 +167,20 @@ class MnistTest(parameterized.TestCase):
                     "qrhs": {
                         "frozen": aqt_tensor.QTensor(
                             # The weight shape was (256, 10) before tiling.
-                            # After tiling it is (2, 128, 1, 10).
+                            # After tiling it is (2, 128, 10).
                             # Contraction shape 256 is tiled to (2, 128).
-                            # The remaining shape 10 is not tiled, so (1, 10).
-                            # Broadcast to other side adds a leading shape of 1.
-                            qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
-                            scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                            # The remaining shape 10 is not tiled.
+                            qvalue=(expected_dtype, (2, 128, 10)),
+                            scale=[(dtype("float32"), (2, 1, 10))],
                             # The scale_t shape was (1, 10) before tiling.
-                            # After tiling the scale shape is (1, 2, 1, 1, 10),
-                            # then transposed to (2, 1, 1, 1, 10).
+                            # After tiling the scale shape is (2, 1, 10),
+                            # then transposed to (2, 1, 10).
                             scale_t=None,
-                            dequant_dtype=dtype("float32")
+                            dequant_dtype=dtype("float32"),
                         )
                     }
                 }
-            }
+            },
         },
         "batch_stats": {
             "BatchNorm_0": {
@@ -329,33 +327,39 @@ class MnistTest(parameterized.TestCase):
             "AqtDotGeneral_0": {
                 "MeanOfAbsMaxCalibration_0": {
                     "count": (dtype("int32"), ()),
-                    "sum_of_max": (dtype("float32"), (1, 1, 1, 1, 1))
+                    "sum_of_max": (dtype("float32"), (1, 1, 1)),
                 },
                 "MeanOfAbsMaxCalibration_1": {
                     "count": (dtype("int32"), ()),
-                    "sum_of_max": (dtype("float32"), (1, 2, 1, 1, 10))
-                }}},
+                    "sum_of_max": (dtype("float32"), (2, 1, 10)),
+                },
+            }
+        },
         "Dense_0": {
             "AqtDotGeneral_0": {
                 "MeanOfAbsMaxCalibration_0": {
                     "count": (dtype("int32"), ()),
-                    "sum_of_max": (dtype("float32"), (1, 1, 1, 1, 1))
+                    "sum_of_max": (dtype("float32"), (1, 1, 1)),
                 },
                 "MeanOfAbsMaxCalibration_1": {
                     "count": (dtype("int32"), ()),
-                    "sum_of_max": (dtype("float32"), (1, 2, 1, 1, 256))
-                }}},
+                    "sum_of_max": (dtype("float32"), (2, 1, 256)),
+                },
+            }
+        },
         "Dense_1": {
             "AqtDotGeneral_0": {
                 "MeanOfAbsMaxCalibration_0": {
                     "count": (dtype("int32"), ()),
-                    "sum_of_max": (dtype("float32"), (1, 1, 1, 1, 1))
+                    "sum_of_max": (dtype("float32"), (1, 1, 1)),
                 },
                 "MeanOfAbsMaxCalibration_1": {
                     "count": (dtype("int32"), ()),
-                    "sum_of_max": (dtype("float32"), (1, 2, 1, 1, 10))
-                }}}}
-
+                    "sum_of_max": (dtype("float32"), (2, 1, 10)),
+                },
+            }
+        },
+    }
     utils.test_pprint_eq(expected_calibration_pytree, calibration_pytree["qc"])
 
     # The count number should be equal to the number of calibration.
@@ -399,20 +403,20 @@ class MnistTest(parameterized.TestCase):
             "AqtDotGeneral_0": {
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        qvalue=(expected_dtype, (2, 5, 10)),
+                        scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
-                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
-                }
+                },
             }
         },
         "Dense_0": {
@@ -420,19 +424,19 @@ class MnistTest(parameterized.TestCase):
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
-                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                        qvalue=(expected_dtype, (2, 1568, 256)),
+                        scale=[(dtype("float32"), (2, 1, 256))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
-                }
+                },
             }
         },
         "Dense_1": {
@@ -440,21 +444,21 @@ class MnistTest(parameterized.TestCase):
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
-                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        qvalue=(expected_dtype, (2, 128, 10)),
+                        scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
-                }
+                },
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(
@@ -538,51 +542,58 @@ class MnistTest(parameterized.TestCase):
         "AqtEinsum_0": {
             "AqtDotGeneral_0": {
                 "WeightedStatsCalibration_0": {
-                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_ones": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_ones": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_vals": (dtype("float32"), (1, 1, 1)),
                 },
                 "WeightedStatsCalibration_1": {
-                    "max_of_abs_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_l1_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_lp_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_ones": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                }}},
+                    "max_of_abs_vals": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_l1_vals": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_lp_vals": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_ones": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_vals": (dtype("float32"), (2, 1, 10)),
+                },
+            }
+        },
         "Dense_0": {
             "AqtDotGeneral_0": {
                 "WeightedStatsCalibration_0": {
-                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_ones": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_ones": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_vals": (dtype("float32"), (1, 1, 1)),
                 },
                 "WeightedStatsCalibration_1": {
-                    "max_of_abs_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
-                    "sum_of_l1_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
-                    "sum_of_lp_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
-                    "sum_of_ones": (dtype("float32"), (1, 2, 1, 1, 256)),
-                    "sum_of_vals": (dtype("float32"), (1, 2, 1, 1, 256)),
-                }}},
+                    "max_of_abs_vals": (dtype("float32"), (2, 1, 256)),
+                    "sum_of_l1_vals": (dtype("float32"), (2, 1, 256)),
+                    "sum_of_lp_vals": (dtype("float32"), (2, 1, 256)),
+                    "sum_of_ones": (dtype("float32"), (2, 1, 256)),
+                    "sum_of_vals": (dtype("float32"), (2, 1, 256)),
+                },
+            }
+        },
         "Dense_1": {
             "AqtDotGeneral_0": {
                 "WeightedStatsCalibration_0": {
-                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_ones": (dtype("float32"), (1, 1, 1, 1, 1)),
-                    "sum_of_vals": (dtype("float32"), (1, 1, 1, 1, 1)),
+                    "max_of_abs_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_l1_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_lp_vals": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_ones": (dtype("float32"), (1, 1, 1)),
+                    "sum_of_vals": (dtype("float32"), (1, 1, 1)),
                 },
                 "WeightedStatsCalibration_1": {
-                    "max_of_abs_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_l1_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_lp_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_ones": (dtype("float32"), (1, 2, 1, 1, 10)),
-                    "sum_of_vals": (dtype("float32"), (1, 2, 1, 1, 10)),
-                }}}}
+                    "max_of_abs_vals": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_l1_vals": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_lp_vals": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_ones": (dtype("float32"), (2, 1, 10)),
+                    "sum_of_vals": (dtype("float32"), (2, 1, 10)),
+                },
+            }
+        },
+    }
 
     utils.test_pprint_eq(expected_trained_pytree, trained_pytree["qc"])
 
@@ -610,20 +621,20 @@ class MnistTest(parameterized.TestCase):
             "AqtDotGeneral_0": {
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 5, 1, 10)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        qvalue=(expected_dtype, (2, 5, 10)),
+                        scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
-                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
-                }
+                },
             }
         },
         "Dense_0": {
@@ -631,19 +642,19 @@ class MnistTest(parameterized.TestCase):
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
-                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 1568, 1, 256)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 256))],
+                        qvalue=(expected_dtype, (2, 1568, 256)),
+                        scale=[(dtype("float32"), (2, 1, 256))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
-                }
+                },
             }
         },
         "Dense_1": {
@@ -651,21 +662,21 @@ class MnistTest(parameterized.TestCase):
                 "qlhs": {
                     "frozen": aqt_tensor.QTensor(
                         qvalue=None,
-                        scale=[(dtype("float32"), (1, 1, 1, 1, 1))],
+                        scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
                 },
                 "qrhs": {
                     "frozen": aqt_tensor.QTensor(
-                        qvalue=(expected_dtype, (1, 2, 128, 1, 10)),
-                        scale=[(dtype("float32"), (1, 2, 1, 1, 10))],
+                        qvalue=(expected_dtype, (2, 128, 10)),
+                        scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
-                        dequant_dtype=dtype("float32")
+                        dequant_dtype=dtype("float32"),
                     )
-                }
+                },
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(
@@ -721,27 +732,27 @@ class MnistTest(parameterized.TestCase):
         "AqtEinsum_0": {
             "AqtDotGeneral_0": {
                 "qlhs": {
-                    "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
-                    "value": (dtype("int8"), (1, 2, 5, 1, 10)),
+                    "scale": (dtype("float32"), (2, 1, 10)),
+                    "value": (dtype("int8"), (2, 5, 10)),
                 }
             }
         },
         "Dense_0": {
             "AqtDotGeneral_0": {
                 "qrhs": {
-                    "scale": (dtype("float32"), (2, 1, 1, 1, 256)),
-                    "value": (dtype("int8"), (1, 2, 1568, 1, 256)),
+                    "scale": (dtype("float32"), (2, 1, 256)),
+                    "value": (dtype("int8"), (2, 1568, 256)),
                 }
             }
         },
         "Dense_1": {
             "AqtDotGeneral_0": {
                 "qrhs": {
-                    "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
-                    "value": (dtype("int8"), (1, 2, 128, 1, 10)),
+                    "scale": (dtype("float32"), (2, 1, 10)),
+                    "value": (dtype("int8"), (2, 128, 10)),
                 }
             }
-        }
+        },
     }
 
     serving_pytree = jax.tree_util.tree_map(

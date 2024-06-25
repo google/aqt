@@ -138,15 +138,14 @@ class MnistTest(parameterized.TestCase):
                 "AqtDotGeneral_0": {
                     "qrhs": {
                         # The scale_t shape was (1, 256) before tiling.
-                        # After tiling the scale shape is (1, 2, 1, 1, 256),
-                        # then transposed to (2, 1, 1, 1, 256).
-                        "scale": (dtype("float32"), (2, 1, 1, 1, 256)),
+                        # After tiling the scale shape is (2, 1, 256),
+                        # then transposed to (2, 1, 256).
+                        "scale": (dtype("float32"), (2, 1, 256)),
                         # The weight shape was (3136, 256) before tiling.
-                        # After tiling it is (2, 1568, 1, 256).
+                        # After tiling it is (2, 1568, 256).
                         # Contraction shape 3136 is tiled to (2, 1568).
-                        # The remaining shape 256 is not tiled, so (1, 256).
-                        # Broadcast to other side adds a leading shape of 1.
-                        "value": (expected_dtype, (1, 2, 1568, 1, 256)),
+                        # The remaining shape 256 is not tiled.
+                        "value": (expected_dtype, (2, 1568, 256)),
                     }
                 }
             },
@@ -154,15 +153,14 @@ class MnistTest(parameterized.TestCase):
                 "AqtDotGeneral_0": {
                     "qrhs": {
                         # The scale_t shape was (1, 10) before tiling.
-                        # After tiling the scale shape is (1, 2, 1, 1, 10),
-                        # then transposed to (2, 1, 1, 1, 10).
-                        "scale": (dtype("float32"), (2, 1, 1, 1, 10)),
+                        # After tiling the scale shape is (2, 1, 10),
+                        # then transposed to (2, 1, 10).
+                        "scale": (dtype("float32"), (2, 1, 10)),
                         # The weight shape was (256, 10) before tiling.
-                        # After tiling it is (2, 128, 1, 10).
+                        # After tiling it is (2, 128, 10).
                         # Contraction shape 256 is tiled to (2, 128).
-                        # The remaining shape 10 is not tiled, so (1, 10).
-                        # Broadcast to other side adds a leading shape of 1.
-                        "value": (expected_dtype, (1, 2, 128, 1, 10)),
+                        # The remaining shape 10 is not tiled.
+                        "value": (expected_dtype, (2, 128, 10)),
                     }
                 }
             },

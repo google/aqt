@@ -311,8 +311,8 @@ class AqtFlaxTest(parameterized.TestCase):
         'AqtDotGeneral_0': {
             'qrhs': {
                 'frozen': aqt_tensor.QTensor(
-                    qvalue=(dtype('int8'), (1, 1, 2, 3, 2, 5, 2)),
-                    scale=[(dtype('float32'), (1, 1, 2, 3, 1, 5, 1))],
+                    qvalue=(dtype('int8'), (2, 3, 2, 5, 2)),
+                    scale=[(dtype('float32'), (2, 3, 1, 5, 1))],
                     scale_t=None,
                     dequant_dtype=dtype('float32'),
                 )
@@ -383,8 +383,8 @@ class AqtFlaxTest(parameterized.TestCase):
             'AqtDotGeneral_0': {
                 'qrhs': {
                     'frozen': aqt_tensor.QTensor(
-                        qvalue=(dtype('int8'), (1, 1, 3, 1, 6, 5, 2)),
-                        scale=[(dtype('float32'), (1, 1, 3, 1, 1, 5, 1))],
+                        qvalue=(dtype('int8'), (3, 6, 5, 2)),
+                        scale=[(dtype('float32'), (3, 1, 5, 1))],
                         scale_t=None,
                         dequant_dtype=dtype('float32'),
                     )
