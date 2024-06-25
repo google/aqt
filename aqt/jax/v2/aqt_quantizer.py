@@ -43,6 +43,9 @@ class Quantizer:
   _calibrator: AbstractAqtCalibration | None = utils.static_field(default=None)
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool = utils.static_field()
+  # The dtype of the quantization scale array. If not set, the scale array will
+  # be in the same dtype as the input.
+  scale_dtype: jnp.dtype | None = utils.static_field(default=None)
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   context: utils.Context
 
@@ -95,6 +98,8 @@ class Quantizer:
       # TODO(lew): Does not matter in DG, because we are using custom gradient.
       #   We should take that into account somehow.
       scale = jax.lax.stop_gradient(scale)
+    if self.scale_dtype is not None:
+      scale = scale.astype(self.scale_dtype)
 
     qt = aqt_tensor.QTensor(
         qvalue=None,

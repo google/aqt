@@ -355,6 +355,25 @@ def set_bits(
   return cfg
 
 
+def set_scale_dtype(cfg: DotGeneral, scale_dtype: jnp.dtype):
+  """Set the dtype for all scales in the given DotGeneral config."""
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  cfg.fwd.dg_quantizer.lhs.scale_dtype = scale_dtype
+  cfg.fwd.dg_quantizer.rhs.scale_dtype = scale_dtype
+  cfg.dlhs.dg_quantizer.lhs.scale_dtype = scale_dtype
+  cfg.dlhs.dg_quantizer.rhs.scale_dtype = scale_dtype
+  cfg.drhs.dg_quantizer.lhs.scale_dtype = scale_dtype
+  cfg.drhs.dg_quantizer.rhs.scale_dtype = scale_dtype
+
+
 ################################################################################
 # Functions below are auxiliary config creators.
 

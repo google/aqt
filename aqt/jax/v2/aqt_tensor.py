@@ -118,9 +118,14 @@ class QTensor:
     )
     assert self.dequant_dtype is not None, msg
     assert self.is_full(), _MSG_NO_QVALUE
-    ret = self.qvalue
+    # pytype: disable=attribute-error
+    ret = self.qvalue.astype(self.dequant_dtype)
     for scale in self.scale:
-      ret = ret.astype(self.dequant_dtype) * scale.astype(self.dequant_dtype)  # pytype: disable=attribute-error
+      ret = ret * scale
+    # In case the scale dtype is not the same as dequant_dtype, and it is a
+    # higher precision.
+    ret = ret.astype(self.dequant_dtype)
+    # pytype: enable=attribute-error
     return ret  # pytype: disable=bad-return-type
 
   def qvalue_astype(self, dtype) -> Self:
