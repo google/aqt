@@ -90,6 +90,7 @@ def fp_round(
     cfg: FpNumericsConfig,
     key: jax.Array,
     stochastic_rounding: bool,
+    test_noise_axis=None,
 ):
   """FP stochastic rounding for a given mantissa and exponent. Returns bf16."""
   nexp = cfg.nexp
@@ -99,6 +100,7 @@ def fp_round(
   assert not cfg.has_two_nan, 'two_nan not implemented'
   assert not cfg.has_naninf, 'naninf not implemented'
 
+  orig_x = x
   input_dtype = x.dtype
   total_bits = jnp.finfo(input_dtype).bits
   # (sign, exp, mantissa) = (1,8,x)
@@ -114,12 +116,15 @@ def fp_round(
 
   # TODO(lew): We can use smaller dtype
   x = jax.lax.bitcast_convert_type(x, bits_dtype)  # adds noise to man
-  # def bprint(s, x):
-  #   xx = int(x)
-  #   print(f'{s:20} = {xx:016b}')
   if stochastic_rounding:
-    noise = jax.random.bits(key, x.shape, bits_dtype)
-    noise = jax.lax.convert_element_type(noise, bits_dtype) & man_trunc_mask
+    if test_noise_axis is not None:
+      noise_axis_size = x.shape[test_noise_axis]
+      sh = list((1,) * len(x.shape))
+      sh[test_noise_axis] = noise_axis_size
+      rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+    else:
+      rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+    noise = jax.lax.convert_element_type(rnd_bits, bits_dtype) & man_trunc_mask
   else:
     noise = 1 << (man_trunc_bits - 1)
     noise = jax.lax.convert_element_type(noise, bits_dtype)
@@ -137,17 +142,36 @@ def fp_round(
     max_exp = min_exp + 2**nexp - 1
 
     min_repr = min_exp << container_man
+    min_repr_float = jax.lax.bitcast_convert_type(min_repr, input_dtype)
     container_mant_mask = (1 << container_man) - 1
     max_mant = jnp.uint16(container_mant_mask & ~man_trunc_mask)
     max_repr = (max_exp << container_man) + max_mant
 
-    exp_mant_msk = jnp.uint16(0b0_11111111_1111111)
-    exp = jax.lax.bitwise_and(x, exp_mant_msk)
-    exp = jnp.clip(exp, min_repr, max_repr)
-    x = jax.lax.bitwise_or(jax.lax.bitwise_and(x, ~exp_mant_msk), exp)
+    sign_mask = jnp.uint16(0b1_00000000_0000000)
+    sign = jax.lax.bitwise_and(x, sign_mask)
+    abs_x = jax.lax.bitwise_and(x, ~sign_mask)
     # TODO(lew): we can do faster clipping with bit twiddling
-
-  x = jax.lax.bitcast_convert_type(x, input_dtype)
+    clip_x = jnp.clip(abs_x, min_repr, max_repr)
+    x = jax.lax.bitwise_or(sign, clip_x)
+    x = jax.lax.bitcast_convert_type(x, input_dtype)
+    if stochastic_rounding:
+      assert bits_dtype == jnp.uint16
+      if test_noise_axis is not None:
+        noise_axis_size = x.shape[test_noise_axis]
+        sh = list((1,) * len(x.shape))
+        sh[test_noise_axis] = noise_axis_size
+        rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+        rnd_bits = rnd_bits << 8
+      else:
+        rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+      rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
+      rnd_floats = jax.lax.bitcast_convert_type(rnd_bits, jnp.float32) - (
+          3.0 - 2 ** (-16)
+      )
+      rx = (orig_x > rnd_floats) * 2 - 1.0
+      x = jnp.where(jnp.abs(orig_x) < min_repr_float, rx, x)
+  else:
+    x = jax.lax.bitcast_convert_type(x, input_dtype)
 
   return x
 

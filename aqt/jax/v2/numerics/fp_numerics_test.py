@@ -247,9 +247,15 @@ class FpTest(parameterized.TestCase):
       minexp,
       nmant,
       has_subnormals,
-      sample_count=100,
+      det_x_count=2**7,  # needs to be power of 2, test_noise_axis exact eq
+      x_count=128,  # TODO(lew): Test fails for 100, why?
       sr_sample_count=1000000,
+      # TODO(lew): Enable these:
+      # x_count=2**12,  # needs to be power of 2
+      # sr_sample_count=1000,
   ):
+    det_x_count += 1  # endpoint
+    x_count += 1  # endpoint
     cfg = fp_numerics.FpNumericsConfig(
         nexp=nexp,
         minexp=minexp,
@@ -286,12 +292,12 @@ class FpTest(parameterized.TestCase):
     data = jnp.linspace(
         bucket_lower,
         bucket_upper,
-        sample_count,
+        x_count,
         endpoint=True,
         axis=0,
         dtype=jnp.float32,
     )
-    assert data.shape == (sample_count, 2 ** (1 + nexp + nmant))
+    assert data.shape == (x_count, 2 ** (1 + nexp + nmant))
     # TODO(lew): Remove when fp_round supports float32. Also below.
     data = data.astype(jnp.bfloat16)
     bucked_interior_mask = jnp.logical_and(
@@ -323,7 +329,7 @@ class FpTest(parameterized.TestCase):
       data = jnp.linspace(
           sign * edge_of_last_bucket,
           sign * 10 * edge_of_last_bucket,
-          sample_count,
+          x_count,
           endpoint=True,
           dtype=jnp.float32,
       )
@@ -346,16 +352,36 @@ class FpTest(parameterized.TestCase):
           aux_x=data,
       )
 
+    # TEST: Equi-spaced noise deterministic "SR"
+
+    x = jnp.linspace(
+        bucket_centers[0],
+        bucket_centers[-1],
+        det_x_count,
+        endpoint=True,
+        dtype=jnp.float32,
+    )
+    bx = jnp.broadcast_to(x[:, jnp.newaxis], (det_x_count, 256))
+    deterministic_qx = fp_numerics.fp_round(
+        bx.astype(jnp.bfloat16),
+        cfg=cfg,
+        key=None,
+        test_noise_axis=1,
+        stochastic_rounding=True,
+    )
+    mean_det_qx = jnp.mean(deterministic_qx, axis=1)
+    assert_equal(mean_det_qx, x, f"{cfg=}")
+
     # TEST: Unbiased stochastic rounding
 
     x = jnp.linspace(
         bucket_centers[0],
         bucket_centers[-1],
-        sample_count,
+        x_count,
         endpoint=True,
         dtype=jnp.float32,
     )
-    bx = jnp.broadcast_to(x[:, jnp.newaxis], (sample_count, sr_sample_count))
+    bx = jnp.broadcast_to(x[:, jnp.newaxis], (x_count, sr_sample_count))
     qx = fp_numerics.fp_round(
         bx.astype(jnp.bfloat16),
         cfg=cfg,
@@ -389,10 +415,9 @@ class FpTest(parameterized.TestCase):
     expected_p_smaller = (qx_larger - x[:, jnp.newaxis]) / bucket_size
     expected_p_smaller = jnp.where(bucket_size == 0, 1.0, expected_p_smaller)
     p_err = p_smaller - expected_p_smaller
-    # p_err_
-    # print((p_smaller - expected_p_smaller))
-    # print((p_smaller - expected_p_smaller) * jnp.sqrt(sr_sample_count))
-    assert (p_err < 10.0 / jnp.sqrt(sr_sample_count)).all()
+    p_stderr = p_err * jnp.sqrt(sr_sample_count)
+    # print(f"{p_stderr=}")
+    assert (p_stderr < 2.0).all(), p_stderr
 
 
 if __name__ == "__main__":
