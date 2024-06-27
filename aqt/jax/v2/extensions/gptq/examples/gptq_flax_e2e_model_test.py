@@ -118,7 +118,7 @@ class GptqTest(parameterized.TestCase):
 
     # Stage 3. Convert the calibrated checkpoint.
     state = state.replace(model=copy.deepcopy(calibrated_params))
-    serve_fn, model_serving = gptq_flax_e2e_model.serving_conversion(state)
+    _, model_serving = gptq_flax_e2e_model.serving_conversion(state)
     dtype = jnp.dtype
     expected_dtype = dtype("int8")
     expected_aqt_pytree = {
@@ -166,19 +166,9 @@ class GptqTest(parameterized.TestCase):
 
     utils.test_pprint_eq(expected_aqt_pytree, serving_pytree["aqt"])
 
-    # Compare logits of models before conversion and after conversion.
-    def forward(model, apply_fn):
-      return apply_fn(
-          model,
-          ds["image"],
-          rngs={"params": jax.random.PRNGKey(0)},
-          mutable=True,
-      )
-
-    logits_before_conversion, _ = forward(state.model, state.cnn_eval.apply)
-    logits_after_conversion, _ = forward(model_serving, serve_fn)
-
-    assert (logits_before_conversion == logits_after_conversion).all()
+    # Since the GPTQ changes the weights to better quantize it, the logits
+    # before and after the conversion should be different.
+    # As a conclusion, we do not put the logits comparison tests here.
 
 
 if __name__ == "__main__":

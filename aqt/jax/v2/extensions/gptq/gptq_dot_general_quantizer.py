@@ -252,7 +252,10 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       self,
       lhs_quantization_info: tuple[jax.Array, Sequence[int]],
       rhs_quantization_info: tuple[jax.Array, Sequence[int]],
-  ) -> tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]:
+  ) -> tuple[
+      tuple[jax.Array, aqt_tensor.QTensor],
+      tuple[jax.Array, aqt_tensor.QTensor]
+  ]:
     """GPTQ calibration.
 
     Majority of the codes are copied from sharded_gptc.gptc_skeleton. we copied
@@ -262,7 +265,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       lhs_quantization_info: left argument and its contracting axis.
       rhs_quantization_info: right argument and its contracting axis:
     Returns:
-      A quantized tensor for lhs and rhs.
+      Updated weight and incomplete QTensor for lhs and rhs.
     """
     # Follow the quantization mode and num_bits of the kernel.
     if self.is_rhs_kernel:
@@ -274,6 +277,14 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       assert isinstance(self.lhs.numerics, int_numerics.IntNumerics)
       num_bits = self.lhs.numerics.bits
 
+    if quant_mode == utils.QuantMode.TRAIN:
+      # During training, we should not allow collecting hinvs and updating
+      # weights using it.
+      return super(GptqDotGeneralQuantizer, self).calibrate(  # pytype: disable=attribute-error
+          lhs_quantization_info, rhs_quantization_info
+      )
+
+    if not self.is_rhs_kernel:
       # Swap so that rhs is kernel.
       lhs_quantization_info, rhs_quantization_info = (
           rhs_quantization_info,
@@ -338,10 +349,10 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       lhs, rhs = rhs, lhs
       lhs_ca, rhs_ca = rhs_ca, lhs_ca
 
-    # lhs and rhs should be quantized separately here with the updated values.
-    lhs_qt = self.lhs.calibrate(lhs, calibration_axes=lhs_ca)
-    rhs_qt = self.rhs.calibrate(rhs, calibration_axes=rhs_ca)
-    return ((lhs, lhs_qt), (rhs, rhs_qt))
+    # Retrieve the scales using the updated lhs and rhs.
+    return super(GptqDotGeneralQuantizer, self).calibrate(  # pytype: disable=attribute-error
+        (lhs, lhs_ca), (rhs, rhs_ca)
+    )
 
   def swap_lhs_and_rhs(self) -> None:
     """Swaps lhs and rhs configuration."""
