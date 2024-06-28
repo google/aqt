@@ -81,7 +81,13 @@ class Tensor:
 
 @utils.flax_slots_kw_only_dataclass
 class LocalAqt:
-  contraction_axis_shard_count: int = utils.static_field()
+  contraction_axis_shard_count: int | None = utils.static_field(default=None)
+  contraction_axis_shard_size: int | None = utils.static_field(default=None)
+  # tile_largest_shape=True will apply the factor_reshape_largest function,
+  # where shard_size is required and shard_count should be None.
+  # If it is False, the original factor_reshape function will be applied,
+  # where shard_count is required and shard_size should be None.
+  tile_largest_shape: bool = utils.static_field(default=False)
 
 
 def dot_general_raw_make(
@@ -228,7 +234,7 @@ def _get_scale_t(
 
 
 def _apply_local_aqt(
-    contraction_axis_shard_count: int,
+    local_aqt: LocalAqt,
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
     dimension_numbers: jax.lax.DotDimensionNumbers,
@@ -236,18 +242,44 @@ def _apply_local_aqt(
   """Applies local AQT if the configuration is given.
 
   Args:
-    contraction_axis_shard_count: Local AQT configuration.
+    local_aqt: Local AQT configuration.
     lhs: Left hand side of the dot_general.
     rhs: Right hand side of the dot_general.
     dimension_numbers: Dot_general dimension numbers.
+
   Returns:
     A tuple of (lhs, rhs, dimension_numbers) with local AQT applied.
   """
 
-  factor = contraction_axis_shard_count
+  def factor_reshape_largest(x, ca, ba):
+    # Tile the contraction axis with largest shape using tile_size.
+    # This function can be a replacement for the original factor_reshape.
+    # In the spirit of backward compatibility, we keep the original
+    # factor_reshape as well.
+    msg = 'When tile_largest_shape is True, must set shard_size.'
+    assert local_aqt.contraction_axis_shard_size is not None, msg
+    assert local_aqt.contraction_axis_shard_count is None, msg
+    shard_size = local_aqt.contraction_axis_shard_size
+    if not ca:
+      return x, ca, ba
+    shape = list(x.shape)
+    max_ca_shape = max(shape[axis] for axis in ca)
+    ax = shape.index(max_ca_shape)
+    ax_ca_idx = ca.index(ax)
+    assert max_ca_shape % shard_size == 0
+    shape[ax] = max_ca_shape // shard_size
+    shape.insert(ax + 1, shard_size)
+    new_ca = [(b + int(b >= ax)) for b in ca]
+    assert new_ca[ax_ca_idx] == ax + 1
+    new_ba = [ax] + [(b + int(b > ax)) for b in ba]
+    return x.reshape(shape), new_ca, new_ba
 
   def factor_reshape(x, ca, ba):
-    assert factor is not None
+    # Original tiling function. Only support configuring the tile count.
+    msg = 'You are using the original local aqt. Please only set shard_count.'
+    assert local_aqt.contraction_axis_shard_count is not None, msg
+    assert local_aqt.contraction_axis_shard_size is None, msg
+    factor = local_aqt.contraction_axis_shard_count
     if not ca:
       return x, ca, ba
     shape = list(x.shape)
@@ -262,8 +294,12 @@ def _apply_local_aqt(
     return x.reshape(shape), new_ca, new_ba
 
   (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-  lhs, lhs_ca, lhs_ba = factor_reshape(lhs, lhs_ca, lhs_ba)
-  rhs, rhs_ca, rhs_ba = factor_reshape(rhs, rhs_ca, rhs_ba)
+  if local_aqt.tile_largest_shape:
+    factor_fn = factor_reshape_largest
+  else:
+    factor_fn = factor_reshape
+  lhs, lhs_ca, lhs_ba = factor_fn(lhs, lhs_ca, lhs_ba)
+  rhs, rhs_ca, rhs_ba = factor_fn(rhs, rhs_ca, rhs_ba)
 
   dimension_numbers = (lhs_ca, rhs_ca), (lhs_ba, rhs_ba)
   return lhs, rhs, dimension_numbers
@@ -610,7 +646,7 @@ class DotGeneralRaw:
           self.dg_quantizer.assert_calib_shared_axes_value(None, None, msg)
 
         lhs, rhs, dimension_numbers = _apply_local_aqt(
-            self.local_aqt.contraction_axis_shard_count,  # pytype: disable=attribute-error
+            self.local_aqt,  # pytype: disable=attribute-error
             lhs,
             rhs,
             dimension_numbers,
