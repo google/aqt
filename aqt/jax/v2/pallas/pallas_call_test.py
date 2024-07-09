@@ -56,7 +56,7 @@ class AqtPallasTest(parameterized.TestCase):
   ):
     key = jax.random.PRNGKey(0)
     x = jax.random.uniform(key, tensor_shape, minval=-3, maxval=3)
-    block_spec = pl.BlockSpec(lambda *args: args, block_shape)
+    block_spec = pl.BlockSpec(block_shape, lambda *args: args)
 
     qx = quantizer.quant(x, 8, calibration_axes=calibration_axes)
 
@@ -107,7 +107,7 @@ class AqtPallasTest(parameterized.TestCase):
     def index_map(i, j, k, _):
       return i, j, k
 
-    block_spec = pl.BlockSpec(index_map, block_shape)
+    block_spec = pl.BlockSpec(block_shape, index_map)
 
     qx = quantizer.quant(x, 8, calibration_axes=calibration_axes)
 

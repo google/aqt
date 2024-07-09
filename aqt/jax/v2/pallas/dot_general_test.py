@@ -89,9 +89,9 @@ class DotGeneralTest(parameterized.TestCase):
         )
         out_ref[...] += out
 
-      lhs_inspec = pl.BlockSpec(lambda i, j, k: (i, k), (m_blk, k_blk))
-      rhs_inspec = pl.BlockSpec(lambda i, j, k: (k, j), (k_blk, n_blk))
-      out_spec = pl.BlockSpec(lambda i, j, k: (i, j), (m_blk, n_blk))
+      lhs_inspec = pl.BlockSpec((m_blk, k_blk), lambda i, j, k: (i, k))
+      rhs_inspec = pl.BlockSpec((k_blk, n_blk), lambda i, j, k: (k, j))
+      out_spec = pl.BlockSpec((m_blk, n_blk), lambda i, j, k: (i, j))
 
       out = aqt_pl.pallas_call(
           kernel,

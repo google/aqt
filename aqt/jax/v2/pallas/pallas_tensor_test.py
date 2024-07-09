@@ -74,7 +74,7 @@ class PallasTensorTest(parameterized.TestCase):
         scale_t=None,
         dequant_dtype=jnp.float32,
     )
-    block_spec = pl.BlockSpec(lambda *args: args, block_shape)
+    block_spec = pl.BlockSpec(block_shape, lambda *args: args)
     qt_block_spec = pallas_tensor.make_qtensor_blockspec(qt, block_spec)
 
     self.assertEqual(qt_block_spec.qvalue, block_spec)
@@ -127,7 +127,7 @@ class PallasTensorTest(parameterized.TestCase):
       expected_block_shape=None,
   ):
     t = jnp.ones(tensor_shape)
-    block_spec = pl.BlockSpec(lambda *args: args, block_shape)
+    block_spec = pl.BlockSpec(block_shape, lambda *args: args)
 
     transposed_t, transposed_block_spec = (
         pallas_tensor.transpose_tensor_for_memory_saving(t, block_spec)
