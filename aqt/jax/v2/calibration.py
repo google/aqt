@@ -87,3 +87,34 @@ class AbsMaxCalibration(Calibration):
     if self.scale is not None:
       abs_max = abs_max * self.scale
     return abs_max.astype(x.dtype)
+
+
+@utils.flax_slots_kw_only_dataclass
+class AbsMeanCalibration(Calibration):
+  """Simple scale * mean(abs(x)) calibration.
+
+  Attributes:
+    scale: Set it to something. IntNumerics.clip_gradient=True is likely to be
+      important.
+  """
+
+  scale: float
+  p: float
+
+  def get_bound(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[utils.AxisIdx] | None,
+      context: utils.Context | None = None,
+  ) -> jnp.ndarray:
+    """Calibration."""
+    del context
+    assert shared_axes is not None
+
+    abs_sum = jnp.sum(jnp.abs(x) ** self.p, axis=shared_axes, keepdims=True)
+    count = jnp.sum(x != 0.0, axis=shared_axes, keepdims=True)
+    count = jnp.where(count == 0.0, jnp.ones_like(count), count)
+    abs_mean = (abs_sum / count) ** (1.0 / self.p)
+    abs_mean = abs_mean * self.scale
+    abs_mean = jnp.where(abs_mean == 0.0, jnp.ones_like(abs_mean), abs_mean)
+    return abs_mean.astype(x.dtype)
