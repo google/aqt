@@ -90,16 +90,64 @@ def set_context(
   return ret_cfg
 
 
+def set_dequant_mode(
+    cfg: DotGeneralRaw,
+    *,
+    lhs_dequant_mode: None | DequantMode = None,
+    rhs_dequant_mode: None | DequantMode = None,
+):
+  """Sets the dequant mode for the lhs and rhs of a single dot general raw.
+
+  If either dequant mode is set to THIS_INPUT and the accumulator dtype is an
+  integer type, the accumulator dtype will be set to None to to avoid
+  accumulating float values into an integer dtype (which errors).
+
+  Args:
+    cfg: The config to be updated.
+    lhs_dequant_mode: The dequant mode for lhs.
+    rhs_dequant_mode: The dequant mode for rhs.
+  """
+  if lhs_dequant_mode is not None:
+    cfg.lhs.dequant_mode = lhs_dequant_mode
+  if rhs_dequant_mode is not None:
+    cfg.rhs.dequant_mode = rhs_dequant_mode
+
+  fake_quant = DequantMode.THIS_INPUT in [lhs_dequant_mode, rhs_dequant_mode]
+  if fake_quant and jnp.issubdtype(cfg.dg_accumulator_dtype, jnp.integer):
+    # Fake-quantization is not compatible with integer accumulation.
+    cfg.dg_accumulator_dtype = None
+
+
 def set_fwd_dequant_mode(
     cfg: DotGeneral,
     *,
     lhs_dequant_mode: None | DequantMode = None,
     rhs_dequant_mode: None | DequantMode = None,
 ):
-  if lhs_dequant_mode is not None:
-    cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
-  if rhs_dequant_mode is not None:
-    cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
+  set_dequant_mode(
+      cfg.fwd,
+      lhs_dequant_mode=lhs_dequant_mode,
+      rhs_dequant_mode=rhs_dequant_mode,
+  )
+
+
+def set_fake_quant(cfg: DotGeneral):
+  """Configures all dot_generals to use fake quantization."""
+  set_dequant_mode(
+      cfg.fwd,
+      lhs_dequant_mode=DequantMode.THIS_INPUT,
+      rhs_dequant_mode=DequantMode.THIS_INPUT,
+  )
+  set_dequant_mode(
+      cfg.dlhs,
+      lhs_dequant_mode=DequantMode.THIS_INPUT,
+      rhs_dequant_mode=DequantMode.THIS_INPUT,
+  )
+  set_dequant_mode(
+      cfg.drhs,
+      lhs_dequant_mode=DequantMode.THIS_INPUT,
+      rhs_dequant_mode=DequantMode.THIS_INPUT,
+  )
 
 
 def set_fwd_calibration_mode(
@@ -145,9 +193,7 @@ def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
   # of 128, we use this setter to enable int2 dtype.
   # Remove this setter and enable int2 in utils.infer_dtype_from_bits()
   # when XLA supports general int2 casting.
-  assert isinstance(
-      cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric
-  )
+  assert isinstance(cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics)
   assert cfg.fwd.dg_quantizer.rhs.numerics.bits == 2
   # Disable pytype check since jnp.int2 is only dynamically to jax
   # when ml_dtypes package has it.
@@ -460,14 +506,19 @@ def set_bits(
     dlhs_rhs_bit: None | int | fp8_numerics.FP8Dtype,
     drhs_lhs_bit: None | int | fp8_numerics.FP8Dtype,
     drhs_rhs_bit: None | int | fp8_numerics.FP8Dtype,
+    *,
+    use_asymmetric: bool,
 ) -> DotGeneral:
-  """Set quant bits for dot_general. Overwrites with AbsMaxCalibration."""
-  calibration_cls = calibration.AbsMaxCalibration
+  """Set quant bits for dot_general. Overwrites with appropriate calibration."""
+  if use_asymmetric:
+    calibration_cls = calibration.MinMaxCalibration
+  else:
+    calibration_cls = calibration.AbsMaxCalibration
 
   set_numerics(
       cfg.fwd,
-      numerics_utils.get_numerics(fwd_lhs_bit),
-      numerics_utils.get_numerics(fwd_rhs_bit),
+      numerics_utils.get_numerics(fwd_lhs_bit, use_asymmetric),
+      numerics_utils.get_numerics(fwd_rhs_bit, use_asymmetric),
   )
   if fwd_lhs_bit is not None:
     cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
@@ -476,8 +527,8 @@ def set_bits(
 
   set_numerics(
       cfg.dlhs,
-      numerics_utils.get_numerics(dlhs_lhs_bit),
-      numerics_utils.get_numerics(dlhs_rhs_bit),
+      numerics_utils.get_numerics(dlhs_lhs_bit, use_asymmetric),
+      numerics_utils.get_numerics(dlhs_rhs_bit, use_asymmetric),
   )
   if dlhs_lhs_bit is not None:
     cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
@@ -486,8 +537,8 @@ def set_bits(
 
   set_numerics(
       cfg.drhs,
-      numerics_utils.get_numerics(drhs_lhs_bit),
-      numerics_utils.get_numerics(drhs_rhs_bit),
+      numerics_utils.get_numerics(drhs_lhs_bit, use_asymmetric),
+      numerics_utils.get_numerics(drhs_rhs_bit, use_asymmetric),
   )
   if drhs_lhs_bit is not None:
     cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
@@ -498,8 +549,12 @@ def set_bits(
   # This is to make the configuration logically correct,
   # i.e., use_fwd_quant cannot be None when fwd is quantized.
   # It is user's responsibility to further choose between False and True.
-  dlhs_use_fwd_quant = False if fwd_rhs_bit is not None else SKIP
-  drhs_use_fwd_quant = False if fwd_lhs_bit is not None else SKIP
+  dlhs_use_fwd_quant = (
+      False if fwd_rhs_bit is not None or use_asymmetric else SKIP
+  )
+  drhs_use_fwd_quant = (
+      False if fwd_lhs_bit is not None or use_asymmetric else SKIP
+  )
   set_use_fwd_quant(cfg, dlhs_use_fwd_quant, drhs_use_fwd_quant)
   return cfg
 
@@ -718,6 +773,7 @@ def config_v4(
     fwd_bits: None | int | fp8_numerics.FP8Dtype = 8,
     dlhs_bits: None | int | fp8_numerics.FP8Dtype = 8,
     drhs_bits: None | int | fp8_numerics.FP8Dtype = None,
+    use_asymmetric: bool = False,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
@@ -744,6 +800,7 @@ def config_v4(
       dlhs_rhs_bit=dlhs_bits,
       drhs_lhs_bit=drhs_bits,
       drhs_rhs_bit=drhs_bits,
+      use_asymmetric=use_asymmetric,
   )
   set_accumulator_dtype(
       cfg,
@@ -794,6 +851,7 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
       dlhs_rhs_bit=None,
       drhs_lhs_bit=None,
       drhs_rhs_bit=None,
+      use_asymmetric=False,
   )
   set_stochastic_rounding(cfg, False, False, 'jax.uniform')
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'

@@ -172,14 +172,18 @@ class Quantizer:
 
 def quantizer_make(
     n_bits: None | int | fp8_numerics.FP8Dtype,
+    use_asymmetric: bool = False,
     preserve_max_val: bool = False,
     initialize_calibration: bool = True,
 ) -> Quantizer:
   """Makes Quantizer."""
-  effective_numerics = numerics_utils.get_numerics(n_bits, preserve_max_val)
-
+  effective_numerics = numerics_utils.get_numerics(
+      n_bits, use_asymmetric, preserve_max_val
+  )
   if n_bits is None:
     calibration_cls = None
+  elif use_asymmetric:
+    calibration_cls = calibration.MinMaxCalibration
   else:
     calibration_cls = calibration.AbsMaxCalibration
 

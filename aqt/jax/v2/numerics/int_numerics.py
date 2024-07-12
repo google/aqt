@@ -21,8 +21,31 @@ from jax import lax
 import jax.numpy as jnp
 
 
+def _apply_noise_fn(x, noise_fn, context):
+  assert context.key is not None, (
+      'noise_fn is set, requesting stochastic rounding, but RNG was not '
+      'passed in Context.key'
+  )
+  return (x + noise_fn(x.shape, context.key)).astype(x.dtype)
+
+
+def _apply_gradient_of_clip(res, grad, lower_clip_bound, upper_clip_bound):
+  # For boundary values we will have the full gradient.
+  # When using max(abs(x)) scaling, x is always in the interior, and the
+  # gradient clip is always 1. So, we can always set clip_gradient to false.
+  # However, other types of scaling may result in x being outside (i.e., there
+  # is clipping). In that case it may be desirable to make the gradient zero.
+  (x,) = res
+  return grad * (lower_clip_bound <= x) * (x <= upper_clip_bound)
+
+
 @utils.flax_slots_kw_only_dataclass
-class IntSymmetric(numerics.AqtNumerics):
+class IntNumerics(numerics.AqtNumerics):
+  """Abstract class for integer numerics typing."""
+
+
+@utils.flax_slots_kw_only_dataclass
+class IntSymmetric(IntNumerics):
   """Symmetric numerics for sint8, sint4, binary, etc."""
 
   bits: int
@@ -30,8 +53,10 @@ class IntSymmetric(numerics.AqtNumerics):
   # false = map max val on the end of the last bucket
   # true = map max val on the middle of the last
   preserve_max_val: bool
-  # The quantized values are only guarenteed to be within the appropriate signed
-  # int range if clip=True and round=True.
+  # The quantized values are only guaranteed to be within the appropriate signed
+  # int range if clip=True and round=True. Otherwise, the values are only
+  # guaranteed to be within [sint_min, sint_max + 1]. The range may be more
+  # restricted depending on the full configuration.
   clip: bool
   clip_gradient: bool
   round: bool
@@ -81,16 +106,11 @@ class IntSymmetric(numerics.AqtNumerics):
   def vjp_fwd(self, x, context):
     """Forward pass."""
     res = (x,)
-    input_dtype = x.dtype
+    return_dtype = self.dtype if self.dtype is not None else x.dtype
     assert self.bits <= 22, 'Too many bits, float32 has less precision.'
 
-    # Maybe noise
     if self.noise_fn:
-      assert context.key is not None, (
-          'noise_fn is set, requestic stochastic rounding, but RNG was not '
-          'passed in Context.key'
-      )
-      x = (x + self.noise_fn(x.shape, context.key)).astype(input_dtype)
+      x = _apply_noise_fn(x, self.noise_fn, context)
 
     if self.clip:
       fwd_clip_bound = self._get_fwd_clip_bound()
@@ -105,21 +125,64 @@ class IntSymmetric(numerics.AqtNumerics):
       else:
         x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
 
-    # Maybe cast: return dtype is either int or the input dtype
-    dtype = self.get_dtype()
-    x = x.astype(dtype if dtype is not None else input_dtype)
+    x = x.astype(return_dtype)  # cast to user-specified dtype or input dtype.
     return x, res
 
   def vjp_bwd(self, res, grad):
-    # Gradient of the clip function.
-    # For boundary values we will have full gradient.
-    # When using abs(max(x)) scaling, x is always in the interior, and the
-    # gradient clip is always 1. So, we can always set clip_gradient to false.
-    # However, other types of scaling may result in x being outside (i.e., there
-    # is clipping). In that case it may be desirable to make the gradient zero.
     ret = grad
     if self.clip_gradient:
-      (x,) = res
       clip_bound = self._get_fwd_clip_bound()
-      ret *= (-clip_bound <= x) * (x <= clip_bound)
+      ret = _apply_gradient_of_clip(res, grad, -clip_bound, clip_bound)
+    return (ret, None)
+
+
+@utils.flax_slots_kw_only_dataclass
+class IntAsymmetric(IntNumerics):
+  """Asymmetric numerics for sint8, sint4, binary, etc."""
+
+  bits: int
+  clip: bool
+  clip_gradient: bool
+  round: bool
+  noise_fn: None | stochastic_rounding.NoiseFn
+  dtype: None | Any = None
+
+  def get_dtype(self):
+    return self.dtype
+
+  def get_quant_bound(self):
+    return 2.0**self.bits - 1
+
+  def get_quant_range(self):
+    if self.bits > 1:
+      # Full signed int range.
+      sint_max = 2.0 ** (self.bits - 1) - 1
+      sint_min = -(2.0 ** (self.bits - 1))
+      return sint_min, sint_max
+    else:
+      # Boolean range.
+      return 0.0, 1.0
+
+  def vjp_fwd(self, x, context):
+    """Forward pass."""
+    res = (x,)
+    return_dtype = self.dtype if self.dtype is not None else x.dtype
+    assert self.bits <= 22, 'Too many bits, float32 has less precision.'
+
+    if self.noise_fn:
+      x = _apply_noise_fn(x, self.noise_fn, context)
+
+    if self.clip:
+      x = jnp.clip(x, *self.get_quant_range())
+
+    if self.round:
+      x = lax.round(x, lax.RoundingMethod.TO_NEAREST_EVEN)
+
+    x = x.astype(return_dtype)  # cast to user-specified dtype or input dtype.
+    return x, res
+
+  def vjp_bwd(self, res, grad):
+    ret = grad
+    if self.clip_gradient:
+      ret = _apply_gradient_of_clip(res, grad, *self.get_quant_range())
     return (ret, None)

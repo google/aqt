@@ -50,6 +50,7 @@ class MnistTest(parameterized.TestCase):
               "drhs_accumulator_dtype": jnp.int32,  # overwrite the default None
           },
           8,
+          False,
       ),
       (
           {
@@ -58,34 +59,64 @@ class MnistTest(parameterized.TestCase):
               "dlhs_accumulator_dtype": None,
           },
           4,
+          False,
+      ),
+      (
+          {
+              "fwd_bits": 2,
+              "dlhs_bits": 2,
+          },
+          2,
+          True,
       ),
   ])
-  def test_mnist_training(self, configs, bits):
-    aqt_cfg_dg = config.config_v4(**configs)
+  def test_mnist_training(self, configs, bits, use_asymmetric=False):
+    aqt_cfg_dg = config.config_v4(**configs, use_asymmetric=use_asymmetric)
+    if use_asymmetric:
+      # TODO(aqt): use native asymmetric quantization once it is supported.
+      # https://github.com/google/aqt/issues/725
+      config.set_fake_quant(aqt_cfg_dg)
     target_loss = {
-        8: {
-            "cpu": [
-                3.122317314147949218750000000000,
-                3.122316360473632812500000000000,
-                3.122316837310791015625000000000,  # colab
-            ],
-            "TPU v2": [3.198328018188476562500000000000],
-            "TPU v3": [3.198328018188476562500000000000],
-            "TPU v4": [3.198297500610351562500000000000],
-            "TPU v5 lite": [3.198297500610351562500000000000],
+        False: {  # use_asymmetric
+            8: {  # bits
+                "cpu": [
+                    3.122317314147949218750000000000,
+                    3.122316360473632812500000000000,
+                    3.122316837310791015625000000000,  # colab
+                ],
+                "TPU v2": [3.198328018188476562500000000000],
+                "TPU v3": [3.198328018188476562500000000000],
+                "TPU v4": [3.198297500610351562500000000000],
+                "TPU v5 lite": [3.198297500610351562500000000000],
+            },
+            4: {
+                "cpu": [2.258865118026733398437500000000],
+                "TPU v2": [2.302409172058105468750000000000],
+                "TPU v3": [2.302409172058105468750000000000],
+                "TPU v4": [2.302409172058105468750000000000],
+                "TPU v5 lite": [2.302409172058105468750000000000],
+            },
         },
-        4: {
-            "cpu": [2.258865118026733398437500000000],
-            "TPU v2": [2.302409172058105468750000000000],
-            "TPU v3": [2.302409172058105468750000000000],
-            "TPU v4": [2.302409172058105468750000000000],
-            "TPU v5 lite": [2.302409172058105468750000000000],
+        True: {
+            2: {
+                "cpu": [
+                    3.539640426635742187500000000000,
+                    3.539642810821533203125000000000,
+                    3.539641380310058593750000000000,
+                    3.539643287658691406250000000000,
+                ],
+                "TPU v2": [2.984576702117919921875000000000],
+                "TPU v3": [2.984576702117919921875000000000],
+                "TPU v4": [2.984576702117919921875000000000],
+                "TPU v5 lite": [2.984576702117919921875000000000],
+            },
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
     config.set_stochastic_rounding(aqt_cfg_dg, True, True, "jax.uniform")
-    aqt_cfg_dg.dlhs.rhs.use_fwd_quant = True
-    aqt_cfg_dg.drhs.rhs.use_fwd_quant = True
+    if not use_asymmetric:
+      aqt_cfg_dg.dlhs.rhs.use_fwd_quant = True
+      aqt_cfg_dg.drhs.rhs.use_fwd_quant = True
 
     def forward(model, apply_fn):
       return apply_fn(
@@ -115,17 +146,19 @@ class MnistTest(parameterized.TestCase):
     )
 
     device_kind = jax.devices()[0].device_kind
-    expected_train_loss = target_loss[bits][device_kind]
+    expected_train_loss = target_loss[use_asymmetric][bits][device_kind]
     if train_loss not in expected_train_loss:
-      msg = "train_loss changed. Consider updating with the following:\n"
-      msg += f'        "{device_kind}": [{train_loss:.30f}]'
+      msg = (
+          "train_loss changed. Consider updating with the following:\n"
+          f'        "{device_kind}": [{train_loss:.30f}]\n'
+          f"         expected one of: {expected_train_loss}"
+      )
       self.fail(msg)
 
     # Run forward once more in the same mode to get logits for testing below.
     logits_s1, _ = forward(state.model, state.cnn_eval.apply)
 
     # Stage 2: Model conversion (quantized weights freezing)
-
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 
     dtype = jnp.dtype
@@ -223,6 +256,15 @@ class MnistTest(parameterized.TestCase):
             },
         },
     }
+
+    if use_asymmetric:
+      for qtensor in [
+          expected_aqt_pytree["aqt"]["AqtEinsum_0"]["AqtDotGeneral_0"]["qlhs"],
+          expected_aqt_pytree["aqt"]["Dense_0"]["AqtDotGeneral_0"]["qrhs"],
+          expected_aqt_pytree["aqt"]["Dense_1"]["AqtDotGeneral_0"]["qrhs"],
+      ]:
+        # Bias has the same shape and dtype as the scale.
+        qtensor["frozen"].bias = qtensor["frozen"].scale
 
     serving_pytree = jax.tree_util.tree_map(
         lambda x: (x.dtype, x.shape), model_serving
@@ -979,7 +1021,7 @@ class MnistTest(parameterized.TestCase):
 
     # AQT Config
     aqt_cfg_dg = config.config_v4()
-    aqt_cfg_dg = config.set_bits(aqt_cfg_dg, *bits)
+    aqt_cfg_dg = config.set_bits(aqt_cfg_dg, *bits, use_asymmetric=False)
 
     # Update cfg with DelayedScalingCalibration.
     # Setting history length to be greater than the number of training steps

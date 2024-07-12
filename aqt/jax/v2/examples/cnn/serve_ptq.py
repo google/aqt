@@ -54,6 +54,7 @@ def run(train_ds: dict[str, jax.Array], test_ds: dict[str, jax.Array]) -> None:
       dlhs_rhs_bit=None,
       drhs_lhs_bit=None,
       drhs_rhs_bit=None,
+      use_asymmetric=False,
   )
   loss = aqt_utils.serve_quantized(
       cnn_model.CNN, test_ds, aqt_cfg, state.model_vars, act_calibrated=False

@@ -44,7 +44,7 @@ def quant(
   Returns:
     A quantized QTensor
   """
-  quantizer = aqt_quantizer.quantizer_make(n_bits)
+  quantizer = aqt_quantizer.quantizer_make(n_bits, use_asymmetric=False)
   # jax.lax.stop_gradient is not supported in pallas, thus disable
   # scale_stop_grad in the quantizer.
   quantizer.scale_stop_grad = False
