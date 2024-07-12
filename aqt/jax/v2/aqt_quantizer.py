@@ -13,7 +13,7 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
@@ -25,7 +25,9 @@ import jax.numpy as jnp
 
 
 AbstractAqtNumerics = numerics.AqtNumerics
+BaseIntNumerics = int_numerics.BaseIntNumerics
 AbstractAqtCalibration = calibration.Calibration
+Axes = Sequence[utils.AxisIdx]
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -33,9 +35,7 @@ class Quantizer:
   """Configuration of quantization of one tensor."""
 
   numerics: AbstractAqtNumerics = utils.static_field()
-  calib_shared_axes: Sequence[utils.AxisIdx] | Literal["per_tensor"] | None = (
-      utils.static_field()
-  )
+  calib_shared_axes: Axes | Literal["per_tensor"] | None = utils.static_field()
   scale_stop_grad: bool = utils.static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
@@ -48,12 +48,33 @@ class Quantizer:
   scale_dtype: jnp.dtype | None = utils.static_field(default=None)
   # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
   context: utils.Context
+  calculate_bias: (
+      Callable[[jnp.ndarray, jnp.ndarray, Axes, BaseIntNumerics], jnp.ndarray]
+      | None
+  ) = utils.static_field(default=None)
 
   # we need to speed up this initialization for the backward pass to happen
   # outside of bwd pass.
   def init_calibration(self):
     assert self._calibrator is None, "second call to self.init_calibration()"
     self._calibrator = self.calibration()
+
+  def _validate_asymmetric_config(self):
+    # DO_NOT_SUBMIT: As things stand a check like this is necessary to prevent
+    # configurations that silently produce bad numerical results, but it's
+    # not pretty.
+    if not (
+        isinstance(self.numerics, int_numerics.AsymIntNumerics)
+        == (self.calculate_bias is not None)
+        == isinstance(self._calibrator, calibration.MinMaxCalibration)
+    ):
+      raise ValueError(
+          "Asymmetric quantization requires self.numerics=AsymIntNumerics,"
+          " self.calculate_bias is not None, and"
+          " self.calibrator=MinMaxCalibration, but got the following partial"
+          f" configuration: {self.numerics=}, {self.calculate_bias=}, and"
+          f" {self._calibrator=}"
+      )
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(
@@ -71,7 +92,7 @@ class Quantizer:
     """Create incomplete QTensor with only quantization parameters."""
     if isinstance(self.numerics, no_numerics.NoNumerics):
       qt = aqt_tensor.QTensor(
-          qvalue=x, scale=[], scale_t=None, dequant_dtype=x.dtype
+          qvalue=x, scale=[], scale_t=None, bias=None, dequant_dtype=x.dtype
       )
       return qt
 
@@ -85,9 +106,11 @@ class Quantizer:
       shared_axes = self.calib_shared_axes or calibration_axes
 
     assert self._calibrator is not None, "forgot self.init_calibration()?"
+    self._validate_asymmetric_config()
+
     bound = self._calibrator.get_bound(x, shared_axes, self.context)
-    abs_max_mapped_to = self.numerics.abs_val_mapped_to()
-    scale = bound / abs_max_mapped_to
+    scaled_bound = self.numerics.get_scaled_bound()
+    scale = bound / scaled_bound
 
     if self.po2_scale:
       # With floor the biggest value (we are using jnp.max) is in the range of
@@ -101,10 +124,16 @@ class Quantizer:
     if self.scale_dtype is not None:
       scale = scale.astype(self.scale_dtype)
 
+    if self.calculate_bias is not None:
+      bias = [self.calculate_bias(x, scale, shared_axes, self.numerics)]
+    else:
+      bias = None
+
     qt = aqt_tensor.QTensor(
         qvalue=None,
         scale=[scale],
         scale_t=None,
+        bias=bias,
         dequant_dtype=dequant_dtype,
     )
     return qt
@@ -131,6 +160,23 @@ class Quantizer:
     return qt, quant_grad
 
 
+def calculate_asymmetric_bias(
+    x: jnp.ndarray,
+    scale: jnp.ndarray,
+    shared_axes: Axes,
+    numerics_: BaseIntNumerics,
+) -> jnp.ndarray:
+  """Calculates the bias for asymmetric quantization."""
+  if not isinstance(numerics_, int_numerics.AsymIntNumerics):
+    raise NotImplementedError(
+        "calculate_signed_asymmetric_bias only supports "
+        f" AsymIntNumerics, but got {numerics}"
+    )
+  # Calcualte bias s.t. quant(min(x)) = (min(x) + bias) / scale = quant_min.
+  quant_min, _ = numerics_.get_quant_range()
+  return quant_min * scale - jnp.min(x, axis=shared_axes, keepdims=True)
+
+
 def quantizer_make(
     n_bits: int | None,
     preserve_max_val: bool = False,
@@ -142,7 +188,7 @@ def quantizer_make(
   else:
     pz = False if n_bits == 1 else True
     dtype = utils.infer_dtype_from_bits(n_bits) if pz else None
-    effective_numerics = int_numerics.IntNumerics(
+    effective_numerics = int_numerics.SymIntNumerics(
         bits=n_bits,
         preserve_zero=pz,
         preserve_max_val=preserve_max_val,

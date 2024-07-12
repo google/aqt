@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# DO_NOT_SUBMIT: Update once an API has been finalized.
 
 """Test for AQT configs."""
 from absl.testing import absltest

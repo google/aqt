@@ -128,6 +128,10 @@ class Freezer(nn.Module):
       self.qvalue.value = inputs.qvalue
       assert inputs.scale_t is not None and len(inputs.scale_t) == 1
       self.scale_t.value = inputs.scale_t[0]
+      if inputs.bias is not None:
+        raise NotImplementedError(
+            'Quantization biases are not supported in AQT Flax Legacy Freezer.'
+        )
     elif self.quant_mode == QuantMode.SERVE:
       # TODO(lew): Optionally compare stored and served value.
       pass
@@ -304,6 +308,11 @@ class AqtDotGeneral(nn.Module):
           axis_metadata_wrapper: Optional[AxisMetadataWrapper],
           tile_map: tiled_dot_general.AqtTileMap,
       ):
+        if qt.bias is not None:
+          raise NotImplementedError(
+              'Quantization biases are not supported in AQT Flax Freezer.'
+          )
+
         if axis_metadata_wrapper is None:
           return qt
 
