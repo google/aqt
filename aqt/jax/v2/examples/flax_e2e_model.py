@@ -307,6 +307,10 @@ def serving_conversion(
       rngs={'params': jax.random.PRNGKey(0)},
       mutable=True,
   )
+
+  activation_quant_mode = (
+      utils.QuantMode.TRAIN if weight_only else utils.QuantMode.SERVE
+  )
   cnn_serve = CNN(
       bn_use_stats=False,
       aqt_cfg=aqt_cfg,
