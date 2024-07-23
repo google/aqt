@@ -58,7 +58,7 @@ class AbsMaxCalibration(Calibration):
 
   Attributes:
     scale: Set it to something like 0.3, 0.1, 0.03. If scale < 1.0, setting
-      IntNumerics.clip_gradient=True is likely to be important.
+      SymIntNumerics.clip_gradient=True is likely to be important.
   """
 
   scale: float | None = None
@@ -79,11 +79,44 @@ class AbsMaxCalibration(Calibration):
     assert shared_axes is not None, msg
 
     # NOTE: If you want to clip, consider using clip and clip_gradient in
-    # int_numerics.IntNumerics.
+    # int_numerics.SymIntNumerics.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     # TODO(yichizh): the zero filtering is not needed anymore because inf is
-    # filtered when calculating the reciprocal of scaline factor
+    # filtered when calculating the reciprocal of scaling factor
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     if self.scale is not None:
       abs_max = abs_max * self.scale
     return abs_max.astype(x.dtype)
+
+
+@utils.flax_slots_kw_only_dataclass
+class MinMaxCalibration(Calibration):
+  """Calibration between the min and max values.
+
+  Attributes:
+    eps: Optional epsilon to add to the bound to avoid division by zero.
+  """
+
+  eps: float | None = None
+
+  def get_bound(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[utils.AxisIdx] | None,
+      context: utils.Context | None = None,
+  ) -> jnp.ndarray:
+    """Calibration."""
+    del context
+
+    msg = (
+        'Perhaps you are using DequantMode.THIS_INPUT (fake_quant) and forgot'
+        ' to set them.'
+    )
+    assert shared_axes is not None, msg
+
+    x_min = jnp.min(x, axis=shared_axes, keepdims=True)
+    x_max = jnp.max(x, axis=shared_axes, keepdims=True)
+    bound = x_max - x_min
+    if self.eps is not None:
+      bound += self.eps
+    return bound.astype(x.dtype)

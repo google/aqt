@@ -26,12 +26,15 @@ class AqtNumerics(abc.ABC):
     pass
 
   @abc.abstractmethod
-  def abs_val_mapped_to(self):
-    """The value returned is the end of quantization range.
+  def get_scaled_bound(self):
+    """Returns the width that the scale corresponds to in the quantizion range.
 
-    It could be biggest value that can be represented by numerical format
-    exactly. E.g. in case of int8, 127 . Or it could be edge of the last bucket.
-    Edge in case of int8, 127.5
+    For symmetric scaling (relative to a fixed zero point) it could be biggest
+    value that can be represented by numerical format exactly. E.g. in case of
+    int8, 127 . Or it could be edge of the last bucket (in case of int8, 127.5).
+
+    For asymmetric scaling, it corresponds to the width of the entire
+    quantization range. E.g. in case of int8, 255.
     """
     pass
 

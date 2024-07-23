@@ -58,33 +58,73 @@ class MnistTest(parameterized.TestCase):
           },
           4,
       ),
+      (
+          {
+              "fwd_bits": 2,
+              "dlhs_bits": 2,
+          },
+          2,
+          False,
+      ),
+      (
+          {
+              "fwd_bits": 2,
+              "dlhs_bits": 2,
+          },
+          2,
+          True,
+      ),
   ])
-  def test_mnist_training(self, configs, bits):
+  def test_mnist_training(self, configs, bits, use_asymmetric=False):
     aqt_cfg = config.config_v4(**configs)
+    if use_asymmetric:
+      config.set_asymmetric_quantization(aqt_cfg)
     target_loss = {
-        8: {
-            "cpu": [
-                3.123474359512329101562500000000,
-                3.123474597930908203125000000000,
-                3.123473882675170898437500000000,  # colab
-            ],
-            "TPU v2": [3.198328018188476562500000000000],
-            "TPU v3": [3.198328018188476562500000000000],
-            "TPU v4": [3.198297500610351562500000000000],
-            "TPU v5 lite": [3.198297500610351562500000000000],
+        False: {  # use_asymmetric
+            8: {  # bits
+                "cpu": [
+                    3.123474359512329101562500000000,
+                    3.123474597930908203125000000000,
+                    3.123473882675170898437500000000,  # colab
+                ],
+                "TPU v2": [3.198328018188476562500000000000],
+                "TPU v3": [3.198328018188476562500000000000],
+                "TPU v4": [3.198297500610351562500000000000],
+                "TPU v5 lite": [3.198297500610351562500000000000],
+            },
+            4: {
+                "cpu": [2.258865118026733398437500000000],
+                "TPU v2": [2.302409172058105468750000000000],
+                "TPU v3": [2.302409172058105468750000000000],
+                "TPU v4": [2.302409172058105468750000000000],
+                "TPU v5 lite": [2.302409172058105468750000000000],
+            },
+            2: {
+                "cpu": [2.067147016525268554687500000000],
+                "TPU v2": [2.052407503128051757812500000000],
+                "TPU v3": [2.052407503128051757812500000000],
+                "TPU v4": [2.052407741546630859375000000000],
+                "TPU v5 lite": [2.054144620895385742187500000000],
+            },
         },
-        4: {
-            "cpu": [2.258865118026733398437500000000],
-            "TPU v2": [2.302409172058105468750000000000],
-            "TPU v3": [2.302409172058105468750000000000],
-            "TPU v4": [2.302409172058105468750000000000],
-            "TPU v5 lite": [2.302409172058105468750000000000],
+        True: {
+            2: {
+                "cpu": [
+                    3.539643526077270507812500000000,
+                    3.539642572402954101562500000000,
+                ],
+                "TPU v2": [2.984576702117919921875000000000],
+                "TPU v3": [2.984576702117919921875000000000],
+                "TPU v4": [2.984576702117919921875000000000],
+                "TPU v5 lite": [2.982401847839355468750000000000],
+            },
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
     config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
-    aqt_cfg.dlhs.rhs.use_fwd_quant = True
-    aqt_cfg.drhs.rhs.use_fwd_quant = True
+    if not use_asymmetric:
+      aqt_cfg.dlhs.rhs.use_fwd_quant = True
+      aqt_cfg.drhs.rhs.use_fwd_quant = True
 
     def forward(model, apply_fn):
       return apply_fn(
@@ -114,16 +154,23 @@ class MnistTest(parameterized.TestCase):
     )
 
     device_kind = jax.devices()[0].device_kind
-    expected_train_loss = target_loss[bits][device_kind]
+    expected_train_loss = target_loss[use_asymmetric][bits][device_kind]
     if train_loss not in expected_train_loss:
-      msg = "train_loss changed. Consider updating with the following:\n"
-      msg += f'        "{device_kind}": [{train_loss:.30f}]'
+      msg = (
+          "train_loss changed. Consider updating with the following:\n"
+          f'        "{device_kind}": [{train_loss:.30f}]\n'
+          f"         expected one of: {expected_train_loss}"
+      )
       self.fail(msg)
 
     # Run forward once more in the same mode to get logits for testing below.
     logits_s1, _ = forward(state.model, state.cnn_eval.apply)
 
     # Stage 2: Model conversion (quantized weights freezing)
+    if use_asymmetric:
+      with self.assertRaisesRegex(NotImplementedError, "biases"):
+        flax_e2e_model.serving_conversion(state)
+      return  # Exit early out of the serving tests.
 
     apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
 

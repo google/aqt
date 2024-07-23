@@ -22,6 +22,7 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
+import itertools
 import typing
 from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import utils
@@ -69,6 +70,11 @@ class QTensor:
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
   scale_t: Optional[list[ArrayT]]
 
+  # (bias == None) means that bias should not be applied;
+  # If bias is not None, it should have the same length as scale.
+  # Biases operate on the scale of the unquatnized tesnsors.
+  bias: Optional[list[ArrayT]] = utils.static_field(default=None)
+
   # DType of the tensor before quantized.
   # NOTE: AQT Users should use the public property, dtype, instead.
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
@@ -97,13 +103,20 @@ class QTensor:
     """Quantizes the QTensor."""
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
+    assert self.bias is None or len(self.bias) == len(
+        self.scale
+    ), 'self.bias must be None or have the same length as self.scale.'
 
     qvalue = x
-    for s in self.scale:
+    bias = [] if self.bias is None else self.bias
+    for s, b in itertools.zip_longest(self.scale, bias):
+      # quant(x) = (x + b) / s
+      if b is not None:
+        qvalue += b
       # TODO(lew): We could store s_inv for faster activation quantization.
       s_inv = jax.lax.reciprocal(s)
       s_inv = jnp.where(jnp.isinf(s_inv), jnp.ones_like(s_inv), s_inv)
-      qvalue = qvalue * s_inv
+      qvalue *= s_inv
 
     # TODO(lew): We should apply numerics here, so that 'quant' function
     # Can be considered a part of API.
@@ -112,18 +125,27 @@ class QTensor:
   def dequant(self) -> jnp.ndarray:
     """Dequantizes the QTensor."""
     assert self.scale is not None, 'Missing scales when dequantizing a QTensor.'
+    assert self.bias is None or len(self.bias) == len(
+        self.scale
+    ), 'self.bias must be None or have the same length as self.scale.'
     msg = (
         'QTensor is manually created without setting a dequant_detype. It can'
         ' be used in dot_general, but to dequantize you need to set its dtype.'
     )
     assert self.dequant_dtype is not None, msg
     assert self.is_full(), _MSG_NO_QVALUE
+
     # pytype: disable=attribute-error
     ret = self.qvalue.astype(self.dequant_dtype)
-    for scale in self.scale:
-      ret = ret * scale
-    # In case the scale dtype is not the same as dequant_dtype, and it is a
-    # higher precision.
+    bias = [] if self.bias is None else self.bias
+    for s, b in itertools.zip_longest(self.scale, bias):
+      # dequant(x) = x * s - b
+      ret *= s
+      if b is not None:
+        ret -= b
+
+    # In case the scale or bias dtypes are not the same as dequant_dtype, and it
+    # is a higher precision.
     ret = ret.astype(self.dequant_dtype)
     # pytype: enable=attribute-error
     return ret  # pytype: disable=bad-return-type

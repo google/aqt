@@ -89,16 +89,35 @@ def set_context(
   return ret_cfg
 
 
+def set_dequant_mode(
+    cfg: DotGeneralRaw,
+    *,
+    lhs_dequant_mode: Optional[DequantMode] = None,
+    rhs_dequant_mode: Optional[DequantMode] = None,
+):
+  """Sets the dequant mode for the lhs and rhs of a single dot general."""
+  if lhs_dequant_mode is not None:
+    cfg.lhs.dequant_mode = lhs_dequant_mode
+  if rhs_dequant_mode is not None:
+    cfg.rhs.dequant_mode = rhs_dequant_mode
+
+  fake_quant = DequantMode.THIS_INPUT in [lhs_dequant_mode, rhs_dequant_mode]
+  if fake_quant and jnp.issubdtype(cfg.dg_accumulator_dtype, jnp.integer):
+    # Fake-quantization is not compatible with integer accumulation.
+    cfg.dg_accumulator_dtype = None
+
+
 def set_fwd_dequant_mode(
     cfg: DotGeneral,
     *,
     lhs_dequant_mode: Optional[DequantMode] = None,
     rhs_dequant_mode: Optional[DequantMode] = None,
 ):
-  if lhs_dequant_mode is not None:
-    cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
-  if rhs_dequant_mode is not None:
-    cfg.fwd.rhs.dequant_mode = rhs_dequant_mode
+  set_dequant_mode(
+      cfg.fwd,
+      lhs_dequant_mode=lhs_dequant_mode,
+      rhs_dequant_mode=rhs_dequant_mode,
+  )
 
 
 def set_fwd_calibration_mode(
@@ -265,7 +284,7 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
     dg_quantizer = dot_general_raw.dg_quantizer
     for q_numerics in [dg_quantizer.lhs.numerics, dg_quantizer.rhs.numerics]:
-      if isinstance(q_numerics, int_numerics.IntNumerics):
+      if isinstance(q_numerics, int_numerics.SymIntNumerics):
         q_numerics.preserve_zero = preserve_zero
         updated_dtype = (
             utils.infer_dtype_from_bits(q_numerics.bits)  # pytype: disable=attribute-error
@@ -301,7 +320,7 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
           calibration.AbsMaxCalibration, scale=scale
       )
       if scale < 1.0 and isinstance(
-          quantizer.numerics, int_numerics.IntNumerics
+          quantizer.numerics, int_numerics.SymIntNumerics
       ):
         quantizer.numerics.clip_gradient = True
 
@@ -330,7 +349,7 @@ def set_bits(
     else:
       pz = False if bits == 1 else True
       dtype = utils.infer_dtype_from_bits(bits) if pz else None
-      effective_numerics = int_numerics.IntNumerics(
+      effective_numerics = int_numerics.SymIntNumerics(
           bits=bits,
           preserve_zero=pz,
           preserve_max_val=False,
@@ -353,6 +372,56 @@ def set_bits(
   drhs_use_fwd_quant = False if fwd_lhs_bit is not None else SKIP
   set_use_fwd_quant(cfg, dlhs_use_fwd_quant, drhs_use_fwd_quant)
   return cfg
+
+
+def _set_asymmetric_quantization(cfg: DotGeneralRaw):
+  """Replaces symmetric quantization with asymmetric quantization."""
+
+  def get_asym_numerics(numerics_: numerics.AqtNumerics):
+    if isinstance(numerics_, int_numerics.BaseIntNumerics):
+      # pytype: disable=attribute-error
+      return int_numerics.AsymIntNumerics(
+          bits=numerics_.bits,
+          clip=numerics_.clip,
+          clip_gradient=numerics_.clip_gradient,
+          round=numerics_.round,
+          noise_fn=numerics_.noise_fn,
+          dtype=numerics_.dtype,
+      )
+      # pytype: enable=attribute-error
+    elif isinstance(numerics_, no_numerics.NoNumerics):
+      return numerics_
+    else:
+      raise NotImplementedError(
+          'Asymmetric quantization currently only supports integer numerics,'
+          f' but got {numerics_}'
+      )
+
+  set_numerics(
+      cfg,
+      get_asym_numerics(cfg.dg_quantizer.lhs.numerics),
+      get_asym_numerics(cfg.dg_quantizer.rhs.numerics),
+  )
+
+  cfg.dg_quantizer.lhs.calibration = calibration.MinMaxCalibration
+  cfg.dg_quantizer.rhs.calibration = calibration.MinMaxCalibration
+
+  cfg.dg_quantizer.lhs.calculate_bias = aqt_quantizer.calculate_asymmetric_bias
+  cfg.dg_quantizer.rhs.calculate_bias = aqt_quantizer.calculate_asymmetric_bias
+
+  # Only fake quantization currently supports quantization biases.
+  set_dequant_mode(
+      cfg,
+      lhs_dequant_mode=DequantMode.THIS_INPUT,
+      rhs_dequant_mode=DequantMode.THIS_INPUT,
+  )
+
+
+def set_asymmetric_quantization(cfg: DotGeneral):
+  """Replaces symmetric quantization with asymmetric quantization."""
+  _set_asymmetric_quantization(cfg.fwd)
+  _set_asymmetric_quantization(cfg.dlhs)
+  _set_asymmetric_quantization(cfg.drhs)
 
 
 def set_scale_dtype(cfg: DotGeneral, scale_dtype: jnp.dtype):
