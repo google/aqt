@@ -13,16 +13,15 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
-
 import copy
 import functools
 from typing import Literal, Optional, TypeAlias, Union
+
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
-
 # Temporary re-export from aqt.jax.v2.aqt_dot_general
 # TODO(lew): Remove these imports, use setters instead
 # pylint: disable=g-importing-member
@@ -37,9 +36,7 @@ from aqt.jax.v2.aqt_dot_general import DotGeneralRaw
 from aqt.jax.v2.aqt_dot_general import dtypes_allowed_for_int32_accum
 from aqt.jax.v2.aqt_dot_general import LocalAqt
 from aqt.jax.v2.aqt_dot_general import Tensor
-
 from aqt.jax.v2.aqt_quantizer import quantizer_make
-
 from aqt.jax.v2.numerics import fp8_numerics
 from aqt.jax.v2.numerics import fp_numerics
 from aqt.jax.v2.numerics import int_numerics
@@ -47,6 +44,7 @@ from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
 import jax
 import jax.numpy as jnp
+
 
 ################################################################################
 # Functions below are auxiliary config attribute setters.
@@ -273,6 +271,39 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
             else None
         )
         q_numerics.dtype = updated_dtype
+
+
+def set_auto_calib_scale(
+    cfg: DotGeneral, auto_scale_search_config: utils.AutoScaleSearchConfig
+) -> None:
+  """Update `cfg`'s quantizers' calibration to use auto scale search.
+
+  Currently only supports the weights (rhs) of `DotGeneral`, since the iterative
+  process of finding the scale tensors might be too slow for the activations
+  (lhs).
+
+  Args:
+    cfg: The config to be updated.
+    auto_scale_search_config: The config for auto scale search.
+  """
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+
+  for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+    dg_quantizer = dot_general_raw.dg_quantizer
+    dg_rhs_quantizer = dg_quantizer.rhs
+    dg_rhs_quantizer.calibration = functools.partial(
+        calibration.SnrBasedAutoCalibration,
+        numerics=dg_rhs_quantizer.numerics,
+        auto_scale_search_config=auto_scale_search_config,
+    )
 
 
 def set_absmax_calib_scale(cfg: DotGeneral, scale: float):

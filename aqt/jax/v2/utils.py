@@ -24,7 +24,7 @@ import enum
 import functools
 import pprint
 import re
-from typing import Any, Sequence
+from typing import Any, Sequence, TypeAlias
 import flax.struct
 import jax
 from jax import numpy as jnp
@@ -39,6 +39,10 @@ ShapeTemplate = Sequence[int | None]
 
 # TODO(lew): We should get a better type for jax.lax.dot_general and variants.
 DotGeneralT = Any
+
+# Specifies the scale values to search for. Used with `SnrBasedAutoCalibration`
+# for auto scale search.
+AutoScaleSearchConfig: TypeAlias = Sequence[float]
 
 
 def assert_shape(shape: Sequence[int], shape_template: ShapeTemplate, msg: str):
