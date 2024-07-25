@@ -74,9 +74,12 @@ def pallas_call(
 
   # If grid spec is given, use in_specs from grid spec.
   if grid_spec is not None:
-    in_specs = tree_util.tree_unflatten(
-        grid_spec.in_specs_tree, grid_spec.in_specs
-    )
+    if jax.__version_info__ >= (0, 4, 31):
+      in_specs = grid_spec.in_specs
+    else:
+      in_specs = tree_util.tree_unflatten(
+          grid_spec.in_specs_tree, grid_spec.in_specs
+      )
 
   @jax.jit
   def wrapped(*args):
@@ -141,15 +144,18 @@ def pallas_call(
       return f(*args)
 
     if grid_spec is not None:
-      kernel_inspecs, inspecs_treedef = tree_util.tree_flatten(kernel_inspecs)
-      grid_spec.in_specs = tuple(kernel_inspecs)
-      grid_spec.in_specs_tree = inspecs_treedef
+      if jax.__version_info__ >= (0, 4, 31):
+        grid_spec.in_specs = kernel_inspecs
+      else:
+        kernel_inspecs, inspecs_treedef = tree_util.tree_flatten(kernel_inspecs)
+        grid_spec.in_specs = tuple(kernel_inspecs)
+        grid_spec.in_specs_tree = inspecs_treedef
 
     func = pl.pallas_call(
         kernel,
         *pl_call_args,
         grid_spec=grid_spec,
-        in_specs=kernel_inspecs if grid_spec is None else None,
+        in_specs=kernel_inspecs if grid_spec is None else no_block_spec,
         **pl_call_kwrags,
     )
     return func(*prefetch_args, *args)
