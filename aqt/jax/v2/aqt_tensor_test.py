@@ -16,7 +16,13 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2 import tiled_dot_general
+import jax
 import jax.numpy as jnp
+
+
+TensorTiling = tiled_dot_general.TensorTiling
+AxisTiling = tiled_dot_general.AxisTiling
 
 
 # TODO(yichizh): refactor and clean the test cases
@@ -99,6 +105,87 @@ class AqtTensorTest(parameterized.TestCase):
     self.assertEqual(qt.dtype, jnp.bfloat16)
     self.assertIsInstance(qt.dtype, jnp.dtype)
     self.assertEqual(qt.dequant_dtype, jnp.bfloat16)
+
+  def test_tiling_state(self):
+    lhs_key, rhs_key = jax.random.split(jax.random.PRNGKey(0))
+    lhs = jax.random.randint(lhs_key, shape=(30, 40, 50), minval=0, maxval=100)
+    rhs = jax.random.randint(rhs_key, shape=(40, 50, 60), minval=0, maxval=100)
+
+    cfg = tiled_dot_general.Cfg(
+        lhs=TensorTiling(
+            contraction_axes=[
+                AxisTiling(axis=1, tile_size=10, tile_count=None),
+                AxisTiling(axis=2, tile_size=25, tile_count=None),
+            ],
+            remaining_axes=[],
+        ),
+        rhs=TensorTiling(
+            contraction_axes=[
+                AxisTiling(axis=0, tile_size=10, tile_count=None),
+                AxisTiling(axis=1, tile_size=25, tile_count=None),
+            ],
+            remaining_axes=[],
+        ),
+    )
+
+    # make tiling state for both lhs and rhs
+    lhs_ca = (1, 2)
+    rhs_ca = (0, 1)
+    xlhs, xrhs = tiled_dot_general.generate_tiling_states_for_dot_general(
+        cfg, lhs, rhs, dimension_numbers=((lhs_ca, rhs_ca), ((), ()))
+    )
+
+    # make scale
+    _, xlhs_ca = xlhs.to_tiled_axes_transposed(lhs_ca)
+    xlhs_scale = xlhs.apply(lhs)
+    xlhs_scale = jnp.max(xlhs_scale, axis=xlhs_ca, keepdims=True) / (2.0**7 - 1)
+
+    _, xrhs_ca = xrhs.to_tiled_axes_transposed(rhs_ca)
+    xrhs_scale = xrhs.apply(rhs)
+    xrhs_scale = jnp.max(xrhs_scale, axis=xrhs_ca, keepdims=True) / (2.0**7 - 1)
+
+    # make qtensor
+    qlhs = aqt_tensor.QTensor(
+        qvalue=None,
+        scale=[xlhs_scale],
+        scale_t=None,
+        dequant_dtype=xlhs_scale.dtype,
+        tiling_state=xlhs,
+    )
+    qlhs = qlhs.quant(lhs)
+
+    qrhs = aqt_tensor.QTensor(
+        qvalue=None,
+        scale=[xrhs_scale],
+        scale_t=None,
+        dequant_dtype=xrhs_scale.dtype,
+        tiling_state=xrhs,
+    )
+    qrhs = qrhs.quant(rhs)
+
+    self.assertEqual(qlhs.shape, lhs.shape)
+    self.assertEqual(qrhs.shape, rhs.shape)
+    self.assertEqual(qlhs.ndim, lhs.ndim)
+    self.assertEqual(qrhs.ndim, rhs.ndim)
+
+    self.assertEqual(qlhs.qvalue.shape, tuple(xlhs.tiled_shape))
+    self.assertEqual(qrhs.qvalue.shape, tuple(xrhs.tiled_shape))
+
+    self.assertEqual(qlhs.dequant().shape, lhs.shape)
+    self.assertEqual(qrhs.dequant().shape, rhs.shape)
+
+    # Check assertion raised when wrong tiling_state is given.
+    qlhs.tiling_state.tiled_shape = qrhs.qvalue.shape
+    with self.assertRaises(AssertionError):
+      qlhs.dequant()
+    with self.assertRaises(AssertionError):
+      qlhs.shape  # pylint: disable=pointless-statement
+
+    qrhs.tiling_state.tiled_shape = qlhs.qvalue.shape
+    with self.assertRaises(AssertionError):
+      qrhs.dequant()
+    with self.assertRaises(AssertionError):
+      qrhs.shape  # pylint: disable=pointless-statement
 
 
 if __name__ == "__main__":

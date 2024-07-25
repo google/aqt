@@ -233,6 +233,14 @@ class TilingState:
     tiled_x = jnp.broadcast_to(tiled_x, self.tiled_shape)
     return tiled_x
 
+  def unapply(self, tiled_x: jnp.ndarray) -> jnp.ndarray:
+    num_bcast_axes = len(self.get_broadcasted_tile_map_indexes())
+    # All elements of broadcast axes are the same, thus we take the first one.
+    first_index = (0,) * num_bcast_axes
+    x = tiled_x[*first_index]
+    x = x.reshape(self.untiled_shape)
+    return x
+
   def broadcast_to_other(self, bcast_shape: tuple[AxisSize, ...]):
     """Adds new axes (bcast_shape) on AxisIdx=0."""
     for k in self.tile_map:
