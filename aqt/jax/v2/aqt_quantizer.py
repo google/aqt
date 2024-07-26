@@ -86,6 +86,22 @@ class Quantizer:
 
     assert self._calibrator is not None, "forgot self.init_calibration()?"
     bound = self._calibrator.get_bound(x, shared_axes, self.context)
+
+    scale = self.get_scale(bound)
+    return aqt_tensor.QTensor(
+        qvalue=None, scale=[scale], scale_t=None, dequant_dtype=dequant_dtype
+    )
+
+  def get_scale(self, bound: jnp.ndarray) -> jnp.ndarray:
+    """Calculate the quantization scale from the bound.
+
+    Args:
+      bound: The bound of the calibration.
+
+    Returns:
+      The scale tensor. The shape of the scale tensor is the same as the bound
+      tensor.
+    """
     abs_max_mapped_to = self.numerics.abs_val_mapped_to()
     scale = bound / abs_max_mapped_to
 
@@ -101,13 +117,7 @@ class Quantizer:
     if self.scale_dtype is not None:
       scale = scale.astype(self.scale_dtype)
 
-    qt = aqt_tensor.QTensor(
-        qvalue=None,
-        scale=[scale],
-        scale_t=None,
-        dequant_dtype=dequant_dtype,
-    )
-    return qt
+    return scale
 
   def calculate_qvalue(
       self,

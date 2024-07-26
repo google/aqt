@@ -14,7 +14,7 @@
 """Quantization calibration methods."""
 
 import abc
-from collections.abc import Sequence
+from collections.abc import Sequence, Callable
 from typing import Union
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import utils
@@ -126,6 +126,7 @@ class SnrBasedAutoCalibration(Calibration):
 
   numerics: numerics.AqtNumerics
   auto_scale_search_config: utils.AutoScaleSearchConfig
+  get_scale_fn: Callable[[jnp.ndarray], jnp.ndarray]
 
   def get_bound(
       self,
@@ -265,9 +266,7 @@ class SnrBasedAutoCalibration(Calibration):
       The SNR tensor containing the SNR values for each subchannel group. Its
       shape will be the same as `x.shape` but with `shared_axes` collapsed to 1.
     """
-    abs_max_mapped_to = self.numerics.abs_val_mapped_to()
-    scale = bound / abs_max_mapped_to
-
+    scale = self.get_scale_fn(bound)
     q_tensor = aqt_tensor.QTensor(
         qvalue=None, scale=[scale], scale_t=None, dequant_dtype=x.dtype
     ).quant(x)

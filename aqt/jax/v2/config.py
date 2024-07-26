@@ -303,6 +303,7 @@ def set_auto_calib_scale(
         calibration.SnrBasedAutoCalibration,
         numerics=dg_rhs_quantizer.numerics,
         auto_scale_search_config=auto_scale_search_config,
+        get_scale_fn=dg_rhs_quantizer.get_scale,
     )
 
 
