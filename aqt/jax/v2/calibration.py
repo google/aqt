@@ -228,24 +228,15 @@ class SnrBasedAutoCalibration(Calibration):
 
     snr_values = self._calculate_snr(x, scaled_abs_max, shared_axes, context)
 
-    # Identify subchannel groups that have higher SNR values.
-    new_snr_highs = jnp.where(
-        snr_values > current_snr_values,
-        jnp.ones_like(current_snr_values),
-        jnp.zeros_like(current_snr_values),
-    )
-
+    # Update the best scale values and SNR values for subchannel groups that
+    # have higher SNR values.
     updated_scale_values = jnp.where(
-        new_snr_highs > 0.0,
+        snr_values > current_snr_values,
         scale,
         current_scale_values,
     )
 
-    updated_snr_values = jnp.where(
-        new_snr_highs > 0.0,
-        snr_values,
-        current_snr_values,
-    )
+    updated_snr_values = jnp.maximum(snr_values, current_snr_values)
     return updated_scale_values, updated_snr_values
 
   def _calculate_snr(
