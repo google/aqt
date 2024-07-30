@@ -33,6 +33,9 @@ import optax
 import tensorflow_datasets as tfds
 
 
+Dataset = dict[str, jnp.ndarray]
+
+
 class CNN(nn.Module):
   """A simple CNN model."""
   bn_use_stats: bool
@@ -131,7 +134,7 @@ def apply_model(model_params, images, labels, apply_fn):
   grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
   aux, grads = grad_fn(model_params)
   loss, (logits, updated_var) = aux
-  accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
+  accuracy = jnp.mean(jnp.argmax(logits, -1) == labels) * 100
   return grads, loss, accuracy, updated_var
 
 
@@ -225,9 +228,13 @@ def train_and_evaluate(
     workdir: str,
     aqt_cfg: aqt_config.DotGeneral | None = None,
     state: TrainState | None = None,
+    datasets: tuple[Dataset, Dataset] | None = None,
 ) -> TrainState:
   """Execute model training and evaluation loop."""
-  train_ds, test_ds = get_datasets()
+  if datasets is None:
+    train_ds, test_ds = get_datasets()
+  else:
+    train_ds, test_ds = datasets
   rng = jax.random.key(0)
 
   summary_writer = tensorboard.SummaryWriter(workdir)
@@ -247,18 +254,14 @@ def train_and_evaluate(
         state.model, test_ds['image'], test_ds['label'], state.cnn_eval.apply
     )
 
-    print(
-        'epoch:% 3d, train_loss: %.30f, train_accuracy: %.30f, test_loss:'
-        ' %.30f, test_accuracy: %.30f'
-        % (
-            epoch,
-            train_loss,
-            train_accuracy * 100,
-            test_loss,
-            test_accuracy * 100,
-        ),
-        flush=True,
-    )
+    stats = [
+        f'epoch: {epoch:3d}',
+        f'{train_loss = :.30f}',
+        f'{test_loss  = :.30f}',
+        f'{train_accuracy = :34.30f}',
+        f'{test_accuracy  = :34.30f}',
+    ]
+    print('\n'.join(stats) + '\n', flush=True)
 
     summary_writer.scalar('train_loss', train_loss, epoch)
     summary_writer.scalar('train_accuracy', train_accuracy, epoch)
