@@ -26,11 +26,11 @@ except IOError:
   README = ""
 
 jax_legacy_install_requires = [
-    "numpy>=1.16.4",
-    "jax>=0.3.4",
-    "flax>=0.4.1",
-    "tensorflow>=2.3.1",
-    "tensorflow-datasets>=4.5.2",
+    "numpy>=1.23.3",
+    "jax>=0.3.20",
+    "flax>=0.6.0",
+    "tensorflow>=2.10.0",
+    "tensorflow-datasets>=4.6.0",
     "dacite>=1.6.0",
     "ml_collections>=0.1.1",
 ]
