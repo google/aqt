@@ -30,6 +30,8 @@ class IntNumerics(numerics.AqtNumerics):
   # false = map max val on the end of the last bucket
   # true = map max val on the middle of the last
   preserve_max_val: bool
+  # The quantized values are only guarenteed to be within the appropriate signed
+  # int range if clip=True and round=True.
   clip: bool
   clip_gradient: bool
   round: bool
