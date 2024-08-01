@@ -253,6 +253,27 @@ class TiledDotGeneralTest(parameterized.TestCase):
     out = tiled_dot_general.tiled_dot_general(cfg, lhs, rhs, dims)
     assert out.shape == jax.lax.dot_general(lhs, rhs, dims).shape
 
+  def test_tiling_state_for_single_tensor(self):
+    t_shape = (31, 22, 27, 8, 27)
+    t = jnp.ones(t_shape)
+    tiled_axes = [
+        AxisTiling(axis=1, tile_count=None, tile_size=11),
+        AxisTiling(axis=2, tile_count=None, tile_size=9),
+    ]
+    t_tiling_state = tiled_dot_general.generate_tiling_state(
+        t, tiled_axes,
+    )
+    self.assertEqual(t_tiling_state.untiled_shape, t_shape)
+    self.assertEqual(t_tiling_state.tiled_shape, [31, 2, 11, 3, 9, 8, 27])
+    self.assertDictEqual(
+        t_tiling_state.tile_map, {0: [0], 1: [1, 2], 2: [3, 4], 3: [5], 4: [6]}
+    )
+    tiled_axes, ca_axes = t_tiling_state.to_tiled_axes_transposed(
+        [ax.axis for ax in tiled_axes]
+    )
+    self.assertEqual(tiled_axes, [1, 3])
+    self.assertEqual(ca_axes, [2, 4])
+
 
 if __name__ == '__main__':
   absltest.main()

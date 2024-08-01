@@ -45,10 +45,30 @@ BROADCAST_PREFIX = 'broadcast_'
 
 @dataclasses.dataclass(frozen=False, slots=True)
 class AxisTiling:
+  """Axis tiling configuration for subchannel quantization."""
   axis: AxisIdx
   # At most one of tile_count, tile_size can be None.
-  tile_count: AxisSize | None
-  tile_size: AxisSize | None
+  tile_count: AxisSize | None = None
+  tile_size: AxisSize | None = None
+
+  def __post_init__(self):
+    msg = 'At most one of tile_count and tile_size can be None'
+    assert not (self.tile_count is None and self.tile_size is None), msg
+
+  def complete_missing(self, shape):
+    """Completes missing tile_count or tile_size."""
+    tc = self.tile_count
+    ts = self.tile_size
+    axis_size = shape[self.axis]
+    msg = 'At most one of tile_count and tile_size can be None'
+    assert not (tc is None and ts is None), msg
+    self.tile_count = axis_size // ts if tc is None else tc
+    self.tile_size = axis_size // tc if ts is None else ts
+    msg = (
+        f'Axis {self.axis} cannot be split into'
+        f' {self.tile_count} tiles.'
+    )
+    assert self.tile_size * self.tile_count == axis_size, msg
 
 
 @dataclasses.dataclass(frozen=False, slots=True)
@@ -117,26 +137,10 @@ class Cfg:
     """Makes lhs and rhs to cover all the axes."""
     new_cfg = copy.deepcopy(self)
 
-    def f(axes_cfg, shape):
-      # add missing tile_count
-      for axis_tiling in axes_cfg:
-        tc = axis_tiling.tile_count
-        ts = axis_tiling.tile_size
-        axis_shape = shape[axis_tiling.axis]
-        msg = 'At most one of tile_count and tile_size can be None'
-        assert not (tc is None and ts is None), msg
-        axis_tiling.tile_count = axis_shape // ts if tc is None else tc
-        axis_tiling.tile_size = axis_shape // tc if ts is None else ts
-        msg = (
-            f'Axis {axis_tiling.axis} cannot be split into'
-            f' {axis_tiling.tile_count} tiles.'
-        )
-        assert axis_tiling.tile_size * axis_tiling.tile_count == axis_shape, msg
-
-    f(new_cfg.lhs.contraction_axes, lhs_shape)
-    f(new_cfg.lhs.remaining_axes, lhs_shape)
-    f(new_cfg.rhs.contraction_axes, rhs_shape)
-    f(new_cfg.rhs.remaining_axes, rhs_shape)
+    for ax in (*new_cfg.lhs.contraction_axes, *new_cfg.lhs.remaining_axes):
+      ax.complete_missing(lhs_shape)
+    for ax in (*new_cfg.rhs.contraction_axes, *new_cfg.rhs.remaining_axes):
+      ax.complete_missing(rhs_shape)
     return new_cfg
 
 
@@ -305,6 +309,19 @@ def print_dimension_numbers(dimension_numbers, lhs, rhs, label) -> None:
   logging.vlog(1, f'rhs_ba={rhs_ba}')
   logging.vlog(1, f'lhs_ra={lhs_ra}')
   logging.vlog(1, f'rhs_ra={rhs_ra}')
+
+
+def generate_tiling_state(
+    tensor: jnp.ndarray,
+    tiled_axes: Iterable[AxisTiling],
+) -> TilingState:
+  """Generates tiling states for the given tensor."""
+  for ax in tiled_axes:
+    ax.complete_missing(tensor.shape)
+
+  xtensor = TilingState(untiled_shape=tensor.shape)
+  xtensor.tile_axes(tiled_axes)
+  return xtensor
 
 
 def generate_tiling_states_for_dot_general(

@@ -16,7 +16,9 @@
 from typing import Literal, Sequence
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
+from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
+
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
@@ -26,6 +28,9 @@ import jax.numpy as jnp
 
 AbstractAqtNumerics = numerics.AqtNumerics
 AbstractAqtCalibration = calibration.Calibration
+
+AxisTiling = tiled_dot_general.AxisTiling
+TilingState = tiled_dot_general.TilingState
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -60,18 +65,55 @@ class Quantizer:
       self,
       x,
       *,
-      calibration_axes,
+      calibration_axes: Sequence[utils.AxisIdx] | None,
+      tiling_state: TilingState | None = None,
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """The core quantizing function."""
-    qt = self.calibrate(x, calibration_axes=calibration_axes)
+    qt = self.calibrate(
+        x, calibration_axes=calibration_axes, tiling_state=tiling_state
+    )
     qt, quant_grad = self.calculate_qvalue(x, qt)
     return qt, quant_grad
 
-  def calibrate(self, x, *, calibration_axes) -> aqt_tensor.QTensor:
-    """Create incomplete QTensor with only quantization parameters."""
+  def calibrate(
+      self,
+      x,
+      *,
+      calibration_axes: Sequence[utils.AxisIdx] | None,
+      tiling_state: TilingState | None = None,
+  ) -> aqt_tensor.QTensor:
+    """Creates incomplete QTensor with only quantization parameters.
+
+    The tiling state is used to tile the input tensor and change the calibration
+    axes accordingly. When axis is tiled, it is split into multiple tiles. Each
+    tile shares the same quantization parameters like scale factor. On the other
+    hand, if the axis is not tiled, the whole axis shares the same qantization
+    parameters. This tiling will increase the granularity of calibration
+    reducing the numeric error from quantizaiton.
+
+    Args:
+      x: The input tensor to be calibrated.
+      calibration_axes: The axes to calibrate.
+      tiling_state: The tiling state of the input tensor.
+
+    Returns:
+      An incomplete QTensor with only quantization parameters.
+    """
+
+    if tiling_state:
+      # Tile `x` and change calibration axes according to the tiling.
+      x = tiling_state.apply(x)
+      _, calibration_axes = tiling_state.to_tiled_axes_transposed(
+          calibration_axes
+      )
+
     if isinstance(self.numerics, no_numerics.NoNumerics):
       qt = aqt_tensor.QTensor(
-          qvalue=x, scale=[], scale_t=None, dequant_dtype=x.dtype
+          qvalue=x,
+          scale=[],
+          scale_t=None,
+          dequant_dtype=x.dtype,
+          tiling_state=tiling_state,
       )
       return qt
 
@@ -106,6 +148,7 @@ class Quantizer:
         scale=[scale],
         scale_t=None,
         dequant_dtype=dequant_dtype,
+        tiling_state=tiling_state,
     )
     return qt
 

@@ -23,7 +23,9 @@ from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import config
 from aqt.jax.v2 import stochastic_rounding
+from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
+
 import aqt.jax.v2.aqt_dot_general as aqt
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
@@ -1085,6 +1087,26 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     ])
     qx, _ = quantizer.quant(x, calibration_axes=None)
     self.assertEqual(qx.scale, [jnp.array([[1.0]])])
+
+  def test_per_subchannel(self):
+    # TODO(lew): bits=8 started failing in VLP colab due x/x != 1.0 sometimes
+    bits = 4
+    quantizer = aqt_quantizer.quantizer_make(bits)
+    x = jnp.arange(0, 64).reshape((4, 4, 4))
+
+    tiling_state = tiled_dot_general.generate_tiling_state(x, [
+        tiled_dot_general.AxisTiling(axis=2, tile_size=2),
+    ])
+    qx, _ = quantizer.quant(
+        x,
+        calibration_axes=[0, 2],
+        tiling_state=tiling_state
+    )
+    self.assertEqual(qx.qvalue.shape, (4, 4, 2, 2))
+    self.assertEqual(qx.scale[0].shape, (1, 4, 2, 1))
+
+    x = qx.dequant()
+    self.assertEqual(x.shape, (4, 4, 4))
 
 
 if __name__ == "__main__":
