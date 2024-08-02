@@ -96,7 +96,7 @@ def fp_round(
   nexp = cfg.nexp
   nmant = cfg.nmant
   assert cfg.minexp == 0, 'minexp not implemented'
-  assert not cfg.has_subnormals, 'subnormals not implemented'
+  # assert not cfg.has_subnormals, 'subnormals not implemented'
   assert not cfg.has_two_nan, 'two_nan not implemented'
   assert not cfg.has_naninf, 'naninf not implemented'
 
@@ -143,7 +143,7 @@ def fp_round(
 
     min_repr = min_exp << container_man
     min_repr_float = jax.lax.bitcast_convert_type(min_repr, input_dtype)
-    container_mant_mask = (1 << container_man) - 1
+    container_mant_mask = bits_dtype((1 << container_man) - 1)
     max_mant = jnp.uint16(container_mant_mask & ~man_trunc_mask)
     max_repr = (max_exp << container_man) + max_mant
 
@@ -151,9 +151,24 @@ def fp_round(
     sign = jax.lax.bitwise_and(x, sign_mask)
     abs_x = jax.lax.bitwise_and(x, ~sign_mask)
     # TODO(lew): we can do faster clipping with bit twiddling
-    clip_x = jnp.clip(abs_x, min_repr, max_repr)
+    clip_x = jnp.clip(abs_x, min_repr, max_repr)  # sign bit is 0
     x = jax.lax.bitwise_or(sign, clip_x)
+    # print(f'{x[0]:016b}')
     x = jax.lax.bitcast_convert_type(x, input_dtype)
+    # print(x)
+    if cfg.has_subnormals:
+      # When container exponent is min_exp, container value is
+      #    sign * 2^min_exp * (1.mantissa) = sign * (1.mantissa)
+      # If dropping min_exp and making it a subnormal, what we want it to
+      # represent is
+      #    sign * 2^min_exp * (0.mantissa) = sign * (0.mantissa)
+      # Therefore, simply subtracting 1 from the container abs value when
+      # container exponent is min_exp.
+      exp = jax.lax.bitwise_and(clip_x, ~container_mant_mask)
+      x = jnp.where(
+          exp == (min_exp << container_man), jnp.sign(x) * (jnp.abs(x) - 1), x
+      )
+    # TODO(yichizh): support subnormal sr
     if stochastic_rounding:
       assert bits_dtype == jnp.uint16
       if test_noise_axis is not None:
