@@ -14,9 +14,12 @@
 """dot_general with flax lifted custom_vjp."""
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2.flax import transformer_engine_calibration
 import flax.linen as nn
 import jax
 from jax import numpy as jnp
+
+MUTABLE_ARRAY_COLLECTIONS = (transformer_engine_calibration.FP8_STATS,)
 
 
 def dg_core_flax_lifted(
@@ -42,6 +45,7 @@ def dg_core_flax_lifted(
   Returns:
     aqt DotGeneral result. Flax-lifted custom_vjp is applied on it.
   """
+
   def _dg_core_flax_lifted(
       mdl: nn.Module,
       lhs: jnp.ndarray,
@@ -77,8 +81,19 @@ def dg_core_flax_lifted(
     # declared INSIDE the AqtDotGeneral layer.
     # Since we do not have any gradient functions for the params, removing
     # jax.lax.stop_gradient here will lead to NotImplementedError of
-    # differentiation rules for 'custom_lin'.
-    params = jax.lax.stop_gradient(mdl.variables)
+    # differentiation rules for 'custom_lin'. MutableArrays should not be passed
+    # through stop_gradient, so we need to filter those out from this logic.
+    params_to_apply_stop_grad_to = {
+        collection: mdl.variables[collection]
+        for collection in mdl.variables
+        if collection not in MUTABLE_ARRAY_COLLECTIONS
+    }
+    params = jax.lax.stop_gradient(params_to_apply_stop_grad_to)
+    for mutable_array_collection in MUTABLE_ARRAY_COLLECTIONS:
+      if mutable_array_collection in mdl.variables:
+        params = params | {
+            mutable_array_collection: mdl.variables[mutable_array_collection]
+        }
     out, res = aqt_dot_general.dg_core_vjp_fwd(
         lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg
     )
