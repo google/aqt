@@ -57,6 +57,9 @@ class AxisTiling:
 
   def complete_missing(self, shape):
     """Completes missing tile_count or tile_size."""
+    if self.axis < 0:
+      # make nagative index to positive index
+      self.axis = len(shape) + self.axis
     tc = self.tile_count
     ts = self.tile_size
     axis_size = shape[self.axis]
@@ -202,6 +205,7 @@ class TilingState:
     """Tiles (splits) one axis while maintaining all AxisIdx."""
     msg = "Can't tile as all tiling must be done before broadcast operations."
     assert len(self.get_broadcasted_tile_map_indexes()) == 0, msg
+
     tile_axis = self.tile_map[at.axis]
     assert len(tile_axis) == 1, "can't tile the same axis twice."
     tile_axis = tile_axis[0]
@@ -277,6 +281,9 @@ class TilingState:
     tile_count = []
     tile_size = []
     for ai in axes:
+      if isinstance(ai, AxisIdx) and ai < 0:
+        # make nagative index to positive index
+        ai = len(self.untiled_shape) + ai
       tiled = self.tile_map[ai]
       match len(tiled):
         case 1:

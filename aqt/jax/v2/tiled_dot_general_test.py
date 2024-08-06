@@ -274,6 +274,30 @@ class TiledDotGeneralTest(parameterized.TestCase):
     self.assertEqual(tiled_axes, [1, 3])
     self.assertEqual(ca_axes, [2, 4])
 
+  def test_negative_axis_index(self):
+    t_shape = (31, 22, 27, 8, 27)
+    t = jnp.ones(t_shape)
+
+    # AxisTiling suppoorts negative axis index
+    tiled_axes = [
+        AxisTiling(axis=-1, tile_count=None, tile_size=9),
+        AxisTiling(axis=-2, tile_count=2, tile_size=None),
+    ]
+    t_tiling_state = tiled_dot_general.generate_tiling_state(
+        t, tiled_axes
+    )
+
+    self.assertEqual(t_tiling_state.untiled_shape, t_shape)
+    self.assertEqual(t_tiling_state.tiled_shape, [31, 22, 27, 2, 4, 3, 9])
+    self.assertEqual(
+        t_tiling_state.tile_map, {0: [0], 1: [1], 2: [2], 3: [3, 4], 4: [5, 6]}
+    )
+
+    # to_tiled_axes_transposed supports negative axis index
+    self.assertEqual(t_tiling_state.to_tiled_axes_transposed([-1]), ([5], [6]))
+    self.assertEqual(t_tiling_state.to_tiled_axes_transposed([-2]), ([3], [4]))
+    self.assertEqual(t_tiling_state.to_tiled_axes_transposed([-3]), ([], [2]))
+
 
 if __name__ == '__main__':
   absltest.main()
