@@ -41,7 +41,7 @@ def _dummy_dataset(ds_size, image_rng, label_rng):
 class MnistTest(parameterized.TestCase):
 
   # Unable to use config_v4() in parameters since it needs jax.device info.
-  # TODO(aqt): Move confiv_v4() into parameters once int4 works for cpu.
+  # TODO(aqt): Move config_v4() into parameters once int4 works for cpu.
   @parameterized.parameters([
       (
           {
@@ -138,6 +138,7 @@ class MnistTest(parameterized.TestCase):
                             qvalue=(expected_dtype, (2, 5, 10)),
                             scale=[(dtype("float32"), (2, 1, 10))],
                             scale_t=None,
+                            bias=[],
                             dequant_dtype=dtype("float32"),
                         )
                     }
@@ -157,6 +158,7 @@ class MnistTest(parameterized.TestCase):
                             # After tiling the scale shape is (2, 1, 256),
                             # then transposed to (2, 1, 256).
                             scale_t=None,
+                            bias=[],
                             dequant_dtype=dtype("float32"),
                         )
                     }
@@ -176,6 +178,7 @@ class MnistTest(parameterized.TestCase):
                             # After tiling the scale shape is (2, 1, 10),
                             # then transposed to (2, 1, 10).
                             scale_t=None,
+                            bias=[],
                             dequant_dtype=dtype("float32"),
                         )
                     }
@@ -406,6 +409,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 5, 10)),
                         scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -414,6 +418,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -426,6 +431,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -434,6 +440,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 1568, 256)),
                         scale=[(dtype("float32"), (2, 1, 256))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -446,6 +453,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -454,6 +462,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 128, 10)),
                         scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -624,6 +633,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 5, 10)),
                         scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -632,6 +642,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -644,6 +655,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -652,6 +664,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 1568, 256)),
                         scale=[(dtype("float32"), (2, 1, 256))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -664,6 +677,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=None,
                         scale=[(dtype("float32"), (1, 1, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -672,6 +686,7 @@ class MnistTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 128, 10)),
                         scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },

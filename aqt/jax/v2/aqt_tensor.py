@@ -72,6 +72,12 @@ class QTensor:
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
   scale_t: Optional[list[ArrayT]]
 
+  # len(bias) == 0 means bias should not be applied.
+  # Quantization and dequantization are defined such that:
+  #   quant(x) = (x + b) / s = (x + b[0] + b[1] + ...) / s[0] / s[1] / ...
+  # dequant(q) = (q * s) - b = (q * s[0] * s[1] * ...) - b[0] - b[1] - ...
+  bias: list[ArrayT]
+
   # DType of the tensor before quantized.
   # NOTE: AQT Users should use the public property, dtype, instead.
   dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
@@ -116,15 +122,26 @@ class QTensor:
     """Quantizes the QTensor."""
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
+    assert isinstance(
+        self.scale, list
+    ), f'QTensor.scale must be a list of arrays, but got {self.scale}'
+    assert isinstance(
+        self.bias, list
+    ), f'QTensor.bias must be a list of arrays, but got {self.bias}'
 
     if self.tiling_state is not None:
       x = self.tiling_state.apply(x)
+
     qvalue = x
+    # quant(x) = (x + b) / s
+    for b in self.bias:
+      qvalue += b
+
     for s in self.scale:
       # TODO(lew): We could store s_inv for faster activation quantization.
       s_inv = jax.lax.reciprocal(s)
       s_inv = jnp.where(jnp.isinf(s_inv), jnp.ones_like(s_inv), s_inv)
-      qvalue = qvalue * s_inv
+      qvalue *= s_inv
 
     # TODO(lew): We should apply numerics here, so that 'quant' function
     # Can be considered a part of API.
@@ -133,8 +150,14 @@ class QTensor:
   def dequant(self) -> jnp.ndarray:
     """Dequantizes the QTensor."""
     assert self.scale is not None, 'Missing scales when dequantizing a QTensor.'
+    assert isinstance(
+        self.scale, list
+    ), f'QTensor.scale must be a list of arrays, but got {self.scale}'
+    assert isinstance(
+        self.bias, list
+    ), f'QTensor.bias must be a list of arrays, but got {self.bias}'
     msg = (
-        'QTensor is manually created without setting a dequant_detype. It can'
+        'QTensor is manually created without setting a dequant_dtype. It can'
         ' be used in dot_general, but to dequantize you need to set its dtype.'
     )
     assert self.dequant_dtype is not None, msg
@@ -143,13 +166,21 @@ class QTensor:
 
     # pytype: disable=attribute-error
     ret = self.qvalue.astype(self.dequant_dtype)
-    for scale in self.scale:
-      ret = ret * scale
+
+    # dequant(q) = q * s - b
+    for s in self.scale:
+      ret *= s
+
+    # Apply bias after all rescaling is done. There may be more biases than
+    # scales, e.g. in native asymmetric matmul output dequantization.
+    for b in self.bias:
+      ret -= b
 
     if self.tiling_state is not None:
       ret = self.tiling_state.unapply(ret)
-    # In case the scale dtype is not the same as dequant_dtype, and it is a
-    # higher precision.
+
+    # In case the scale or bias dtypes are not the same as dequant_dtype, and it
+    # is a higher precision.
     ret = ret.astype(self.dequant_dtype)
     # pytype: enable=attribute-error
     return ret  # pytype: disable=bad-return-type
@@ -170,6 +201,7 @@ class QTensor:
         qvalue=qvalue,
         scale=scale,
         scale_t=self.scale_t,
+        bias=self.bias,
         dequant_dtype=self.dequant_dtype,
     )
 
@@ -204,6 +236,7 @@ def zeros(
       qvalue=jnp.zeros(shape, dtype=container_dtype),
       scale=[],
       scale_t=None,
+      bias=[],
       dequant_dtype=dequant_dtype,
   )
 
@@ -228,6 +261,7 @@ def zeros_with_scale(
       qvalue=jnp.zeros(shape, dtype=container_dtype),
       scale=[jnp.ones(scale_shape, dtype=scale_dtype)],
       scale_t=None,
+      bias=[],
       dequant_dtype=dequant_dtype,
   )
 
@@ -236,15 +270,30 @@ def partition_spec(
     partitions: Sequence[Any],
     calibration_axis: Sequence[utils.AxisIdx],
     dtype: jnp.dtype,
+    *,
+    use_bias: bool,
 ) -> QTensor:
   """Returns a QTensor filled with partition specs."""
+  # This function assumes that there is a single scale, and if use_bias=True, a
+  # single bias. Both of which are expected to be configured using per-channel
+  # quantization.
   scale_partitions = list(partitions)
   for axis in calibration_axis:
     scale_partitions[axis] = None
+  if use_bias:
+    # Assumes that the bias to be partitioned is the bias from input
+    # quantization, (which has singleton dimensions for the calibration_axis),
+    # and not the biases used in native output dequantization, of which there
+    # may be more than one, and which may have the same shape as the qvalue.
+    bias_partition = [jax.sharding.PartitionSpec(*scale_partitions)]
+  else:
+    # JAX errors upon receiving partition specs for non-existent tensors.
+    bias_partition = []
   return QTensor(
       qvalue=jax.sharding.PartitionSpec(*partitions),
       scale=[jax.sharding.PartitionSpec(*scale_partitions)],
       scale_t=None,
+      bias=bias_partition,
       dequant_dtype=dtype,
   )
 
@@ -255,8 +304,9 @@ def dynamic_slice(
     slice_sizes: Sequence[int],
 ) -> QTensor:
   """Dynamically slices the value at start_indices using the given shape."""
-  msg = 'scale_t is not supported in the dynamic_slice of a QTensor.'
-  assert operand.scale_t is None, msg
+  msg = '{attribute} is not supported in the dynamic_slice of a QTensor.'
+  assert operand.scale_t is None, msg.format('scale_t')
+  assert not operand.bias, msg.format('bias')
 
   def get_sliced_scales(scale):
     msg = 'Slice sizes must have the same length as operand dims.'
@@ -284,6 +334,7 @@ def dynamic_slice(
       qvalue=jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),
       scale=[get_sliced_scales(s) for s in operand.scale],
       scale_t=None,
+      bias=[],
       dequant_dtype=operand.dequant_dtype,
   )
 
@@ -332,6 +383,7 @@ def dynamic_update_slice(
       qvalue=qvalues,
       scale=scales,
       scale_t=None,
+      bias=[],
       dequant_dtype=operand.dequant_dtype,
   )
 
@@ -348,5 +400,9 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
           for target_scale, update_scale in zip(operand.scale, update.scale)
       ],
       scale_t=None,
+      bias=[
+          target_bias.at[frame].set(update_bias)
+          for target_bias, update_bias in zip(operand.bias, update.bias)
+      ],
       dequant_dtype=operand.dequant_dtype,
   )

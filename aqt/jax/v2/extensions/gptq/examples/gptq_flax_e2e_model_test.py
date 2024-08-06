@@ -129,6 +129,7 @@ class GptqTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 5, 10)),
                         scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 },
@@ -141,6 +142,7 @@ class GptqTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 1568, 256)),
                         scale=[(dtype("float32"), (2, 1, 256))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 }
@@ -153,6 +155,7 @@ class GptqTest(parameterized.TestCase):
                         qvalue=(expected_dtype, (2, 128, 10)),
                         scale=[(dtype("float32"), (2, 1, 10))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype("float32"),
                     )
                 }

@@ -160,5 +160,6 @@ def make_qtensor_blockspec(
       qvalue=block_spec,
       scale=[_make_scale_block_spec(s, block_spec) for s in qtensor.scale],
       scale_t=None,
+      bias=[],
       dequant_dtype=qtensor.dequant_dtype,
   )

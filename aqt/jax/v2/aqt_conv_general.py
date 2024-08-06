@@ -60,7 +60,7 @@ However if there is any other use, we will drop that assumption."""
     # In Flax, lhs is the inputs, rhs is the kernel.
     # lhs layout is B, spatials..., Ci
     # rhs layout is: spatials..., Ci, Co
-    # out layous it: B, spatials..., Co
+    # out layout is: B, spatials..., Co
     #
     # we need to share these axes: lhs[1:] , rhs[:-1]
     # we have a scale/invscale per: lhs[0] / out[0] and rhs[-1] / out[-1]
@@ -103,6 +103,7 @@ However if there is any other use, we will drop that assumption."""
         qvalue=out,
         scale=[],
         scale_t=None,
+        bias=[],
         dequant_dtype=jnp.promote_types(lhs, rhs),
     )
     assert out.scale is not None  # pytype help
@@ -112,7 +113,7 @@ However if there is any other use, we will drop that assumption."""
 
     # # Future scale granularity optimization.
     # In 1x1 conv, each pixel (spatial location) can have different scales
-    # in 1xN (rows x colums) conv each row can have different scale, but
+    # in 1xN (rows x columns) conv each row can have different scale, but
     # columns need to share the scales ,  because we are adding pixels across.
     #
     # For patch convs we could have separate scales per patch.

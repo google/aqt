@@ -314,6 +314,7 @@ class AqtFlaxTest(parameterized.TestCase):
                     qvalue=(dtype('int8'), (2, 3, 2, 5, 2)),
                     scale=[(dtype('float32'), (2, 3, 1, 5, 1))],
                     scale_t=None,
+                    bias=[],
                     dequant_dtype=dtype('float32'),
                 )
             }
@@ -386,6 +387,7 @@ class AqtFlaxTest(parameterized.TestCase):
                         qvalue=(dtype('int8'), (3, 6, 5, 2)),
                         scale=[(dtype('float32'), (3, 1, 5, 1))],
                         scale_t=None,
+                        bias=[],
                         dequant_dtype=dtype('float32'),
                     )
                 }

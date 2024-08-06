@@ -97,7 +97,7 @@ class AbsMaxCalibration(Calibration):
     # int_numerics.IntNumerics.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     # TODO(yichizh): the zero filtering is not needed anymore because inf is
-    # filtered when calculating the reciprocal of scaline factor
+    # filtered when calculating the reciprocal of scaling factor
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     if self.scale is not None:
       abs_max = abs_max * self.scale
@@ -269,7 +269,7 @@ class SnrBasedAutoCalibration(Calibration):
     scale = bound / abs_max_mapped_to
 
     q_tensor = aqt_tensor.QTensor(
-        qvalue=None, scale=[scale], scale_t=None, dequant_dtype=x.dtype
+        qvalue=None, scale=[scale], scale_t=None, bias=[], dequant_dtype=x.dtype
     ).quant(x)
 
     # This actually quantizes the tensor (clips, rounds, etc).

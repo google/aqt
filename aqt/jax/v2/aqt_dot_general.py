@@ -114,7 +114,7 @@ def dot_general_raw_make(
   else:
     dg_accumulator_dtype = None
 
-  # DotGeneralRaw should create a this quantizer on defualt.
+  # DotGeneralRaw should create a this quantizer on default.
   # Then setter can change it.
 
   # initialize_calibration=False because that has to be delayed to be called
@@ -574,6 +574,11 @@ def _maybe_use_fwd_quant(
   )
   if use_fwd_quant:
     assert fwd_quantized, msg
+    if rhs.qx.bias:
+      raise NotImplementedError(
+          'Quantization biases are not supported in forward quantization.'
+      )
+
     scale_t = transpose.rhs_scale_transpose_for_lhs_input(
         rhs.qx.scale[0], dimension_numbers, lhs.shape
     )
@@ -663,6 +668,17 @@ class DotGeneralRaw:
           dimension_numbers,
           self.allow_dummy_gradient_into_qtensor
       )
+
+      msg = (
+          'biases are only supported in fake quant mode, but got a {arg} bias '
+          'and self.{arg}.dequant_mode == {mode} != DequantMode.THIS_INPUT'
+      )
+      assert not (
+          lhs_qt.bias and self.lhs.dequant_mode != DequantMode.THIS_INPUT
+      ), msg.format(arg='lhs', mode=self.lhs.dequant_mode)
+      assert not (
+          rhs_qt.bias and self.rhs.dequant_mode != DequantMode.THIS_INPUT
+      ), msg.format(arg='rhs', mode=self.rhs.dequant_mode)
 
       lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
       lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
@@ -772,6 +788,7 @@ def _qtensor_dot_general(
       qvalue=out,
       scale=[],
       scale_t=None,
+      bias=[],
       dequant_dtype=dequant_dtype,
   )
   assert out.scale is not None  # pytype help
@@ -869,7 +886,7 @@ class DotGeneral:
     expected_fwd_quant = False
     msg_fwd_quant = (
         f'use_fwd_quant should be set to {expected_fwd_quant} when remaining'
-        ' axis are used for calibration axis.'
+        ' axis are used for calibration axis. '
     )
 
     if self.fwd.rhs.calibration_mode == CalibrationMode.REMAINING_AXIS:

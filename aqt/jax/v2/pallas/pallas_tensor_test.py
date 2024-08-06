@@ -72,6 +72,7 @@ class PallasTensorTest(parameterized.TestCase):
         qvalue=jnp.ones(qvalue_shape, dtype=jnp.int8),
         scale=[jnp.ones(scale_shape, dtype=jnp.float32)],
         scale_t=None,
+        bias=[],
         dequant_dtype=jnp.float32,
     )
     block_spec = pl.BlockSpec(block_shape, lambda *args: args)

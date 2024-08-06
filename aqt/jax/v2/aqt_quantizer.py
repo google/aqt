@@ -51,7 +51,7 @@ class Quantizer:
   # The dtype of the quantization scale array. If not set, the scale array will
   # be in the same dtype as the input.
   scale_dtype: jnp.dtype | None = utils.static_field(default=None)
-  # TODO(yichizh): Factor out auxilliary dataclasses into a separate file.
+  # TODO(yichizh): Factor out auxiliary dataclasses into a separate file.
   context: utils.Context
 
   # we need to speed up this initialization for the backward pass to happen
@@ -87,9 +87,9 @@ class Quantizer:
     The tiling state is used to tile the input tensor and change the calibration
     axes accordingly. When axis is tiled, it is split into multiple tiles. Each
     tile shares the same quantization parameters like scale factor. On the other
-    hand, if the axis is not tiled, the whole axis shares the same qantization
+    hand, if the axis is not tiled, the whole axis shares the same quantization
     parameters. This tiling will increase the granularity of calibration
-    reducing the numeric error from quantizaiton.
+    reducing the numeric error from quantization.
 
     Args:
       x: The input tensor to be calibrated.
@@ -112,6 +112,7 @@ class Quantizer:
           qvalue=x,
           scale=[],
           scale_t=None,
+          bias=[],
           dequant_dtype=x.dtype,
           tiling_state=tiling_state,
       )
@@ -133,7 +134,7 @@ class Quantizer:
 
     if self.po2_scale:
       # With floor the biggest value (we are using jnp.max) is in the range of
-      # clipping and therefore have a correct gradinet.
+      # clipping and therefore have a correct gradient.
       scale = 2 ** jnp.floor(jnp.log2(jax.lax.reciprocal(scale)))
       scale = jax.lax.reciprocal(scale)
     if self.scale_stop_grad:
@@ -147,6 +148,7 @@ class Quantizer:
         qvalue=None,
         scale=[scale],
         scale_t=None,
+        bias=[],
         dequant_dtype=dequant_dtype,
         tiling_state=tiling_state,
     )

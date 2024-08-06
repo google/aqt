@@ -60,7 +60,7 @@ class Freezer(nn.Module):
 
   On default it is an identity function that saves the input in a variable.
   In 'quant_mode=QuantMode.Serve' mode, ignores the input and returns the frozen
-  value. It is usefult to implement 'constant folding' and put quantized weights
+  value. It is useful to implement 'constant folding' and put quantized weights
   and scales in the checkpoint for serving. Specifically:
 
   self.get() returns None when quant_mode=TRAIN or CONVERT, returns variable
@@ -106,6 +106,7 @@ class Freezer(nn.Module):
           qvalue=self.qvalue.value,
           scale=None,
           scale_t=[self.scale_t.value],
+          bias=[],
           # TODO(lew): Ideal solution: To find out this dequant_dtype one should
           # use the dtype of inputs of the quant function. We should store it as
           # a dtype of small-sized scale tensor.
@@ -120,6 +121,10 @@ class Freezer(nn.Module):
     #     f'Freezer got a QTensor of type {inputs.qvalue.dtype} but expected'
     #     f' {self.q_dtype}.'
     # )
+    if inputs.bias:
+      raise NotImplementedError(
+          'Quantization biases are not supported in AQT Flax Legacy Freezer.'
+      )
     if self.quant_mode == QuantMode.TRAIN:
       pass
     elif self.quant_mode == QuantMode.CALIBRATE:
@@ -310,6 +315,9 @@ class AqtDotGeneral(nn.Module):
         scale_non_shard_axis_all = list(range(qt.ndim))
         scale_non_shard_axis_contracting = list(contracting_axis)
 
+        def _get_singleton_axes(x: jnp.ndarray) -> list[utils.AxisIdx]:
+          return [axis for axis, dim in enumerate(x.shape) if dim == 1]
+
         qt = qt.replace(
             qvalue=axis_metadata_wrapper(
                 qt.qvalue,
@@ -330,6 +338,13 @@ class AqtDotGeneral(nn.Module):
                     x, tile_map, scale_non_shard_axis_all
                 ),
                 qt.scale_t,
+            ),
+            # Set the non-sharding axes for bias to the singleton dimensions.
+            bias=jax.tree.map(
+                lambda x: axis_metadata_wrapper(
+                    x, tile_map, _get_singleton_axes(x)
+                ),
+                qt.bias,
             ),
         )
         return qt

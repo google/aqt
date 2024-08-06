@@ -72,11 +72,11 @@ def dot_general(
     precision: this is ignored, but added to match the signature of
       jax.lax.dot_general.
     preferred_element_type: preferred output element type after dequantization.
-    lhs_dequant_mode: This decicdes where lhs is dequantized. Default is OUTPUT
+    lhs_dequant_mode: This decides where lhs is dequantized. Default is OUTPUT
       where dequantization is applied to the output of dot_general. OTHER_INPUT
       applies dequantization to the other input before dot_general and
       THIS_INPUT applies dequantization to the current input before dot_general.
-    rhs_dequant_mode: This decicdes where rhs is dequantized. Default is OUTPUT.
+    rhs_dequant_mode: This decides where rhs is dequantized. Default is OUTPUT.
 
   Returns:
     Dequantized output of dot_general.
@@ -86,9 +86,9 @@ def dot_general(
 
   # The code below is supposed to be executed inside pallas kernel.
 
-  # When only one of operands is quantized, Jax impliclty cast int8 into float
-  # and performs dot_general. However, pallas requires explict casting when only
-  # one of operands is quantized.
+  # When only one of operands is quantized, Jax implicitly cast int8 into float
+  # and performs dot_general. However, pallas requires explicit casting when
+  # only one of operands is quantized.
   is_both_quantized = isinstance(lhs, QTensor) and isinstance(rhs, QTensor)
   if isinstance(lhs, QTensor) and not is_both_quantized:
     promoted_dtype = jnp.promote_types(lhs.dequant_dtype, rhs)
@@ -99,11 +99,11 @@ def dot_general(
 
   if isinstance(lhs, jax.Array):
     lhs = QTensor(
-        qvalue=lhs, scale=[], scale_t=None, dequant_dtype=lhs.dtype
+        qvalue=lhs, scale=[], scale_t=None, bias=[], dequant_dtype=lhs.dtype
     )
   if isinstance(rhs, jax.Array):
     rhs = QTensor(
-        qvalue=rhs, scale=[], scale_t=None, dequant_dtype=rhs.dtype
+        qvalue=rhs, scale=[], scale_t=None, bias=[], dequant_dtype=rhs.dtype
     )
 
   if preferred_element_type is None:
