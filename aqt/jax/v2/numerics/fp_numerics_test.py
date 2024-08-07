@@ -234,12 +234,12 @@ class FpTest(parameterized.TestCase):
   #   has_naninf=False,
   @parameterized.parameters([
       dict(nexp=3, minexp=0, nmant=0, has_subnormals=False),
-      # dict(nexp=3, minexp=0, nmant=0, has_subnormals=True),
+      dict(nexp=3, minexp=0, nmant=0, has_subnormals=True),
       # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=False),
       # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=True),
       dict(nexp=2, minexp=0, nmant=0, has_subnormals=False),
       dict(nexp=2, minexp=0, nmant=1, has_subnormals=False),
-      # dict(nexp=2, minexp=0, nmant=1, has_subnormals=True),
+      dict(nexp=2, minexp=0, nmant=1, has_subnormals=True),
   ])
   def test_fp_round(
       self,
@@ -414,7 +414,7 @@ class FpTest(parameterized.TestCase):
     bucket_size = qx_larger - qx_smaller
     expected_p_smaller = (qx_larger - x[:, jnp.newaxis]) / bucket_size
     expected_p_smaller = jnp.where(bucket_size == 0, 1.0, expected_p_smaller)
-    p_err = p_smaller - expected_p_smaller
+    p_err = jnp.abs(p_smaller - expected_p_smaller)
     p_stderr = p_err * jnp.sqrt(sr_sample_count)
     # print(f"{p_stderr=}")
     assert (p_stderr < 2.0).all(), p_stderr
