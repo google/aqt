@@ -136,6 +136,19 @@ def set_numerics(
     cfg.dg_accumulator_dtype = None
 
 
+def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
+  """A special setter for int2 weights."""
+  # Since XLA only supports int2 casting with an input shape of a multiple
+  # of 128, we use this setter to enable int2 dtype.
+  # Remove this setter and enable int2 in utils.infer_dtype_from_bits()
+  # when XLA supports general int2 casting.
+  assert isinstance(cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics)
+  assert cfg.fwd.dg_quantizer.rhs.numerics.bits == 2
+  # Disable pytype check since jnp.int2 is only dynamically to jax
+  # when ml_dtypes package has it.
+  cfg.fwd.dg_quantizer.rhs.numerics.dtype = jnp.int2  # pytype: disable=module-attr
+
+
 def set_accumulator_dtype(
     cfg: DotGeneral,
     fwd_dtype: Union[jnp.dtype, None, SkipT],
