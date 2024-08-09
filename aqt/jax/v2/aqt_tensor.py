@@ -22,6 +22,7 @@
 
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
+import math
 import typing
 from typing import Any, Callable, Optional, Sequence, TypeAlias
 from aqt.jax.v2 import tiled_dot_general
@@ -49,6 +50,8 @@ else:
   ArrayT: TypeAlias = jnp.ndarray
 
 TilingState = tiled_dot_general.TilingState
+AqtTileMap = tiled_dot_general.AqtTileMap
+AxisTiling = tiled_dot_general.AxisTiling
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -84,10 +87,48 @@ class QTensor:
       pytree_node=False, default=None
   )
 
-  # Tiling state of the tensor.
-  tiling_state: Optional[TilingState] = flax.struct.field(
+  # How axes are tiled in the tensor.
+  tile_map: Optional[AqtTileMap] = flax.struct.field(
       pytree_node=False, default=None
   )
+
+  def is_tiled(self) -> bool:
+    return self.tile_map is not None
+
+  def tiled_axes(self) -> Optional[list[AxisTiling]]:
+    """Returns the tiled axes of the QTensor."""
+    if not self.is_tiled():
+      return None
+    tiled_ax = []
+    for ax in self.tile_map:
+      if len(self.tile_map[ax]) == 2:
+        tile_cnt_axis, tile_size_axis = self.tile_map[ax]
+
+        if self.is_full():
+          # If the QTensor is full, we can infer the tile count and size from
+          # the qvalue shape.
+          tile_cnt = self.qvalue.shape[tile_cnt_axis]  # pytype: disable=attribute-error
+          tile_size = self.qvalue.shape[tile_size_axis]  # pytype: disable=attribute-error
+        else:
+          # If the QTensor is not full, we can only infer the tile count from
+          # the scale shape.
+          assert self.scale is not None and len(self.scale) == 1
+          tile_cnt = self.scale[0].shape[tile_cnt_axis]
+          tile_size = None
+
+        tiled_ax.append(
+            AxisTiling(axis=ax, tile_count=tile_cnt, tile_size=tile_size)
+        )
+    return tiled_ax
+
+  def tiling_state(self) -> Optional[TilingState]:
+    """Returns the tiling state of the QTensor."""
+    if not self.is_tiled():
+      return None
+    assert self.is_full(), 'Tiling state is only available when qvalue is set.'
+    return tiled_dot_general.generate_tiling_state_from_tiled_tensor(
+        self.qvalue, self.tile_map
+    )
 
   @property
   def dtype(self) -> jnp.dtype | None:
@@ -98,14 +139,16 @@ class QTensor:
     return jnp.dtype(self.dequant_dtype) if self.dequant_dtype else None
 
   def _validate_tiling_state(self):
-    if self.tiling_state is None:
+    if not self.is_tiled():
       return
 
     if self.is_full():
-      assert self.qvalue.shape == tuple(self.tiling_state.tiled_shape), (
-          'The shape of the qvalue should be the same as the tiled shape of'
-          f' the tiling state. However, {self.qvalue.shape=} and'  # pytype: disable=attribute-error
-          f' {self.tiling_state.tiled_shape=}'
+      tiling_state = self.tiling_state()
+      assert math.prod(self.qvalue.shape) == math.prod(  # pytype: disable=attribute-error
+          tiling_state.untiled_shape  # pytype: disable=attribute-error
+      ), (
+          f'The qvalue of shape={self.qvalue.shape} cannot be reshaped to the'  # pytype: disable=attribute-error
+          f' untiled shape of the {tiling_state.untiled_shape}'  # pytype: disable=attribute-error
       )
 
   def is_full(self) -> bool:
@@ -129,9 +172,11 @@ class QTensor:
         self.bias, list
     ), f'QTensor.bias must be a list of arrays, but got {self.bias}'
 
-    if self.tiling_state is not None:
-      x = self.tiling_state.apply(x)
-
+    if self.is_tiled():
+      tiling_state = tiled_dot_general.generate_tiling_state(
+          x, self.tiled_axes()
+      )
+      x = tiling_state.apply(x)
     qvalue = x
     # quant(x) = (x + b) / s
     for b in self.bias:
@@ -176,11 +221,10 @@ class QTensor:
     for b in self.bias:
       ret -= b
 
-    if self.tiling_state is not None:
-      ret = self.tiling_state.unapply(ret)
-
-    # In case the scale or bias dtypes are not the same as dequant_dtype, and it
-    # is a higher precision.
+    if self.is_tiled():
+      ret = self.tiling_state().unapply(ret)
+    # In case the scale dtype is not the same as dequant_dtype, and it is a
+    # higher precision.
     ret = ret.astype(self.dequant_dtype)
     # pytype: enable=attribute-error
     return ret  # pytype: disable=bad-return-type
@@ -209,16 +253,16 @@ class QTensor:
   def ndim(self) -> int:
     assert self.is_full(), _MSG_NO_QVALUE
     self._validate_tiling_state()
-    if self.tiling_state is not None:
-      return len(self.tiling_state.untiled_shape)
+    if self.is_tiled():
+      return len(self.tiling_state().untiled_shape)  # pytype: disable=attribute-error
     return self.qvalue.ndim  # pytype: disable=attribute-error
 
   @property
   def shape(self) -> Sequence[int]:
     assert self.is_full(), _MSG_NO_QVALUE
     self._validate_tiling_state()
-    if self.tiling_state is not None:
-      return tuple(self.tiling_state.untiled_shape)
+    if self.is_tiled():
+      return tuple(self.tiling_state().untiled_shape)  # pytype: disable=attribute-error
     return self.qvalue.shape  # pytype: disable=attribute-error
 
   def __len__(self) -> int:

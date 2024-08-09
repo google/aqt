@@ -274,6 +274,14 @@ class TiledDotGeneralTest(parameterized.TestCase):
     self.assertEqual(tiled_axes, [1, 3])
     self.assertEqual(ca_axes, [2, 4])
 
+    t_tiling_state_from_tiled_tensor = (
+        tiled_dot_general.generate_tiling_state_from_tiled_tensor(
+            jnp.empty([31, 2, 11, 3, 9, 8, 27]),
+            t_tiling_state.tile_map,
+        )
+    )
+    self.assertEqual(t_tiling_state, t_tiling_state_from_tiled_tensor)
+
   def test_negative_axis_index(self):
     t_shape = (31, 22, 27, 8, 27)
     t = jnp.ones(t_shape)

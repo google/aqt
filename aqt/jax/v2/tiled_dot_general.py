@@ -196,6 +196,9 @@ class TilingState:
   tiled_shape: list[AxisSize] = utils.dataclass_field(list)
 
   def __post_init__(self):
+    if self.tile_map and self.tiled_shape:
+      # if all attributes are already set then do nothing.
+      return
     for i in range(len(self.untiled_shape)):
       # No axis is split at all yet.
       self.tile_map[i] = [i]
@@ -329,6 +332,30 @@ def generate_tiling_state(
   xtensor = TilingState(untiled_shape=tensor.shape)
   xtensor.tile_axes(tiled_axes)
   return xtensor
+
+
+def generate_tiling_state_from_tiled_tensor(
+    tiled_tensor: jnp.ndarray,
+    tile_map: AqtTileMap
+) -> TilingState:
+  """Generates tiling states for the given already tiled tensor."""
+  tiled_shape = tiled_tensor.shape
+  untiled_shape = []
+  for ax in sorted(tile_map.keys()):
+    if len(tile_map[ax]) == 2:
+      tile_cnt_axis, tile_size_axis = tile_map[ax]
+      untiled_shape.append(
+          tiled_shape[tile_cnt_axis] * tiled_shape[tile_size_axis]
+      )
+    else:
+      tile_size_axis = tile_map[ax][0]
+      untiled_shape.append(tiled_shape[tile_size_axis])
+
+  return TilingState(
+      untiled_shape=tuple(untiled_shape),
+      tile_map=tile_map,
+      tiled_shape=list(tiled_shape),
+  )
 
 
 def generate_tiling_states_for_dot_general(
