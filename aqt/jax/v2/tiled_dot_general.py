@@ -201,7 +201,7 @@ class TilingState:
       self.tile_map[i] = [i]
     self.tiled_shape = list(self.untiled_shape)
 
-  def tile_axis(self, at: AxisTiling):
+  def tile_one_axis(self, at: AxisTiling):
     """Tiles (splits) one axis while maintaining all AxisIdx."""
     msg = "Can't tile as all tiling must be done before broadcast operations."
     assert len(self.get_broadcasted_tile_map_indexes()) == 0, msg
@@ -224,7 +224,7 @@ class TilingState:
 
   def tile_axes(self, ats: Iterable[AxisTiling]):
     for at in ats:
-      self.tile_axis(at)
+      self.tile_one_axis(at)
 
   def _is_broadcasted_ax(self, tile_map_idx: AxisIdx | str) -> bool:
     return isinstance(tile_map_idx, str) and tile_map_idx.startswith(
