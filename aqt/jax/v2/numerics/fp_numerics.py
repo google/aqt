@@ -111,8 +111,9 @@ def fp_round(
   container_man = jnp.finfo(input_dtype).nmant
   bits_dtype = jnp.uint16 if total_bits == 16 else jnp.uint32
   assert nmant <= container_man, 'bf16 man bits'
-  man_trunc_bits = container_man - nmant
-  man_trunc_mask = bits_dtype((1 << man_trunc_bits) - 1)
+  man_trunc_bits = container_man - nmant  # e2m1 in bf16: 7-1
+  # example e2m1 in bf16: man_trunc_mask = 0b0000000000111111  (7-1 1s)
+  man_trunc_mask = bits_dtype((1 << man_trunc_bits) - 1)  # 0b00000000_00111111
 
   # TODO(lew): We can use smaller dtype
   x = jax.lax.bitcast_convert_type(x, bits_dtype)  # adds noise to man
@@ -126,24 +127,26 @@ def fp_round(
       rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
     noise = jax.lax.convert_element_type(rnd_bits, bits_dtype) & man_trunc_mask
   else:
-    noise = 1 << (man_trunc_bits - 1)
+    # example e2m1 in bf16: noise = 0b0000000000100000  (shift = 7-1 - 1)
+    noise = 1 << (man_trunc_bits - 1)  #  represents 0.5 in the container
     noise = jax.lax.convert_element_type(noise, bits_dtype)
   # This noise add might overflow up to sign bit if x(bf16) has max exp.
   # In bf16 this happens if x=nan or x=inf.
-  x = x + noise
-  x = jax.lax.bitwise_and(x, ~man_trunc_mask)  # zero-out lowest bits in man
+  x = x + noise  # uint addition, potential carry into exponent, this is correct
+  x = jax.lax.bitwise_and(x, ~man_trunc_mask)  # zero-out lowest "6" bits in man
 
   if nexp is not None:
+    # We use 1 as a minimal representable value. TODO(lew): use cfg.minexp.
+    # We will clip to [1, 2^(2**nexp - 1) * (2-1 ^ nmant)] interval.
     assert input_dtype == jnp.bfloat16
-    # min_exp = jnp.uint16(0b0_10000000_0000000)
-    # max_exp = jnp.uint16(0b0_10000111_0000000)
-    # bf16_exp_bias = jnp.uint16(0b0_01111111)
     min_exp = jnp.uint16(0b0_01111111)
     max_exp = min_exp + 2**nexp - 1
 
     min_repr = min_exp << container_man
+    # min_repr_float is used to select which SR to use.
     min_repr_float = jax.lax.bitcast_convert_type(min_repr, input_dtype)
-    container_mant_mask = (1 << container_man) - 1
+    container_mant_mask = (1 << container_man) - 1  # 0b0000_0000_0111_1111
+    # max_mant for e2m1 in bf16: 0b0000_0000_0100_0000
     max_mant = jnp.uint16(container_mant_mask & ~man_trunc_mask)
     max_repr = (max_exp << container_man) + max_mant
 
@@ -151,9 +154,12 @@ def fp_round(
     sign = jax.lax.bitwise_and(x, sign_mask)
     abs_x = jax.lax.bitwise_and(x, ~sign_mask)
     # TODO(lew): we can do faster clipping with bit twiddling
+    # Clipping of positive values in int domain is the same as in float.
     clip_x = jnp.clip(abs_x, min_repr, max_repr)
     x = jax.lax.bitwise_or(sign, clip_x)
     x = jax.lax.bitcast_convert_type(x, input_dtype)
+
+    # Rounding of values in [-1, 1] interval follows different logic.
     if stochastic_rounding:
       assert bits_dtype == jnp.uint16
       if test_noise_axis is not None:
@@ -168,6 +174,7 @@ def fp_round(
       rnd_floats = jax.lax.bitcast_convert_type(rnd_bits, jnp.float32) - (
           3.0 - 2 ** (-16)
       )
+      # rx is 1 or -1 - SR of orig_x
       rx = (orig_x > rnd_floats) * 2 - 1.0
       x = jnp.where(jnp.abs(orig_x) < min_repr_float, rx, x)
   else:
