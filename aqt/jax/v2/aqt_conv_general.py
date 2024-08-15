@@ -22,6 +22,7 @@
 
 # pylint: disable=protected-access
 
+from typing import Tuple
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 import jax
@@ -37,6 +38,8 @@ def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
   def my_conv_general_dilated(
       lhs,
       rhs,
+      lhs_qt: aqt_tensor.QTensor | None,
+      rhs_qt: aqt_tensor.QTensor | None,
       window_strides,
       padding,
       lhs_dilation=None,
@@ -46,7 +49,7 @@ def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
       batch_group_count=1,
       precision=None,
       preferred_element_type=None,
-  ) -> jax.Array:
+  ) -> Tuple[jax.Array, tuple[aqt_tensor.QTensor, aqt_tensor.QTensor]]:
     msg1 = """
 To simplify the code, we currently assume a Flax-particular layout of the data.
 This makes sense, because this is the main use-case of this function.
@@ -77,7 +80,29 @@ However if there is any other use, we will drop that assumption."""
     cfg.dg_quantizer.assert_calib_shared_axes_value(
         list(range(1, rank)), list(range(0, rank - 1)), msg
     )
-    (lhs_qt, _), (rhs_qt, _) = cfg.dg_quantizer((lhs, None), (rhs, None))
+
+    (lhs, lhs_incomplete_qt), (rhs, rhs_incomplete_qt) = (
+        cfg.dg_quantizer.calibrate((lhs, None), (rhs, None))
+    )
+    if lhs_qt is not None and not lhs_qt.is_full():
+      # Incomplete QTensor is provided as lhs_qt.
+      lhs_incomplete_qt = lhs_qt
+      lhs_qt = None
+
+    if rhs_qt is not None and not rhs_qt.is_full():
+      # Incomplete QTensor is provided as rhs_qt.
+      rhs_incomplete_qt = rhs_qt
+      rhs_qt = None
+
+    lhs_quantized, rhs_quantized = cfg.dg_quantizer.calculate_qvalue(
+        lhs, lhs_incomplete_qt, rhs, rhs_incomplete_qt
+    )
+    lhs_qt_calculated, _ = lhs_quantized
+    rhs_qt_calculated, _ = rhs_quantized
+
+    lhs_qt = lhs_qt if lhs_qt is not None else lhs_qt_calculated
+    rhs_qt = rhs_qt if rhs_qt is not None else rhs_qt_calculated
+
     # Therefore, cast qvalue back to its original data dtype.
     # Delete the following two lines when the constraint is lifted.
     lhs_qt = lhs_qt.qvalue_astype(lhs.dtype)
@@ -127,7 +152,7 @@ However if there is any other use, we will drop that assumption."""
     #
     # We can have different scales across different groups.
     # This applies to both feature and batch.
-    return out
+    return out, (lhs_qt, rhs_qt)
 
   return my_conv_general_dilated
 
@@ -136,6 +161,7 @@ def conv_general_dilated_make(
     spatial_dimensions: int,
     lhs_bits: int | None = None,
     rhs_bits: int | None = None,
+    initialize_calibration: bool = True,
 ) -> aqt_dot_general.DotGeneralRaw:
   """Create quantization config conv_general_dilated.
 
@@ -144,11 +170,14 @@ def conv_general_dilated_make(
       convolutional window moves across.
     lhs_bits: The precision for quantization for lhs
     rhs_bits: The precision for quantization for rhs
+    initialize_calibration: If set, calibrators are initialized. Set False if
+      you want to run static range quantization.
 
   Returns:
     DotGeneralRaw object to be injected into nn.Conv as conv_general_dilated.
   """
-  config = aqt_dot_general.dot_general_raw_make(lhs_bits, rhs_bits)
+  config = aqt_dot_general.dot_general_raw_make(
+      lhs_bits, rhs_bits, initialize_calibration=initialize_calibration)
   # Hardcoding flax assumptions.
   lhs_calib_shared_axes = (
       list(range(1, spatial_dimensions + 2)) if config.lhs else None
