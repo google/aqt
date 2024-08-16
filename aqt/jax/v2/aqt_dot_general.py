@@ -96,6 +96,7 @@ def dot_general_raw_make(
     local_aqt=None,
     jax_scope_name='aqt',
     initialize_calibration=True,
+    allow_dummy_gradients=False,
 ) -> 'DotGeneralRaw':
   """Create quantization configs for input matrices to a matmul."""
   # TODO: b/343490088 - Move all the parameters to dataclass defaults,
@@ -134,6 +135,7 @@ def dot_general_raw_make(
       dg_accumulator_dtype=dg_accumulator_dtype,
       local_aqt=local_aqt,
       jax_scope_name=jax_scope_name,
+      allow_dummy_gradient_into_qtensor=allow_dummy_gradients,
   )
 
 
@@ -146,6 +148,7 @@ def dot_general_make(
     use_fwd_quant: bool = True,
     dlhs_local_aqt=None,
     drhs_local_aqt=None,
+    allow_dummy_gradients: bool = False,
 ) -> 'DotGeneral':
   """Create quantization configs for input matrices to a matmul."""
   fwd = dot_general_raw_make(
@@ -153,6 +156,7 @@ def dot_general_make(
       rhs_bits,
       jax_scope_name='aqt_fwd',
       initialize_calibration=False,
+      allow_dummy_gradients=allow_dummy_gradients,
   )
   dlhs = dot_general_raw_make(
       bwd_bits,
@@ -160,6 +164,7 @@ def dot_general_make(
       local_aqt=dlhs_local_aqt,
       jax_scope_name='aqt_dlhs',
       initialize_calibration=False,
+      allow_dummy_gradients=allow_dummy_gradients,
   )
   drhs = dot_general_raw_make(
       bwd_bits,
@@ -167,6 +172,7 @@ def dot_general_make(
       local_aqt=drhs_local_aqt,
       jax_scope_name='aqt_drhs',
       initialize_calibration=False,
+      allow_dummy_gradients=allow_dummy_gradients,
   )
   cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
 
