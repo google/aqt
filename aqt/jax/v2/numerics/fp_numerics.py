@@ -37,11 +37,29 @@ e3m0 = FpNumericsConfig(
     has_naninf=False,
 )
 
+e3m0_ocp = FpNumericsConfig(
+    nexp=3,
+    minexp=0,
+    nmant=0,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
 e2m1 = FpNumericsConfig(
     nexp=2,
     minexp=0,
     nmant=1,
     has_subnormals=False,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
+e2m1_ocp = FpNumericsConfig(
+    nexp=2,
+    minexp=0,
+    nmant=1,
+    has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
 )
@@ -96,7 +114,6 @@ def fp_round(
   nexp = cfg.nexp
   nmant = cfg.nmant
   assert cfg.minexp == 0, 'minexp not implemented'
-  assert not cfg.has_subnormals, 'subnormals not implemented'
   assert not cfg.has_two_nan, 'two_nan not implemented'
   assert not cfg.has_naninf, 'naninf not implemented'
 
@@ -139,13 +156,17 @@ def fp_round(
     # We use 1 as a minimal representable value. TODO(lew): use cfg.minexp.
     # We will clip to [1, 2^(2**nexp - 1) * (2-1 ^ nmant)] interval.
     assert input_dtype == jnp.bfloat16
-    min_exp = jnp.uint16(0b0_01111111)
+    # min_exp = jnp.uint16(0b0_10000000_0000000)
+    # max_exp = jnp.uint16(0b0_10000111_0000000)
+    # bf16_exp_bias = jnp.uint16(0b0_01111111)
+    min_exp = jnp.uint16(0b0_01111111) - (1 if cfg.has_subnormals else 0)
     max_exp = min_exp + 2**nexp - 1
 
     min_repr = min_exp << container_man
     # min_repr_float is used to select which SR to use.
     min_repr_float = jax.lax.bitcast_convert_type(min_repr, input_dtype)
-    container_mant_mask = (1 << container_man) - 1  # 0b0000_0000_0111_1111
+    # container_mant_mask is 0b0000_0000_0111_1111
+    container_mant_mask = bits_dtype((1 << container_man) - 1)
     # max_mant for e2m1 in bf16: 0b0000_0000_0100_0000
     max_mant = jnp.uint16(container_mant_mask & ~man_trunc_mask)
     max_repr = (max_exp << container_man) + max_mant
@@ -155,28 +176,70 @@ def fp_round(
     abs_x = jax.lax.bitwise_and(x, ~sign_mask)
     # TODO(lew): we can do faster clipping with bit twiddling
     # Clipping of positive values in int domain is the same as in float.
-    clip_x = jnp.clip(abs_x, min_repr, max_repr)
+    clip_x = jnp.clip(abs_x, min_repr, max_repr)  # sign bit is 0
     x = jax.lax.bitwise_or(sign, clip_x)
     x = jax.lax.bitcast_convert_type(x, input_dtype)
-
-    # Rounding of values in [-1, 1] interval follows different logic.
-    if stochastic_rounding:
-      assert bits_dtype == jnp.uint16
-      if test_noise_axis is not None:
-        noise_axis_size = x.shape[test_noise_axis]
-        sh = list((1,) * len(x.shape))
-        sh[test_noise_axis] = noise_axis_size
-        rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
-        rnd_bits = rnd_bits << 8
+    if cfg.has_subnormals:
+      # In simulated numerics, what We would like to represent as a subnormal is
+      #    sign * 2^min_exp * (0.mantissa_s) = sign * (0.mantissa_s)
+      # However, in container format, the same number is represented by
+      #    sign * 2^(min_exp-1) * (1.mantissa) = sign * 0.5 * (1.mantissa_c)
+      # Note that they are different in bit repr and mantissa_s != mantissa_c.
+      # So we cannot directly truncate mantissa_c to get mantissa_s.
+      # Also note that the container subnormal is never hit when simulating
+      # the low-precision numerics.
+      # Alternatively, we can simply do integer rounding inside the subnormal
+      # regime since it is linear.
+      orig_x_bit_repr = jax.lax.bitcast_convert_type(orig_x, bits_dtype)
+      orig_abs_x = jax.lax.bitwise_and(orig_x_bit_repr, ~sign_mask)
+      orig_clip_x = jnp.clip(orig_abs_x, min_repr, max_repr)
+      exp = jax.lax.bitwise_and(orig_clip_x, ~container_mant_mask)
+      if stochastic_rounding:
+        if test_noise_axis is not None:
+          noise_axis_size = x.shape[test_noise_axis]
+          sh = list((1,) * len(x.shape))
+          sh[test_noise_axis] = noise_axis_size
+          rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+          rnd_bits = rnd_bits << 8
+          rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(
+              jnp.uint32
+          )
+          noise = (
+              jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
+              - 1.5
+              + 1.0 / 512  # to make noise symmetric to zero
+          )
+        else:
+          noise = jax.random.uniform(key, orig_x.shape, dtype=jnp.float32) - 0.5
       else:
-        rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
-      rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
-      rnd_floats = jax.lax.bitcast_convert_type(rnd_bits, jnp.float32) - (
-          3.0 - 2 ** (-16)
+        noise = 0.0
+      # SR within subnormal is adding random noise [-0.5, 0.5) then round.
+      subnormal = (jnp.round(orig_x * 2**nmant + noise) / 2**nmant).astype(
+          input_dtype
       )
-      # rx is 1 or -1 - SR of orig_x
-      rx = (orig_x > rnd_floats) * 2 - 1.0
-      x = jnp.where(jnp.abs(orig_x) < min_repr_float, rx, x)
+      x = jnp.where(exp == (min_exp << container_man), subnormal, x)
+    else:
+      # Rounding of values in [-1, 1] interval follows different logic.
+      if stochastic_rounding:
+        assert bits_dtype == jnp.uint16
+        if test_noise_axis is not None:
+          noise_axis_size = x.shape[test_noise_axis]
+          sh = list((1,) * len(x.shape))
+          sh[test_noise_axis] = noise_axis_size
+          rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+          rnd_bits = rnd_bits << 8
+        else:
+          rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+        rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
+        # rnd_bits here is 32 bits, with exponent 10000000, first 8 mantissa
+        # being the generated "noise" and the rest of mantissa being 0.
+        # Sign bit is 0.
+        rnd_floats = jax.lax.bitcast_convert_type(rnd_bits, jnp.float32) - (
+            3.0 - 2 ** (-16)
+        )
+        # rx is 1 or -1 - SR of orig_x
+        rx = (orig_x > rnd_floats) * 2 - 1.0
+        x = jnp.where(jnp.abs(orig_x) < min_repr_float, rx, x)
   else:
     x = jax.lax.bitcast_convert_type(x, input_dtype)
 
@@ -187,9 +250,8 @@ def fp_largest_representable(cfg: FpNumericsConfig):
   nexp = cfg.nexp
   nmant = cfg.nmant
   assert cfg.minexp == 0, 'minexp not implemented'
-  assert not cfg.has_subnormals, 'subnormals not implemented'
   assert not cfg.has_naninf, 'naninf not implemented'
-  max_exp = 2**nexp - 1 + cfg.minexp
+  max_exp = 2**nexp - 1 + cfg.minexp - (1 if cfg.has_subnormals else 0)
   max_mant = 2**nmant - 1 - (1 if cfg.has_two_nan else 0)
   return 2**max_exp * (1 + (max_mant / 2**nmant))
 
