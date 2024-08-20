@@ -30,8 +30,8 @@ from jax import lax
 import jax.numpy as jnp
 
 
-def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
-  """Makes quantized lax.make_conv_general_dilated replacement."""
+def make_conv_general_dilated_with_qt(cfg: aqt_dot_general.DotGeneralRaw):
+  """Makes quantized lax.make_conv_general_dilated replacement which returns QTensors."""
   # TODO(lew): Either rename DotGeneralConfig or make a conv-specific cfg.
   assert cfg is not None, "Missing config for make_conv_general_dilated"
 
@@ -153,6 +153,45 @@ However if there is any other use, we will drop that assumption."""
     # We can have different scales across different groups.
     # This applies to both feature and batch.
     return out, (lhs_qt, rhs_qt)
+
+  return my_conv_general_dilated
+
+
+def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
+  """Makes quantized lax.make_conv_general_dilated replacement."""
+  assert cfg is not None, "Missing config for make_conv_general_dilated"
+
+  def my_conv_general_dilated(
+      lhs,
+      rhs,
+      window_strides,
+      padding,
+      lhs_dilation=None,
+      rhs_dilation=None,
+      dimension_numbers=None,
+      feature_group_count=1,
+      batch_group_count=1,
+      precision=None,
+      preferred_element_type=None,
+  ) -> jax.Array:
+    my_conv_general_dilated_with_qt = make_conv_general_dilated_with_qt(cfg)
+
+    out, _ = my_conv_general_dilated_with_qt(
+        lhs,
+        rhs,
+        window_strides,
+        padding,
+        lhs_qt=None,
+        rhs_qt=None,
+        lhs_dilation=lhs_dilation,
+        rhs_dilation=rhs_dilation,
+        dimension_numbers=dimension_numbers,
+        feature_group_count=feature_group_count,
+        batch_group_count=batch_group_count,
+        precision=precision,
+        preferred_element_type=preferred_element_type,
+    )
+    return out
 
   return my_conv_general_dilated
 

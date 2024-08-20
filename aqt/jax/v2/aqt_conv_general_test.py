@@ -72,7 +72,7 @@ class AqtConvGeneralTest(parameterized.TestCase):
     lhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.lhs)(lhs)
     rhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.rhs)(rhs)
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
-    prod_aqt, _ = aqt_conv_fn(lhs, rhs, lhs_qt=None, rhs_qt=None, **kwargs)
+    prod_aqt = aqt_conv_fn(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
 
   @parameterized.parameters([
@@ -109,7 +109,7 @@ class AqtConvGeneralTest(parameterized.TestCase):
     rhs = rand_unif((3, 3, contr_n, feature_n), rhs_maxval, seed + 1)
     rhs_zeros = jnp.zeros(rhs.shape, dtype=rhs.dtype)
 
-    aqt_conv_fn = aqt_conv.make_conv_general_dilated(dg_raw_conv)
+    aqt_conv_fn = aqt_conv.make_conv_general_dilated_with_qt(dg_raw_conv)
     kwargs = {
         "window_strides": (1, 1),
         "padding": "SAME",
