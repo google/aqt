@@ -38,10 +38,10 @@ def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
   def my_conv_general_dilated(
       lhs,
       rhs,
-      lhs_qt: aqt_tensor.QTensor | None,
-      rhs_qt: aqt_tensor.QTensor | None,
       window_strides,
       padding,
+      lhs_qt: aqt_tensor.QTensor | None = None,
+      rhs_qt: aqt_tensor.QTensor | None = None,
       lhs_dilation=None,
       rhs_dilation=None,
       dimension_numbers=None,
