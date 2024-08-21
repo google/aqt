@@ -419,6 +419,47 @@ class FpTest(parameterized.TestCase):
     # print(f"{p_stderr=}")
     assert (p_stderr < 2.0).all(), p_stderr
 
+  @parameterized.parameters([
+      dict(cfg=fp_numerics.e3m0, sr=False),
+      dict(cfg=fp_numerics.e3m0, sr=True),
+      dict(cfg=fp_numerics.e2m1, sr=False),
+      dict(cfg=fp_numerics.e2m1, sr=True),
+      dict(cfg=fp_numerics.e1m0, sr=False),
+      dict(cfg=fp_numerics.e1m0, sr=True),
+      dict(cfg=fp_numerics.e3m0_ocp, sr=False),
+      dict(cfg=fp_numerics.e3m0_ocp, sr=True),
+      dict(cfg=fp_numerics.e2m1_ocp, sr=False),
+      dict(cfg=fp_numerics.e2m1_ocp, sr=True),
+      # minexp not implemented, hence the following cfgs are skipped
+      # dict(cfg=fp_numerics.float8_e4m3fn),
+      # dict(cfg=fp_numerics.float8_e5m2),
+      # dict(cfg=fp_numerics.float16),
+  ])
+  def test_fp_round_old_vs_new(
+      self, cfg: fp_numerics.FpNumericsConfig, sr: bool
+  ):
+    print(cfg)
+    print(f"stochastic_rounding: {sr}")
+    x = jnp.arange(0, 2**16, step=1, dtype=jnp.uint16)
+    x = jax.lax.bitcast_convert_type(x, jnp.bfloat16)
+    nan_mask = jnp.isnan(x)
+    if sr:
+      for key_num in [0, 12, 42, 17, 96, 101]:
+        key = jax.random.PRNGKey(key_num)
+        out = fp_numerics.fp_round(x, cfg=cfg, key=key, stochastic_rounding=sr)
+        out_new = fp_numerics.fp_round_new(
+            x, cfg=cfg, key=key, stochastic_rounding=sr
+        )
+        assert (out[~nan_mask] == out_new[~nan_mask]).all()
+        assert jnp.isnan(out_new[nan_mask]).all()
+    else:
+      out = fp_numerics.fp_round(x, cfg=cfg, key=None, stochastic_rounding=sr)
+      out_new = fp_numerics.fp_round_new(
+          x, cfg=cfg, key=None, stochastic_rounding=sr
+      )
+      assert (out[~nan_mask] == out_new[~nan_mask]).all()
+      assert jnp.isnan(out_new[nan_mask]).all()
+
 
 if __name__ == "__main__":
   absltest.main()
