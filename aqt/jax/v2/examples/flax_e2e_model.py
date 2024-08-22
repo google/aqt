@@ -23,6 +23,7 @@ from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
 from aqt.jax.v2.flax import aqt_flax
 from aqt.jax.v2.flax import aqt_flax_calibration
+from aqt.jax.v2.flax import delayed_scaling_calibration
 from flax import linen as nn
 from flax import struct
 from flax.metrics import tensorboard
@@ -32,12 +33,13 @@ import numpy as np
 import optax
 import tensorflow_datasets as tfds
 
-
+CALIBRATION_STATS = delayed_scaling_calibration.CALIBRATION_STATS
 Dataset = dict[str, jnp.ndarray]
 
 
 class CNN(nn.Module):
   """A simple CNN model."""
+
   bn_use_stats: bool
   aqt_cfg: aqt_config.DotGeneral
   weights_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
@@ -122,10 +124,7 @@ def apply_model(model_params, images, labels, apply_fn):
 
   def loss_fn(model):
     logits, updated_var = apply_fn(
-        model,
-        images,
-        rngs={'params': jax.random.PRNGKey(0)},
-        mutable=True,
+        model, images, rngs={'params': jax.random.PRNGKey(0)}, mutable=True
     )
     one_hot = jax.nn.one_hot(labels, 10)
     loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
@@ -138,8 +137,21 @@ def apply_model(model_params, images, labels, apply_fn):
   return grads, loss, accuracy, updated_var
 
 
-@jax.jit
 def update_model(state, grads, updated_var):
+  # CALIBRATION_STATS is a MutableArray collection and updated in place,
+  # so it doesn't go through a gradient update (and can't be returned from
+  # a jitted function), so we just copy it over to the new state
+  calibration_stats = state.model.get(CALIBRATION_STATS)
+  state = update_model_params_with_grads(state, grads, updated_var)
+  if calibration_stats:
+    state = state.replace(
+        model=state.model | {CALIBRATION_STATS: calibration_stats}
+    )
+  return state
+
+
+@jax.jit
+def update_model_params_with_grads(state, grads, updated_var):
   params = state.model['params']
   param_grad = grads['params']
   updates, new_opt_state = state.tx.update(param_grad, state.opt_state, params)
@@ -173,7 +185,10 @@ def train_epoch(state, train_ds, batch_size, rng):
     batch_images = train_ds['image'][perm, ...]
     batch_labels = train_ds['label'][perm, ...]
     grads, loss, accuracy, updated_var = apply_model(
-        state.model, batch_images, batch_labels, state.cnn_train.apply
+        state.model,
+        batch_images,
+        batch_labels,
+        state.cnn_train.apply,
     )
     state = update_model(state, grads, updated_var)
     epoch_loss.append(loss)
@@ -276,7 +291,7 @@ def serving_conversion(
     train_state: TrainState,
     weight_only: bool = True,
     legacy_for_freeze: bool = False,
-    legacy_for_serve: bool = False
+    legacy_for_serve: bool = False,
 ) -> tuple[Callable[..., Any], dict[str, Any]]:
   """Model conversion (quantized weights freezing).
 
@@ -302,7 +317,7 @@ def serving_conversion(
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.CONVERT,
       activation_quant_mode=activation_quant_mode,
-      use_legacy_freezer=legacy_for_freeze
+      use_legacy_freezer=legacy_for_freeze,
   )
   _, model_serving = cnn_freeze.apply(
       train_state.model,
@@ -319,7 +334,7 @@ def serving_conversion(
       aqt_cfg=aqt_cfg,
       weights_quant_mode=utils.QuantMode.SERVE,
       activation_quant_mode=activation_quant_mode,
-      use_legacy_freezer=legacy_for_serve
+      use_legacy_freezer=legacy_for_serve,
   )
 
   return cnn_serve.apply, model_serving
@@ -371,6 +386,7 @@ def calibration_conversion(
 
   Args:
     train_state: TrainState containing model definitions and params.
+
   Returns:
     A tuple of calibration function, and an updated model parameters with new
     variables to store the gathered quantization statistics.
@@ -461,11 +477,16 @@ def serve_fn_hlo(state):
   # serving
   serve_fn, model_serving = serving_conversion(state)
   # The following XLA graph is only needed for debugging purpose
-  hlo = jax.jit(serve_fn).lower(
-      model_serving,
-      sample_image,
-      rngs={'params': jax.random.PRNGKey(0)},
-  ).compiler_ir('hlo').as_hlo_module()
+  hlo = (
+      jax.jit(serve_fn)
+      .lower(
+          model_serving,
+          sample_image,
+          rngs={'params': jax.random.PRNGKey(0)},
+      )
+      .compiler_ir('hlo')
+      .as_hlo_module()
+  )
   return hlo
 
 

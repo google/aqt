@@ -24,6 +24,7 @@ from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
 from aqt.jax.v2.flax import aqt_flax_calibration
+from aqt.jax.v2.flax import delayed_scaling_calibration
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -688,6 +689,287 @@ class MnistTest(parameterized.TestCase):
                         scale_t=None,
                         bias=[],
                         dequant_dtype=dtype("float32"),
+                    )
+                },
+            }
+        },
+    }
+
+    serving_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), model_serving
+    )
+    utils.test_pprint_eq(expected_aqt_pytree, serving_pytree["aqt"])
+
+    # Compare logits of models before conversion and after conversion.
+    logits_after_conversion, _ = forward(model_serving, serve_fn)
+    assert (logits_before_conversion == logits_after_conversion).all()
+
+  @parameterized.parameters(
+      (["e4m3"] * 2 + ["e5m2"] * 4,),  # Higher precision fwd, larger range bwd
+      ([8] * 6,),
+  )
+  def test_mnist_delayed_scaling_calibration(self, bits):
+    # RNGs
+    rng = jax.random.key(0)
+    rng, init_rng = jax.random.split(rng)
+    rng, image_rng, label_rng = jax.random.split(rng, 3)
+    rng, input_rng = jax.random.split(rng)
+    del rng
+
+    # Dataset
+    ds_size = 64
+    batch_size = 8
+    ds = _dummy_dataset(ds_size, image_rng, label_rng)
+    num_train_steps = ds_size // batch_size
+
+    # AQT Config
+    aqt_cfg = config.config_v4()
+    aqt_cfg = config.set_bits(aqt_cfg, *bits)
+
+    # Update cfg with DelayedScalingCalibration.
+    # Setting history length to be greater than the number of training steps
+    # so we can verify history is being updated correctly on each step below.
+    amax_history_length = num_train_steps * 2
+    calibration_cls = functools.partial(
+        delayed_scaling_calibration.DelayedScalingCalibration,
+        amax_history_length=amax_history_length,
+    )
+    aqt_cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls
+
+    # Stage 1: Training with Delayed Scaling Calibration
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+
+    state, _, _ = flax_e2e_model.train_epoch(
+        state, ds, batch_size, rng=input_rng
+    )
+
+    trained_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape),
+        state.model[delayed_scaling_calibration.CALIBRATION_STATS],
+    )
+    dtype = jnp.dtype
+    expected_trained_pytree = {
+        "AqtEinsum_0": {
+            "AqtDotGeneral_0": {
+                "DelayedScalingCalibration_0": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_1": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_2": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_3": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_4": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_5": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+            }
+        },
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "DelayedScalingCalibration_0": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_1": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_2": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_3": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_4": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_5": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+            }
+        },
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "DelayedScalingCalibration_0": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_1": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_2": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_3": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_4": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+                "DelayedScalingCalibration_5": {
+                    "amax_history": (dtype("float32"), (amax_history_length,)),
+                    "bound": (dtype("float32"), (1,)),
+                },
+            }
+        },
+    }
+
+    utils.test_pprint_eq(expected_trained_pytree, trained_pytree)
+
+    # Verify we get the number of updates we expect to amax_history. This is a
+    # bit difficult to verify since sometimes the amax_update is 0, but a few of
+    # of the modules have more predictable behavior
+
+    # We should have num_train_steps + 1 (for init) updates for the forward pass
+    self.assertEqual(
+        jnp.sum(
+            state.model[delayed_scaling_calibration.CALIBRATION_STATS][
+                "Dense_0"
+            ]["AqtDotGeneral_0"]["DelayedScalingCalibration_0"]["amax_history"][
+                :
+            ]
+            != 0
+        ).item(),
+        num_train_steps + 1,
+    )
+    self.assertNotEqual(
+        state.model[delayed_scaling_calibration.CALIBRATION_STATS]["Dense_0"][
+            "AqtDotGeneral_0"
+        ]["DelayedScalingCalibration_0"]["bound"][:].item(),
+        1.0,
+    )
+
+    # We should have num_train_steps updates for the backward pass
+    self.assertEqual(
+        jnp.sum(
+            state.model[delayed_scaling_calibration.CALIBRATION_STATS][
+                "Dense_0"
+            ]["AqtDotGeneral_0"]["DelayedScalingCalibration_3"]["amax_history"][
+                :
+            ]
+            != 0
+        ).item(),
+        num_train_steps,
+    )
+    self.assertNotEqual(
+        state.model[delayed_scaling_calibration.CALIBRATION_STATS]["Dense_0"][
+            "AqtDotGeneral_0"
+        ]["DelayedScalingCalibration_3"]["bound"][:].item(),
+        1.0,
+    )
+
+    def forward(model, apply_fn):
+      return apply_fn(
+          model,
+          ds["image"],
+          rngs={"params": jax.random.PRNGKey(0)},
+          mutable=True,
+      )
+
+    # We need to set the mode to SERVE so the MutableArrays don't get changed,
+    # which would mean the logits would not match before and after conversion.
+    state.cnn_eval.weights_quant_mode = utils.QuantMode.SERVE
+    state.cnn_eval.activations_quant_mode = utils.QuantMode.SERVE
+    logits_before_conversion, params = forward(
+        state.model, state.cnn_eval.apply
+    )
+    state = state.replace(model=params)
+
+    # Stage 2. Convert the checkpoint, and serve.
+    serve_fn, model_serving = flax_e2e_model.serving_conversion(
+        state, weight_only=False
+    )
+    dtype = jnp.dtype
+    expected_dtype = dtype("int8") if bits[0] == 8 else dtype("float8_e4m3fn")
+    expected_aqt_pytree = {
+        "AqtEinsum_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (2, 5, 10)),
+                        scale=[(dtype("float32"), (1, 1, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype("float32"),
+                        bias=[],
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype("float32"),
+                        bias=[],
+                    )
+                },
+            }
+        },
+        "Dense_0": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype("float32"),
+                        bias=[],
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (2, 1568, 256)),
+                        scale=[(dtype("float32"), (1, 1, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype("float32"),
+                        bias=[],
+                    )
+                },
+            }
+        },
+        "Dense_1": {
+            "AqtDotGeneral_0": {
+                "qlhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=None,
+                        scale=[(dtype("float32"), (1, 1, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype("float32"),
+                        bias=[],
+                    )
+                },
+                "qrhs": {
+                    "frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (2, 128, 10)),
+                        scale=[(dtype("float32"), (1, 1, 1))],
+                        scale_t=None,
+                        dequant_dtype=dtype("float32"),
+                        bias=[],
                     )
                 },
             }

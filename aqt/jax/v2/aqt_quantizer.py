@@ -59,6 +59,7 @@ class Quantizer:
   def init_calibration(self):
     assert self._calibrator is None, "second call to self.init_calibration()"
     self._calibrator = self.calibration()
+    self._calibrator.init_calibration()
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(

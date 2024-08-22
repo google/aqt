@@ -35,6 +35,9 @@ class Calibration(abc.ABC):
   ) -> jnp.ndarray:
     pass
 
+  def init_calibration(self):
+    pass
+
 
 @utils.flax_slots_kw_only_dataclass
 class ConstantCalibration(Calibration):
