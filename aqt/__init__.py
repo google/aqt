@@ -13,4 +13,4 @@
 # limitations under the License.
 """Accurate Quantized Training library."""
 
-__version__ = "0.7.5"
+__version__ = "0.8.0"
