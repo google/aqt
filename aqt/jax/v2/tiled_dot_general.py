@@ -245,7 +245,7 @@ class TilingState:
     num_bcast_axes = len(self.get_broadcasted_tile_map_indexes())
     # All elements of broadcast axes are the same, thus we take the first one.
     first_index = (0,) * num_bcast_axes
-    x = tiled_x[*first_index]
+    x = tiled_x[jnp.s_[first_index]]
     x = x.reshape(self.untiled_shape)
     return x
 
