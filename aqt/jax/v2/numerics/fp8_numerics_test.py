@@ -126,11 +126,8 @@ class MyTest(parameterized.TestCase):
             "cpu": [
                 # Different CPU models are not bit exact and sometimes produce
                 # different losses under the same training setting.
-                3.167505979537963867187500000000,
-                3.167574167251586914062500000000,  # xla:cpu thunks
-                3.167574405670166015625000000000,  # xla:cpu thunks
-                3.167573928833007812500000000000,  # xla:cpu thunks
-                3.167067050933837890625000000000,  # skylake, cascadelake
+                3.167573690414428710937500000000,
+                3.167574644088745117187500000000,
                 3.167066574096679687500000000000,  # colab
             ],
             "TPU v2": [3.212926864624023437500000000000],
@@ -142,10 +139,8 @@ class MyTest(parameterized.TestCase):
             "cpu": [
                 # Different CPU models are not bit exact and sometimes produce
                 # different losses under the same training setting.
-                3.112026929855346679687500000000,
-                3.112026691436767578125000000000,
-                3.112028121948242187500000000000,  # xla:cpu thunks
-                3.112025737762451171875000000000,  # xla:cpu thunks
+                3.112026214599609375000000000000,
+                3.112027645111083984375000000000,
                 3.112027168273925781250000000000,  # colab s
             ],
             "TPU v2": [3.184741020202636718750000000000],
