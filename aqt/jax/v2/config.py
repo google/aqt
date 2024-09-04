@@ -42,6 +42,7 @@ from aqt.jax.v2.numerics import fp_numerics
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
+from aqt.jax.v2.numerics import utils as numerics_utils
 import jax
 import jax.numpy as jnp
 
@@ -361,34 +362,21 @@ def set_bits(
 ) -> DotGeneral:
   """Set quantization bits for dot_general config."""
 
-  def get_numerics(bits):
-    if bits is None:
-      effective_numerics = no_numerics.NoNumerics()
-    elif bits in fp8_numerics.fp8_map.keys():
-      exponent_bits, mantissa_bits = int(bits[1]), int(bits[3])
-      effective_numerics = fp8_numerics.Fp8Numerics(
-          exponent_bits=exponent_bits,
-          mantissa_bits=mantissa_bits,
-          dtype=fp8_numerics.fp8_map[bits],
-      )
-    else:
-      pz = False if bits == 1 else True
-      dtype = utils.infer_dtype_from_bits(bits) if pz else None
-      effective_numerics = int_numerics.IntNumerics(
-          bits=bits,
-          preserve_zero=pz,
-          preserve_max_val=False,
-          clip=True,
-          round=True,
-          noise_fn=None,
-          clip_gradient=False,  # Can be disabled when using abs-max scaling.
-          dtype=dtype,
-      )
-    return effective_numerics
-
-  set_numerics(cfg.fwd, get_numerics(fwd_lhs_bit), get_numerics(fwd_rhs_bit))
-  set_numerics(cfg.dlhs, get_numerics(dlhs_lhs_bit), get_numerics(dlhs_rhs_bit))
-  set_numerics(cfg.drhs, get_numerics(drhs_lhs_bit), get_numerics(drhs_rhs_bit))
+  set_numerics(
+      cfg.fwd,
+      numerics_utils.get_numerics(fwd_lhs_bit),
+      numerics_utils.get_numerics(fwd_rhs_bit),
+  )
+  set_numerics(
+      cfg.dlhs,
+      numerics_utils.get_numerics(dlhs_lhs_bit),
+      numerics_utils.get_numerics(dlhs_rhs_bit),
+  )
+  set_numerics(
+      cfg.drhs,
+      numerics_utils.get_numerics(drhs_lhs_bit),
+      numerics_utils.get_numerics(drhs_rhs_bit),
+  )
   # use_fwd_quant is by default set to False if fwd pass is quantized.
   # This is to make the configuration logically correct,
   # i.e., use_fwd_quant cannot be None when fwd is quantized.
@@ -667,10 +655,7 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
   return cfg
 
 
-def set_fwd_calibration(
-    cfg: DotGeneral,
-    calibration_factory
-) -> DotGeneral:
+def set_fwd_calibration(cfg: DotGeneral, calibration_factory) -> DotGeneral:
   """Updates aqt_cfg for static range calibration."""
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer

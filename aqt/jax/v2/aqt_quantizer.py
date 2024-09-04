@@ -18,10 +18,10 @@ from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
-
-from aqt.jax.v2.numerics import int_numerics
+from aqt.jax.v2.numerics import fp8_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
+from aqt.jax.v2.numerics import utils as numerics_utils
 import jax
 import jax.numpy as jnp
 
@@ -156,9 +156,7 @@ class Quantizer:
     return qt
 
   def calculate_qvalue(
-      self,
-      x,
-      qt: aqt_tensor.QTensor
+      self, x, qt: aqt_tensor.QTensor
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """Uses the quantization parameters in qt to quantize x."""
     if isinstance(self.numerics, no_numerics.NoNumerics):
@@ -178,26 +176,12 @@ class Quantizer:
 
 
 def quantizer_make(
-    n_bits: int | None,
+    n_bits: int | fp8_numerics.FP8Dtype | None,
     preserve_max_val: bool = False,
     initialize_calibration: bool = True,
 ) -> Quantizer:
   """Makes Quantizer."""
-  if n_bits is None:
-    effective_numerics = no_numerics.NoNumerics()
-  else:
-    pz = False if n_bits == 1 else True
-    dtype = utils.infer_dtype_from_bits(n_bits) if pz else None
-    effective_numerics = int_numerics.IntNumerics(
-        bits=n_bits,
-        preserve_zero=pz,
-        preserve_max_val=preserve_max_val,
-        clip=True,
-        round=True,
-        noise_fn=None,
-        clip_gradient=False,  # This can be disabled when using abs-max scaling.
-        dtype=dtype,
-    )
+  effective_numerics = numerics_utils.get_numerics(n_bits, preserve_max_val)
   quantizer = Quantizer(
       numerics=effective_numerics,
       calib_shared_axes=None,

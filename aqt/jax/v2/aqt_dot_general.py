@@ -31,6 +31,7 @@ from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import transpose
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import fp8_numerics
 import jax
 from jax import lax
 from jax._src.numpy import lax_numpy
@@ -108,7 +109,11 @@ def dot_general_raw_make(
   if (
       lhs_bits is not None
       and rhs_bits is not None
+      and lhs_bits not in fp8_numerics.fp8_map.keys()
+      and rhs_bits not in fp8_numerics.fp8_map.keys()
+      and isinstance(lhs_bits, int)
       and 2 <= lhs_bits <= 8
+      and isinstance(rhs_bits, int)
       and 2 <= rhs_bits <= 8
   ):
     dg_accumulator_dtype = jnp.int32
@@ -142,9 +147,9 @@ def dot_general_raw_make(
 # TODO: b/343490088 - Move all the parameters to dataclass defaults,
 #   provide setters to modify the configuration.
 def dot_general_make(
-    lhs_bits: Optional[int] = None,
-    rhs_bits: Optional[int] = None,
-    bwd_bits: Optional[int] = None,
+    lhs_bits: Optional[int | fp8_numerics.FP8Dtype] = None,
+    rhs_bits: Optional[int | fp8_numerics.FP8Dtype] = None,
+    bwd_bits: Optional[int | fp8_numerics.FP8Dtype] = None,
     use_fwd_quant: bool = True,
     dlhs_local_aqt=None,
     drhs_local_aqt=None,
@@ -338,8 +343,7 @@ class DotGeneralQuantizer(abc.ABC):
       lhs_quantization_info: tuple[jax.Array, Sequence[int]],
       rhs_quantization_info: tuple[jax.Array, Sequence[int]],
   ) -> tuple[
-      tuple[jax.Array, aqt_tensor.QTensor],
-      tuple[jax.Array, aqt_tensor.QTensor]
+      tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
     """Calculates incomplete QTensor from the given inputs.
 
@@ -349,6 +353,7 @@ class DotGeneralQuantizer(abc.ABC):
     Args:
       lhs_quantization_info: left argument and its contracting axis.
       rhs_quantization_info: right argument and its contracting axis:
+
     Returns:
       A tuple of (lhs, lhs_qt), (rhs, rhs_qt) where lhs and rhs are updated
       arguments and lhs_qt and rhs_qt are incomplete QTensor.
@@ -413,8 +418,7 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
       lhs_quantization_info: tuple[jax.Array, Sequence[int]],
       rhs_quantization_info: tuple[jax.Array, Sequence[int]],
   ) -> tuple[
-      tuple[jax.Array, aqt_tensor.QTensor],
-      tuple[jax.Array, aqt_tensor.QTensor]
+      tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
     lhs_input, lhs_ca = lhs_quantization_info
     rhs_input, rhs_ca = rhs_quantization_info
@@ -468,12 +472,13 @@ def quant(
     lhs_cfg: Tensor,
     rhs_cfg: Tensor,
     dimension_numbers: jax.lax.DotDimensionNumbers,
-    allow_dummy_gradient_into_qtensor: bool
+    allow_dummy_gradient_into_qtensor: bool,
 ) -> tuple[
     tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
     tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
 ]:
   """Quantizes the given lhs and rhs using dg_quantizer."""
+
   def _get_calibration_axes(
       tensor_cfg: Tensor,
       ndim: int,
@@ -569,6 +574,7 @@ def _maybe_use_fwd_quant(
     rhs: Right hand size of gradient dot_general.
     dimension_numbers: Dot_general dimension numbers.
     use_fwd_quant: Flag to use forward quantization.
+
   Returns:
     A tuple of updated (lhs, rhs). If use_fwd_quant is True, lhs is multiplied
     with rhs scale, while rhs is set to the original rhs's qvalue.
@@ -672,7 +678,7 @@ class DotGeneralRaw:
           self.lhs,
           self.rhs,
           dimension_numbers,
-          self.allow_dummy_gradient_into_qtensor
+          self.allow_dummy_gradient_into_qtensor,
       )
 
       msg = (
@@ -1004,11 +1010,13 @@ def _update_dimension_numbers_for_backward(
     y_is_lhs: If set, the function calculates dimension numbers for dlhs.
     gradient_rank: Rank of the gradient.
     y_rank: Rank of the other side input.
+
   Returns:
     A tuple of (dimension numbers for gradient dot_general, transpose axes to be
     applied on the gradient dot_generals output to match with the original
     argument dimension).
   """
+
   def ranges_like(*xs):
     start = 0
     for x in xs:
