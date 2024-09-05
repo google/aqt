@@ -31,6 +31,60 @@ class FpNumericsConfig:
   has_two_nan: bool
   has_naninf: bool
 
+e5m0_ocp = FpNumericsConfig(
+    nexp=5,
+    minexp=0,
+    nmant=0,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
+e4m1_ocp = FpNumericsConfig(
+    nexp=4,
+    minexp=0,
+    nmant=1,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
+e3m2_ocp = FpNumericsConfig(
+    nexp=3,
+    minexp=0,
+    nmant=2,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
+e2m3_ocp = FpNumericsConfig(
+    nexp=2,
+    minexp=0,
+    nmant=3,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
+e1m4_ocp = FpNumericsConfig(
+    nexp=1,
+    minexp=0,
+    nmant=4,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
+e0m5_ocp = FpNumericsConfig(
+    nexp=0,
+    minexp=0,
+    nmant=5,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+)
+
 e3m0 = FpNumericsConfig(
     nexp=3,
     minexp=0,
