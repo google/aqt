@@ -206,6 +206,20 @@ class FpTest(parameterized.TestCase):
               -0, -0.5, -1, -1.5, -2, -3, -4, -6,
           ],
       ),
+      dict(
+          nexp=1, minexp=0, nmant=2, has_subnormals=True,
+          expected_values=[
+              0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75,
+              -0, -0.25, -0.5, -0.75, -1, -1.25, -1.5, -1.75,
+          ],
+      ),
+      dict(
+          nexp=0, minexp=0, nmant=3, has_subnormals=True,
+          expected_values=[
+              0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875,
+              -0, -0.125, -0.25, -0.375, -0.5, -0.625, -0.75, -0.875,
+          ],
+      ),
   ])  # pyformat: disable
   def test_fp_some_fp_values(
       self,
