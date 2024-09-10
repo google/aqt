@@ -54,6 +54,7 @@ setup(
     author_email="cerebra-catalyst-team@google.com",
     url="https://github.com/google/aqt",
     packages=find_packages(),
+    python_requires=">=3.10",
     zip_safe=False,
     extras_require={
         "jax_legacy": jax_legacy_install_requires,

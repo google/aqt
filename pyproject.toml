@@ -13,6 +13,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dynamic = ["version", "description"]
+requires-python = ">=3.10"
 
 dependencies = [
   "absl-py",
