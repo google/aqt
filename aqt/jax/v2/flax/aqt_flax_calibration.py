@@ -17,6 +17,7 @@ from typing import Sequence
 
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import numerics
 import flax.linen as nn
 from jax import numpy as jnp
 
@@ -72,6 +73,19 @@ class MeanOfAbsMaxCalibration(calibration.Calibration, nn.Module):
     # use this feature.
     # Maybe wait for the JAX language upgrade to have a better support for this?
     return sum_of_max.value / count.value
+
+  def get_scale_and_bias(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
+      context: utils.Context | None = None,
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    dtype = self.dtype if self.dtype is not None else x.dtype
+    bound = self.get_bound(x, shared_axes, context)
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []
 
 
 # TODO: b/335764538 - Check the math correctness of the module.
@@ -222,3 +236,16 @@ class WeightedStatsCalibration(calibration.Calibration, nn.Module):
         + self.max_dev_coeff * self._max_dev()
         + self.const_bound_coeff
     )
+
+  def get_scale_and_bias(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
+      context: utils.Context | None = None,
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    dtype = self.dtype if self.dtype is not None else x.dtype
+    bound = self.get_bound(x, shared_axes, context)
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []

@@ -20,6 +20,15 @@ from aqt.jax.v2 import utils
 import jax.numpy as jnp
 
 
+def _dot_general_full_init_calibration(cfg):
+  cfg.fwd.dg_quantizer.lhs.init_calibration()
+  cfg.fwd.dg_quantizer.rhs.init_calibration()
+  cfg.dlhs.dg_quantizer.lhs.init_calibration()
+  cfg.dlhs.dg_quantizer.rhs.init_calibration()
+  cfg.drhs.dg_quantizer.lhs.init_calibration()
+  cfg.drhs.dg_quantizer.rhs.init_calibration()
+
+
 class AqtConfigTest(parameterized.TestCase):
 
   def _retrieve_quantizers(self, dot_general_raws):
@@ -59,9 +68,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                    calib_shared_axes=None,
                                                                                    scale_stop_grad=True,
                                                                                    calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                   _calibrator=None,
-                                                                                   po2_scale=False,
-                                                                                   scale_dtype=None,
+                                                                                   _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                 po2_scale=False,
+                                                                                                                 clipping_scale=None),
                                                                                    context=Context(key=None,
                                                                                                    train_step=None,
                                                                                                    quant_mode=<QuantMode.TRAIN: 1>)),
@@ -76,9 +85,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                    calib_shared_axes=None,
                                                                                    scale_stop_grad=True,
                                                                                    calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                   _calibrator=None,
-                                                                                   po2_scale=False,
-                                                                                   scale_dtype=None,
+                                                                                   _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                 po2_scale=False,
+                                                                                                                 clipping_scale=None),
                                                                                    context=Context(key=None,
                                                                                                    train_step=None,
                                                                                                    quant_mode=<QuantMode.TRAIN: 1>))),
@@ -104,9 +113,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>)),
@@ -121,9 +130,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>))),
@@ -151,9 +160,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>)),
@@ -168,9 +177,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>))),
@@ -182,6 +191,7 @@ class AqtConfigTest(parameterized.TestCase):
                               allow_dummy_gradient_into_qtensor=False,
                               dot_general=<function dot_general>),
            apply_custom_vjp_on_jax=True)"""
+    _dot_general_full_init_calibration(cfg)
     utils.test_pprint_eq(cfg, expected_cfg_str, remove_memory_addresses=True)
 
   def test_configv4_original(self):
@@ -202,9 +212,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                    calib_shared_axes=None,
                                                                                    scale_stop_grad=True,
                                                                                    calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                   _calibrator=None,
-                                                                                   po2_scale=False,
-                                                                                   scale_dtype=None,
+                                                                                   _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                 po2_scale=False,
+                                                                                                                 clipping_scale=None),
                                                                                    context=Context(key=None,
                                                                                                    train_step=None,
                                                                                                    quant_mode=<QuantMode.TRAIN: 1>)),
@@ -219,9 +229,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                    calib_shared_axes=None,
                                                                                    scale_stop_grad=True,
                                                                                    calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                   _calibrator=None,
-                                                                                   po2_scale=False,
-                                                                                   scale_dtype=None,
+                                                                                   _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                 po2_scale=False,
+                                                                                                                 clipping_scale=None),
                                                                                    context=Context(key=None,
                                                                                                    train_step=None,
                                                                                                    quant_mode=<QuantMode.TRAIN: 1>))),
@@ -247,9 +257,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>)),
@@ -264,9 +274,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>))),
@@ -286,9 +296,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>)),
@@ -297,9 +307,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>))),
@@ -309,9 +319,9 @@ class AqtConfigTest(parameterized.TestCase):
                               allow_dummy_gradient_into_qtensor=False,
                               dot_general=<function dot_general>),
            apply_custom_vjp_on_jax=True)"""
-    utils.test_pprint_eq(
-        config.config_v4(), expected_cfg_str, remove_memory_addresses=True
-    )
+    cfg = config.config_v4()
+    _dot_general_full_init_calibration(cfg)
+    utils.test_pprint_eq(cfg, expected_cfg_str, remove_memory_addresses=True)
 
   def test_config_fwd_fp8(self):
     expected_cfg = """DotGeneral(fwd=DotGeneralRaw(lhs=Tensor(use_fwd_quant=False,
@@ -327,9 +337,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                    calib_shared_axes=None,
                                                                                    scale_stop_grad=True,
                                                                                    calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                   _calibrator=None,
-                                                                                   po2_scale=False,
-                                                                                   scale_dtype=None,
+                                                                                   _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                 po2_scale=False,
+                                                                                                                 clipping_scale=None),
                                                                                    context=Context(key=None,
                                                                                                    train_step=None,
                                                                                                    quant_mode=<QuantMode.TRAIN: 1>)),
@@ -340,9 +350,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                    calib_shared_axes=None,
                                                                                    scale_stop_grad=True,
                                                                                    calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                   _calibrator=None,
-                                                                                   po2_scale=False,
-                                                                                   scale_dtype=None,
+                                                                                   _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                 po2_scale=False,
+                                                                                                                 clipping_scale=None),
                                                                                    context=Context(key=None,
                                                                                                    train_step=None,
                                                                                                    quant_mode=<QuantMode.TRAIN: 1>))),
@@ -362,9 +372,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>)),
@@ -373,9 +383,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>))),
@@ -395,9 +405,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>)),
@@ -406,9 +416,9 @@ class AqtConfigTest(parameterized.TestCase):
                                                                                     calib_shared_axes=None,
                                                                                     scale_stop_grad=True,
                                                                                     calibration=<class 'aqt.jax.v2.calibration.AbsMaxCalibration'>,
-                                                                                    _calibrator=None,
-                                                                                    po2_scale=False,
-                                                                                    scale_dtype=None,
+                                                                                    _calibrator=AbsMaxCalibration(dtype=None,
+                                                                                                                  po2_scale=False,
+                                                                                                                  clipping_scale=None),
                                                                                     context=Context(key=None,
                                                                                                     train_step=None,
                                                                                                     quant_mode=<QuantMode.TRAIN: 1>))),
@@ -418,9 +428,9 @@ class AqtConfigTest(parameterized.TestCase):
                               allow_dummy_gradient_into_qtensor=False,
                               dot_general=<function dot_general>),
            apply_custom_vjp_on_jax=True)"""
-    utils.test_pprint_eq(
-        config.config_fwd_fp8(), expected_cfg, remove_memory_addresses=True
-    )
+    cfg = config.config_fwd_fp8()
+    _dot_general_full_init_calibration(cfg)
+    utils.test_pprint_eq(cfg, expected_cfg, remove_memory_addresses=True)
 
   def test_set_int_numerics_preserve_zero(self):
     cfg = config.config_v4()
@@ -436,14 +446,14 @@ class AqtConfigTest(parameterized.TestCase):
   def test_set_absmax_calib_scale(self):
     cfg = config.config_v4()
     for quantizer in self._retrieve_quantizers([cfg.fwd, cfg.dlhs, cfg.drhs]):
-      self.assertIsNone(quantizer.calibration().scale)
+      self.assertIsNone(quantizer.calibration().clipping_scale)
 
     for quantizer in self._retrieve_quantizers([cfg.fwd, cfg.dlhs]):
       self.assertFalse(quantizer.numerics.clip_gradient)
 
     config.set_absmax_calib_scale(cfg, scale=3)
     for quantizer in self._retrieve_quantizers([cfg.fwd, cfg.dlhs, cfg.drhs]):
-      self.assertAlmostEqual(quantizer.calibration().scale, 3)
+      self.assertAlmostEqual(quantizer.calibration().clipping_scale, 3)
 
     for quantizer in self._retrieve_quantizers([cfg.fwd, cfg.dlhs]):
       self.assertFalse(quantizer.numerics.clip_gradient)

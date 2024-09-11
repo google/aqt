@@ -19,20 +19,44 @@ from typing import Union
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
+import jax
 import jax.numpy as jnp
+
+
+def ceil_to_po2(scale: jnp.ndarray) -> jnp.ndarray:
+  # With floor the biggest value (we are using jnp.max) is in the range of
+  # clipping and therefore have a correct gradient.
+  scale = 2 ** jnp.floor(jnp.log2(jax.lax.reciprocal(scale)))
+  scale = jax.lax.reciprocal(scale)
+  return scale
 
 
 @utils.flax_slots_kw_only_dataclass
 class Calibration(abc.ABC):
-  """Abstract class for calibration."""
+  """Abstract class for scale and bias calibration."""
+
+  # The dtype of the quantization scale and bias arrays. If not set, the arrays
+  # will be in the same dtype as the input.
+  dtype: jnp.dtype | None = utils.static_field(default=None)
+  # Round up the calibration to power of 2 (po2).
+  po2_scale: bool = utils.static_field(default=False)
 
   @abc.abstractmethod
-  def get_bound(
+  def get_scale_and_bias(
       self,
       x: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
       context: utils.Context | None = None,
-  ) -> jnp.ndarray:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    """Returns the quantizaiton scale and bias for the given input tensor."""
+    # NOTE: The scale and bias calculation are handled by the Calibration
+    # class because there is not a single order in which they should be
+    # calculated. In the case of symmetric quantization, the scale depends on
+    # the bias as the bias shifts the symmetric upperbound. In the case of
+    # asymmetric quantization, the bias depends on the scale as the scale
+    # determines how far the bias should shift the input s.t. the minimum
+    # quantized value aligns with the minimum quantization bucket.
     pass
 
   def init_calibration(self):
@@ -41,21 +65,28 @@ class Calibration(abc.ABC):
 
 @utils.flax_slots_kw_only_dataclass
 class ConstantCalibration(Calibration):
-  """Calibration with a constant value."""
+  """Calibration with a constant per-tensor value."""
 
   bound: Union[jnp.ndarray, float]
+  bias: Union[jnp.ndarray, float] | None = None
 
-  def get_bound(
+  def get_scale_and_bias(
       self,
       x: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
       context: utils.Context | None = None,
-  ) -> jnp.ndarray:
-    """Calibration."""
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     del shared_axes, context
     assert self.bound > 0, 'Bound should be positive.'
+    dtype = self.dtype if self.dtype is not None else x.dtype
+
     # TODO(yichizh): hardcode bf16 for the scales, subject to quality evaluation
-    return jnp.asarray(self.bound).reshape((1,) * len(x.shape)).astype(x.dtype)
+    bound = jnp.full(x.shape, self.bound, x.dtype)
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = ceil_to_po2(scale) if self.po2_scale else scale
+    bias = [] if self.bias is None else [jnp.full(x.shape, self.bias, dtype)]
+    return [scale.astype(dtype)], bias
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -63,179 +94,199 @@ class AbsMaxCalibration(Calibration):
   """Simple max(abs(x)) calibration.
 
   Attributes:
-    scale: Set it to something like 0.3, 0.1, 0.03. If scale < 1.0, setting
-      IntNumerics.clip_gradient=True is likely to be important.
+    clipping_scale: Set it to something like 0.3, 0.1, 0.03. If clipping_scale <
+      1.0, setting IntNumerics.clip_gradient=True is likely to be important.
   """
 
-  scale: float | None = None
+  clipping_scale: float | None = None
 
-  def get_bound(
+  def get_scale_and_bias(
       self,
       x: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
       context: utils.Context | None = None,
-  ) -> jnp.ndarray:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     """Calibration.
 
     Args:
       x: The input tensor.
       shared_axes: Axes that share a calibration bound. For AbsMaxCalibration,
         it should not be None.
+      numerics_: An `AqtNumerics` object containing information regarding
+        quantization. Used to create the scale and bias arrays.
       context: The quantization context.
 
     Returns:
-      The bound tensor containing the bound values for each group (can
+      The scale tensor containing the scale values for each group (can
       potentially be a subchannel). Its shape will be the same as `x.shape` but
-      with `shared_axes` collapsed to 1.
+      with `shared_axes` collapsed to 1. Bias is not supported.
     """
     del context
-
     msg = (
         'Perhaps you are using DequantMode.THIS_INPUT (fake_quant) and forgot'
         ' to set them.'
     )
     assert shared_axes is not None, msg
+    dtype = self.dtype if self.dtype is not None else x.dtype
 
-    # NOTE: If you want to clip, consider using clip and clip_gradient in
-    # int_numerics.IntNumerics.
+    # NOTE: If you use a clipping_scale, consider using clip and clip_gradient
+    # in int_numerics.IntNumerics.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     # TODO(yichizh): the zero filtering is not needed anymore because inf is
     # filtered when calculating the reciprocal of scaling factor
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
-    if self.scale is not None:
-      abs_max = abs_max * self.scale
-    return abs_max.astype(x.dtype)
+    bound = abs_max * self.clipping_scale if self.clipping_scale else abs_max
+
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []
 
 
 @utils.flax_slots_kw_only_dataclass
 class AbsMeanCalibration(Calibration):
-  """Simple scale * mean(abs(x)) calibration.
+  """Simple clipping_scale * mean(abs(x) ** p) ** (1 / p) calibration.
 
   Attributes:
-    scale: Set it to something. IntNumerics.clip_gradient=True is likely to be
-      important.
+    clipping_scale: If clipping_scale < 1.0, setting
+      IntNumerics.clip_gradient=True is likely to be important.
+    p: Set it to 1 for mean of absolute scaling.
   """
 
-  scale: float
+  clipping_scale: float
   p: float
 
-  def get_bound(
+  def get_scale_and_bias(
       self,
       x: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
       context: utils.Context | None = None,
-  ) -> jnp.ndarray:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     """Calibration."""
     del context
     assert shared_axes is not None
+    dtype = self.dtype if self.dtype is not None else x.dtype
 
     abs_sum = jnp.sum(jnp.abs(x) ** self.p, axis=shared_axes, keepdims=True)
     count = jnp.sum(x != 0.0, axis=shared_axes, keepdims=True)
     count = jnp.where(count == 0.0, jnp.ones_like(count), count)
     abs_mean = (abs_sum / count) ** (1.0 / self.p)
-    abs_mean = abs_mean * self.scale
+    abs_mean = abs_mean * self.clipping_scale
     abs_mean = jnp.where(abs_mean == 0.0, jnp.ones_like(abs_mean), abs_mean)
-    return abs_mean.astype(x.dtype)
+
+    scale = abs_mean / numerics_.abs_val_mapped_to()
+    scale = ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []
 
 
 @utils.flax_slots_kw_only_dataclass
 class SnrBasedAutoCalibration(Calibration):
-  """Automatically finds the best scale based on SNR values.
+  """Automatically finds the best clipping scales based on SNR values.
 
-  The best scale is determined by the SNR (signal-to-noise ratio) values of the
-  quantized tensor. The SNR is calculated by the following formula:
+  The best clipping scales are determined by the SNR (signal-to-noise ratio)
+  values of the quantized tensor. The SNR is calculated by the following
+  formula:
     SNR = log(1 + signal / noise)
   where signal = sum(x ** 2) and noise = sum(err ** 2).
-  An SNR value is calculated for each scale per subchannel group. Scales that
-  produce the highest SNR value for each subchannel group are selected as the
-  best scale.
+  An SNR value is calculated for each clipping scale per subchannel group.
+  Clipping scales that produce the highest SNR value for each subchannel group
+  are selected and used to calculate the best quantization scale.
 
   Attributes:
-    numerics: An `AqtNumerics` object containing information regarding
-      quantization such as target dtype. Also used to actually quantize (round
-      and clip) the tensor when calculating the SNR values.
-    scale_search_space: A sequence of scale values, a.k.a. clipping factors, to
-      search for the best scale.
+    auto_clip_search_config: A sequence of clipping scales to use to search for
+      the best per-channel quantization scale.
   """
 
-  numerics: numerics.AqtNumerics
-  auto_scale_search_config: utils.AutoScaleSearchConfig
+  auto_clip_search_config: utils.AutoScaleSearchConfig
 
-  def get_bound(
+  def get_scale_and_bias(
       self,
       x: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
       context: utils.Context | None = None,
-  ) -> jnp.ndarray:
-    """Produces the max bound for quantization based on SNR values.
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    """Produces the scale for quantization based on SNR values.
 
     Args:
       x: The input tensor.
       shared_axes: Axes that each subchannel group is shared across.
+      numerics_: An `AqtNumerics` object containing information regarding
+        quantization such as target dtype. Also used to actually quantize (round
+        and clip) the tensor when calculating the SNR values.
       context: The quantization context.
 
     Returns:
-      The bound tensor containing the bound values for each subchannel group.
+      The scale tensor containing the scale values for each subchannel group.
       Its shape will be the same as `x.shape` but with `shared_axes` collapsed
-      to 1.
+      to 1. Biases are not supported.
     """
-    # Determine the shape of the best_scale_values. There will be one scale
-    # value per subchannel group, so it shape will be the same as `x.shape` but
-    # with `shared_axes` collapsed to 1.
-    scales_shape = list(x.shape)
-    for i in shared_axes:
-      scales_shape[i] = 1
+    dtype = self.dtype if self.dtype is not None else x.dtype
 
-    # Default value of 1.0 (max value). One scale value per subchannel group.
-    best_scale_values = jnp.ones((*scales_shape,), dtype=jnp.float32)
+    # Determine the shape of the best_subchannel_clip_scales. There will be one
+    # clip scale per subchannel group, so it shape will be the same as
+    # `x.shape` but with `shared_axes` collapsed to 1.
+    clip_shape = list(x.shape)
+    for i in shared_axes:
+      clip_shape[i] = 1
+
+    # Default clipping scale of 1.0 (max value). One per subchannel group.
+    best_subchannel_clip_scales = jnp.ones(clip_shape, dtype=jnp.float32)
 
     # Start with the worst possible SNR value of zeros, essentially representing
-    # infinite noise. This will be updated as we search through the scale
-    # values.
-    max_snr_values = jnp.zeros((*scales_shape,), dtype=jnp.float32)
+    # infinite noise. This will be updated as we search through the clip
+    # scales.
+    max_snr_values = jnp.zeros(clip_shape, dtype=jnp.float32)
 
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
 
-    # Iteratively search through the scale value search space, identifying and
-    # updating the best SNR and corresponding scale value for each subchannel
+    # Iteratively search through the clip scales search space, identifying and
+    # updating the best SNR and corresponding clip scale for each subchannel
     # group. Essentially it is performing the "find the max value" for each
-    # subgroup in O(num_scales) time.
-    for scale in self.auto_scale_search_config:
-      # Replace the new highest SNR values and corresponding scale values
-      # after evaluating for `scale`.
-      best_scale_values, max_snr_values = self._update_best_scale_and_max_snr(
-          best_scale_values,
-          max_snr_values,
-          scale,
-          x,
-          abs_max,
-          shared_axes,
-          context,
+    # subgroup in O(auto_clip_search_config) time.
+    for clip_scale in self.auto_clip_search_config:
+      # Replace the new highest SNR values and corresponding clip scales
+      # after evaluating for `clip`.
+      best_subchannel_clip_scales, max_snr_values = (
+          self._update_best_clip_scales_and_max_snr(
+              best_subchannel_clip_scales,
+              max_snr_values,
+              clip_scale,
+              x,
+              abs_max,
+              shared_axes,
+              numerics_,
+              context,
+          )
       )
 
-    # TODO(b/339746869): Generate a simple report for the scale distribution.
-    best_abs_max = abs_max * best_scale_values
-    return best_abs_max.astype(x.dtype)
+    # TODO(b/339746869): Generate a simple report for the clip distribution.
+    bound = abs_max * best_subchannel_clip_scales
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []
 
-  def _update_best_scale_and_max_snr(
+  def _update_best_clip_scales_and_max_snr(
       self,
-      current_scale_values: jnp.ndarray,
+      current_clip_scales: jnp.ndarray,
       current_snr_values: jnp.ndarray,
-      scale: float,
+      clip_scale: float,
       x: jnp.ndarray,
       abs_max: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx],
+      numerics_: numerics.AqtNumerics,
       context: utils.Context,
   ) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Updates the best scale and max SNR values given a `scale` value.
+    """Updates the best clip scales and max SNR values given a `clip_scale`.
 
-    Given a `scale` value, this function calculates the SNR value for each
+    Given a `clip_scale`, this function calculates the SNR value for each
     subchannel group. It then identifies the subchannel groups that have higher
-    SNR values than `current_snr_values` and updates the best scale and max SNR
-    values for those groups.
+    SNR values than `current_snr_values` and updates the best clip scales and
+    max SNR values for those groups.
 
-    `current_scale_values`, `current_snr_values`, and `abs_max` are expected to
+    `current_clip_scales`, `current_snr_values`, and `abs_max` are expected to
     have the same shape, which is the same as `x.shape` but with `shared_axes`
     collapsed to 1.
 
@@ -243,41 +294,47 @@ class SnrBasedAutoCalibration(Calibration):
     the SNR values for each subchannel group.
 
     Args:
-      current_scale_values: The current best scale values for each subchannel
+      current_clip_scales: The current best clip scales for each subchannel
         group.
       current_snr_values: The current best SNR values for each subchannel group.
-      scale: The scale value to be evaluated.
+      clip_scale: The clip scale to be evaluated.
       x: The input tensor.
       abs_max: The absolute max value for each subchannel group.
       shared_axes: Axes that each subchannel group is shared across.
+      numerics_: An `AqtNumerics` object containing information regarding
+        quantization such as target dtype. Also used to actually quantize (round
+        and clip) the tensor when calculating the SNR values.
       context: The quantization context.
 
     Returns:
-      The (updated best scale values, updated best SNR values) tuple.
+      The (updated best clip scales, updated best SNR values) tuple.
     """
-    # Note that all subchannel groups are scaled by the same candidate scale
-    # value.
-    scaled_abs_max = abs_max * scale
-    scaled_abs_max = scaled_abs_max.astype(x.dtype)
+    # Note that all subchannel groups are clipped by the same candidate clip
+    # scale.
+    clipped_abs_max = abs_max * clip_scale
+    clipped_abs_max = clipped_abs_max.astype(x.dtype)
 
-    snr_values = self._calculate_snr(x, scaled_abs_max, shared_axes, context)
+    snr_values = self._calculate_snr(
+        x, clipped_abs_max, shared_axes, numerics_, context
+    )
 
-    # Update the best scale values and SNR values for subchannel groups that
+    # Update the best clipping scales and SNR values for subchannel groups that
     # have higher SNR values.
-    updated_scale_values = jnp.where(
+    updated_clip_scales = jnp.where(
         snr_values > current_snr_values,
-        scale,
-        current_scale_values,
+        clip_scale,
+        current_clip_scales,
     )
 
     updated_snr_values = jnp.maximum(snr_values, current_snr_values)
-    return updated_scale_values, updated_snr_values
+    return updated_clip_scales, updated_snr_values
 
   def _calculate_snr(
       self,
       x: jnp.ndarray,
       bound: jnp.ndarray,
       shared_axes: Sequence[utils.AxisIdx],
+      numerics_: numerics.AqtNumerics,
       context: utils.Context,
   ) -> jnp.ndarray:
     """Calculates the quantization signal-to-noise ratio (SNR) for the given bound.
@@ -293,21 +350,28 @@ class SnrBasedAutoCalibration(Calibration):
       shared_axes: Axes that each subchannel group is shared across. SNR values
         will be calculated for each dimension in `x.shape` except the shared
         axes.
+      numerics_: An `AqtNumerics` object containing information regarding
+        quantization such as target dtype. Also used to actually quantize (round
+        and clip) the tensor when calculating the SNR values.
       context: The quantization context.
 
     Returns:
       The SNR tensor containing the SNR values for each subchannel group. Its
       shape will be the same as `x.shape` but with `shared_axes` collapsed to 1.
     """
-    abs_max_mapped_to = self.numerics.abs_val_mapped_to()
-    scale = bound / abs_max_mapped_to
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = scale.astype(self.dtype if self.dtype is not None else x.dtype)
 
     q_tensor = aqt_tensor.QTensor(
-        qvalue=None, scale=[scale], scale_t=None, bias=[], dequant_dtype=x.dtype
+        qvalue=None,
+        scale=[scale],
+        scale_t=None,
+        bias=[],
+        dequant_dtype=x.dtype,
     ).quant(x)
 
     # This actually quantizes the tensor (clips, rounds, etc).
-    quantized_tensor, _ = self.numerics.vjp_fwd(q_tensor.qvalue, context)
+    quantized_tensor, _ = numerics_.vjp_fwd(q_tensor.qvalue, context)
     q_tensor = q_tensor.replace(qvalue=quantized_tensor)
 
     dequantized_tensor = q_tensor.dequant()

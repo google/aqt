@@ -89,7 +89,6 @@ class IntNumericsTest(parameterized.TestCase):
           calib_shared_axes=None,
           scale_stop_grad=True,
           calibration=calibration.AbsMaxCalibration,
-          po2_scale=False,
           context=utils.Context(key=None, train_step=None),
       )
       q.init_calibration()

@@ -37,6 +37,20 @@ import numpy as np
 import scipy.stats
 
 
+def _apply_po2_scale(quantizer):
+  calibration_cls = quantizer.calibration
+  # TODO(lew): Remove partial inspection wherever possible.
+  # Partial inspection is needed because the current implementation of delayed
+  # calibration initialization requires the configuration to be set via
+  # functools.partial.
+  keywords = {}
+  if isinstance(calibration_cls, functools.partial):
+    keywords = calibration_cls.keywords
+    calibration_cls = calibration_cls.func
+  keywords.update(po2_scale=True)
+  quantizer.calibration = functools.partial(calibration_cls, **keywords)
+
+
 def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
   """Tests whether dot_generals in f conform to dtypes inside of dg_raws."""
 
@@ -200,14 +214,6 @@ def _modify_dg(
     dg.fwd.dg_quantizer.lhs.numerics = _TrickyNumerics()
     dg.fwd.dg_accumulator_dtype = None
 
-  # Setting po2_scale is ensuring that fake_quant and full dot_general
-  # have the same numerics when scales are power of two (po2).
-  # We are passing dims to config so that we can reuse it in fake_quant.
-  # Power-of-2 scales allow FQ and AQT to be exactly the same.
-  def _apply_po2_scale(c):
-    c.dg_quantizer.lhs.po2_scale = True
-    c.dg_quantizer.rhs.po2_scale = True
-
   def _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode):
     c.lhs.dequant_mode = lhs_dequant_mode
     c.rhs.dequant_mode = rhs_dequant_mode
@@ -231,7 +237,13 @@ def _modify_dg(
   disable_lhs_quant = lhs_dequant_mode == aqt.DequantMode.THIS_INPUT
   disable_rhs_quant = rhs_dequant_mode == aqt.DequantMode.THIS_INPUT
   for c in [dg.fwd, dg.dlhs, dg.drhs]:
-    _apply_po2_scale(c)
+    # Setting po2_scale is ensuring that fake_quant and full dot_general
+    # have the same numerics when scales are power of two (po2).
+    # We are passing dims to config so that we can reuse it in fake_quant.
+    # Power-of-2 scales allow FQ and AQT to be exactly the same.
+    _apply_po2_scale(c.dg_quantizer.lhs)
+    _apply_po2_scale(c.dg_quantizer.rhs)
+
     _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode)
     _apply_calibration_mode(
         c, lhs_calibration_mode, rhs_calibration_mode
@@ -438,8 +450,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       maxval=10.0,
       shape=(20, 1),
   ):
-    quantizer = config.quantizer_make(bits)
-    quantizer.po2_scale = True
+    quantizer = config.quantizer_make(bits, initialize_calibration=False)
+    _apply_po2_scale(quantizer)
+    quantizer.init_calibration()
     quantizer.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
     grad = jnp.ones(shape) * 12345.0
@@ -1074,7 +1087,6 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         calib_shared_axes="per_tensor",
         scale_stop_grad=True,
         calibration=calibration.AbsMaxCalibration,
-        po2_scale=False,
         context=utils.Context(key=None, train_step=None),
     )
     # TODO(lew): Perhaps post_init call could work?
@@ -1091,12 +1103,23 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_per_subchannel(self):
     # TODO(lew): bits=8 started failing in VLP colab due x/x != 1.0 sometimes
     bits = 4
-    quantizer = aqt_quantizer.quantizer_make(bits)
+    quantizer = aqt_quantizer.quantizer_make(bits, initialize_calibration=False)
     x = jnp.arange(0, 64).reshape((4, 4, 4))
 
-    tiling_state = tiled_dot_general.generate_tiling_state(x, [
-        tiled_dot_general.AxisTiling(axis=2, tile_size=2),
-    ])
+    # NOTE: The scale dtype must be set to a float dtype when quantizing an
+    # integer input, as jax does not support taking the inverse of an integer.
+    assert not isinstance(
+        quantizer.calibration, functools.partial
+    ), "The line below must be updated to reflect this change."
+    quantizer.calibration = functools.partial(
+        quantizer.calibration, dtype=jnp.float32
+    )
+    quantizer.init_calibration()
+
+    tiling_state = tiled_dot_general.generate_tiling_state(
+        x,
+        [tiled_dot_general.AxisTiling(axis=2, tile_size=2)],
+    )
     qx, _ = quantizer.quant(
         x,
         calibration_axes=[0, 2],
@@ -1104,6 +1127,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     )
     self.assertEqual(qx.qvalue.shape, (4, 4, 2, 2))
     self.assertEqual(qx.scale[0].shape, (1, 4, 2, 1))
+    self.assertEqual(qx.scale[0].dtype, jnp.float32)
 
     x = qx.dequant()
     self.assertEqual(x.shape, (4, 4, 4))

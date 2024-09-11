@@ -16,6 +16,7 @@ from typing import Sequence
 
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import numerics
 import flax.linen as nn
 import jax
 from jax import numpy as jnp
@@ -59,6 +60,7 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
       shared_axes: Sequence[utils.AxisIdx] | None,
       context: utils.Context | None = None,
   ) -> jnp.ndarray:
+    del shared_axes
     # Right now we just support per_tensor calibration (i.e. one value).
     # To support per_axis calibration, we would need to be able to change the
     # shape of the mutable arrays. For example, right now amax_history has
@@ -88,6 +90,19 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
       bound_mutable_arr[:] = new_bound[:]
       amax_history_mutable_arr[:] = new_history[:]
     return new_bound.reshape((1,) * len(x.shape))
+
+  def get_scale_and_bias(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: numerics.AqtNumerics,
+      context: utils.Context | None = None,
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    dtype = self.dtype if self.dtype is not None else x.dtype
+    bound = self.get_bound(x, shared_axes, context)
+    scale = bound / numerics_.abs_val_mapped_to()
+    scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []
 
   def compute_bound(self, amax, prev_bound):
     new_bound = jnp.copy(amax)

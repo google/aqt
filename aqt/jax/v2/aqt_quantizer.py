@@ -14,6 +14,7 @@
 """Configuration dataclasses."""
 
 from typing import Literal, Sequence
+
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import calibration
 from aqt.jax.v2 import tiled_dot_general
@@ -23,7 +24,6 @@ from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
 from aqt.jax.v2.numerics import utils as numerics_utils
 import jax
-import jax.numpy as jnp
 
 
 AbstractAqtNumerics = numerics.AqtNumerics
@@ -46,11 +46,6 @@ class Quantizer:
   # We apply gradient of clip_and_round in bwd pass.
   calibration: type[AbstractAqtCalibration] = utils.static_field()
   _calibrator: AbstractAqtCalibration | None = utils.static_field(default=None)
-  # Round up the calibration to power of 2 (po2).
-  po2_scale: bool = utils.static_field()
-  # The dtype of the quantization scale array. If not set, the scale array will
-  # be in the same dtype as the input.
-  scale_dtype: jnp.dtype | None = utils.static_field(default=None)
   # TODO(yichizh): Factor out auxiliary dataclasses into a separate file.
   context: utils.Context
 
@@ -129,27 +124,19 @@ class Quantizer:
       shared_axes = self.calib_shared_axes or calibration_axes
 
     assert self._calibrator is not None, "forgot self.init_calibration()?"
-    bound = self._calibrator.get_bound(x, shared_axes, self.context)
-    abs_max_mapped_to = self.numerics.abs_val_mapped_to()
-    scale = bound / abs_max_mapped_to
-
-    if self.po2_scale:
-      # With floor the biggest value (we are using jnp.max) is in the range of
-      # clipping and therefore have a correct gradient.
-      scale = 2 ** jnp.floor(jnp.log2(jax.lax.reciprocal(scale)))
-      scale = jax.lax.reciprocal(scale)
+    scale, bias = self._calibrator.get_scale_and_bias(
+        x, shared_axes, self.numerics, self.context
+    )
     if self.scale_stop_grad:
       # TODO(lew): Does not matter in DG, because we are using custom gradient.
       #   We should take that into account somehow.
       scale = jax.lax.stop_gradient(scale)
-    if self.scale_dtype is not None:
-      scale = scale.astype(self.scale_dtype)
 
     qt = aqt_tensor.QTensor(
         qvalue=None,
-        scale=[scale],
+        scale=scale,
         scale_t=None,
-        bias=[],
+        bias=bias,
         dequant_dtype=dequant_dtype,
         tiling_state=tiling_state,
     )
@@ -187,7 +174,6 @@ def quantizer_make(
       calib_shared_axes=None,
       scale_stop_grad=True,
       calibration=calibration.AbsMaxCalibration,
-      po2_scale=False,
       context=utils.Context(key=None, train_step=None),
   )
   # TODO(lew): We should try to move to to class constructor or post-init.

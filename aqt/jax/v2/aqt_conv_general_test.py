@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_quantizer
@@ -26,6 +28,20 @@ def rand_unif(shape, maxval, seed, dtype=jnp.float32):
   return jax.random.uniform(
       key=key, shape=shape, minval=-maxval, maxval=maxval, dtype=dtype
   )
+
+
+def _apply_po2_scale(quantizer):
+  calibration_cls = quantizer.calibration
+  # TODO(lew): Remove partial inspection wherever possible.
+  # Partial inspection is needed because the current implementation of delayed
+  # calibration initialization requires the configuration to be set via
+  # functools.partial.
+  keywords = {}
+  if isinstance(calibration_cls, functools.partial):
+    keywords = calibration_cls.keywords
+    calibration_cls = calibration_cls.func
+  keywords.update(po2_scale=True)
+  quantizer.calibration = functools.partial(calibration_cls, **keywords)
 
 
 class AqtConvGeneralTest(parameterized.TestCase):
@@ -48,13 +64,17 @@ class AqtConvGeneralTest(parameterized.TestCase):
       rhs_maxval=20.0,
       seed=0,
   ):
-    dg_raw_conv = aqt_conv.conv_general_dilated_make(2, lhs_bits, rhs_bits)
-
+    dg_raw_conv = aqt_conv.conv_general_dilated_make(
+        2, lhs_bits, rhs_bits, initialize_calibration=False
+    )
+    # Power-of-2 scales allow FQ and AQT to be exactly the same.
+    dg_quantizer = dg_raw_conv.dg_quantizer
     if dg_raw_conv.lhs:
-      # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      dg_raw_conv.dg_quantizer.lhs.po2_scale = True
+      _apply_po2_scale(dg_quantizer.lhs)
+      dg_quantizer.lhs.init_calibration()
     if dg_raw_conv.rhs:
-      dg_raw_conv.dg_quantizer.rhs.po2_scale = True
+      _apply_po2_scale(dg_quantizer.rhs)
+      dg_quantizer.rhs.init_calibration()
 
     batch_n = 10
     contr_n = 20
@@ -94,12 +114,17 @@ class AqtConvGeneralTest(parameterized.TestCase):
       seed=0,
   ):
     """Check that passing quantized lhs/rhs to aqt_conv_fn works."""
-    dg_raw_conv = aqt_conv.conv_general_dilated_make(2, lhs_bits, rhs_bits)
+    dg_raw_conv = aqt_conv.conv_general_dilated_make(
+        2, lhs_bits, rhs_bits, initialize_calibration=False
+    )
+    # Power-of-2 scales allow FQ and AQT to be exactly the same.
+    dg_quantizer = dg_raw_conv.dg_quantizer
     if dg_raw_conv.lhs:
-      # Power-of-2 scales allow FQ and AQT to be exactly the same.
-      dg_raw_conv.dg_quantizer.lhs.po2_scale = True
+      _apply_po2_scale(dg_quantizer.lhs)
+      dg_quantizer.lhs.init_calibration()
     if dg_raw_conv.rhs:
-      dg_raw_conv.dg_quantizer.rhs.po2_scale = True
+      _apply_po2_scale(dg_quantizer.rhs)
+      dg_quantizer.rhs.init_calibration()
 
     batch_n = 10
     contr_n = 20

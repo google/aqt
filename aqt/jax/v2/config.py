@@ -213,10 +213,12 @@ def set_stochastic_rounding(
   _set_numerics_noise_fn(cfg.drhs.dg_quantizer, is_lhs_sr, is_rhs_sr)
 
 
-def set_static_bound(cfg: DotGeneral, bound: float = 1.0):
+def set_constant_calibration(
+    cfg: DotGeneral, bound: float = 1.0, bias: float | None = None
+):
   """Sets the static bound for calibration."""
   calibration_cls = functools.partial(
-      calibration.ConstantCalibration, bound=bound
+      calibration.ConstantCalibration, bound=bound, bias=bias
   )
 
   assert isinstance(
@@ -288,9 +290,9 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
 
 
 def set_auto_calib_scale(
-    cfg: DotGeneral, auto_scale_search_config: utils.AutoScaleSearchConfig
+    cfg: DotGeneral, auto_clip_search_config: utils.AutoScaleSearchConfig
 ) -> None:
-  """Update `cfg`'s quantizers' calibration to use auto scale search.
+  """Update `cfg`'s quantizers' calibration to use auto clipping search.
 
   Currently only supports the weights (rhs) of `DotGeneral`, since the iterative
   process of finding the scale tensors might be too slow for the activations
@@ -298,7 +300,7 @@ def set_auto_calib_scale(
 
   Args:
     cfg: The config to be updated.
-    auto_scale_search_config: The config for auto scale search.
+    auto_clip_search_config: The config for auto clipping search.
   """
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
@@ -311,17 +313,22 @@ def set_auto_calib_scale(
   )
 
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
-    dg_quantizer = dot_general_raw.dg_quantizer
-    dg_rhs_quantizer = dg_quantizer.rhs
-    dg_rhs_quantizer.calibration = functools.partial(
-        calibration.SnrBasedAutoCalibration,
-        numerics=dg_rhs_quantizer.numerics,
-        auto_scale_search_config=auto_scale_search_config,
+    quantizer = dot_general_raw.dg_quantizer.rhs
+    # TODO(lew): Remove partial inspection wherever possible.
+    # Partial inspection is needed because the current implementation of delayed
+    # calibration initialization requires the configuration to be set via
+    # functools.partial.
+    keywords = {}
+    if isinstance(quantizer.calibration, functools.partial):
+      keywords = quantizer.calibration.keywords
+    keywords.update(auto_clip_search_config=auto_clip_search_config)
+    quantizer.calibration = functools.partial(
+        calibration.SnrBasedAutoCalibration, **keywords
     )
 
 
 def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
-  """Set AbsMaxCalibration scale and update clip_gradient accordingly."""
+  """Set AbsMaxCalibration clipping_scale and clip_gradient accordingly."""
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
@@ -336,14 +343,22 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
     dg_quantizer = dot_general_raw.dg_quantizer
     for quantizer in [dg_quantizer.lhs, dg_quantizer.rhs]:
       calibration_cls = quantizer.calibration
+      # TODO(lew): Remove partial inspection wherever possible.
+      # Partial inspection is needed because the current implementation of
+      # delayed calibration initialization requires the configuration to be set
+      # via functools.partial.
+      keywords = {}
       if isinstance(calibration_cls, functools.partial):
+        keywords = calibration_cls.keywords
         calibration_cls = calibration_cls.func
+      keywords.update(clipping_scale=scale)
       assert calibration_cls == calibration.AbsMaxCalibration, (
-          'scale is only available in AbsMaxCalibration, while'
+          'clipping_scale is only available in AbsMaxCalibration, while'
           f' {quantizer.calibration} is used in current config.'
       )
       quantizer.calibration = functools.partial(
-          calibration.AbsMaxCalibration, scale=scale
+          calibration.AbsMaxCalibration,
+          **keywords,
       )
       if scale < 1.0 and isinstance(
           quantizer.numerics, int_numerics.IntNumerics
@@ -387,8 +402,8 @@ def set_bits(
   return cfg
 
 
-def set_scale_dtype(cfg: DotGeneral, scale_dtype: jnp.dtype):
-  """Set the dtype for all scales in the given DotGeneral config."""
+def set_scale_and_bias_dtype(cfg: DotGeneral, dtype: jnp.dtype):
+  """Set the dtype for all scales and biases in the given DotGeneral config."""
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
@@ -398,12 +413,26 @@ def set_scale_dtype(cfg: DotGeneral, scale_dtype: jnp.dtype):
   assert isinstance(
       cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
-  cfg.fwd.dg_quantizer.lhs.scale_dtype = scale_dtype
-  cfg.fwd.dg_quantizer.rhs.scale_dtype = scale_dtype
-  cfg.dlhs.dg_quantizer.lhs.scale_dtype = scale_dtype
-  cfg.dlhs.dg_quantizer.rhs.scale_dtype = scale_dtype
-  cfg.drhs.dg_quantizer.lhs.scale_dtype = scale_dtype
-  cfg.drhs.dg_quantizer.rhs.scale_dtype = scale_dtype
+
+  def _update_dtype(quantizer: aqt_quantizer.Quantizer):
+    calibration_cls = quantizer.calibration
+    # TODO(lew): Remove partial inspection wherever possible.
+    # Partial inspection is needed because the current implementation of delayed
+    # calibration initialization requires the configuration to be set via
+    # functools.partial.
+    keywords = {}
+    if isinstance(calibration_cls, functools.partial):
+      keywords = calibration_cls.keywords
+      calibration_cls = calibration_cls.func
+    keywords.update(dtype=dtype)
+    quantizer.calibration = functools.partial(calibration_cls, **keywords)
+
+  _update_dtype(cfg.fwd.dg_quantizer.lhs)
+  _update_dtype(cfg.fwd.dg_quantizer.rhs)
+  _update_dtype(cfg.dlhs.dg_quantizer.lhs)
+  _update_dtype(cfg.dlhs.dg_quantizer.rhs)
+  _update_dtype(cfg.drhs.dg_quantizer.lhs)
+  _update_dtype(cfg.drhs.dg_quantizer.rhs)
 
 
 ################################################################################
@@ -427,7 +456,6 @@ def default_unquantized_config() -> DotGeneral:
         calib_shared_axes=None,
         scale_stop_grad=True,
         calibration=calibration.AbsMaxCalibration,
-        po2_scale=False,
         context=utils.Context(key=None, train_step=None),
     )
 
@@ -507,7 +535,7 @@ def fully_quantized(
     set_stochastic_rounding(cfg, False, True, 'jax.uniform')
 
   if use_dummy_static_bound:
-    set_static_bound(cfg, 1.0)
+    set_constant_calibration(cfg, 1.0)
 
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
 
@@ -565,7 +593,7 @@ def config_v3(
   )
 
   if use_dummy_static_bound:
-    set_static_bound(cfg, 1.0)
+    set_constant_calibration(cfg, 1.0)
 
   set_accumulator_dtype(
       cfg,
@@ -619,7 +647,7 @@ def config_v4(
       implementation=rng_type,
   )
   if use_dummy_static_bound:
-    set_static_bound(cfg, 1.0)
+    set_constant_calibration(cfg, 1.0)
   set_local_aqt(
       cfg,
       fwd_local_aqt=SKIP,
