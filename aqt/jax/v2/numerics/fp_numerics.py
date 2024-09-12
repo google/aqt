@@ -350,17 +350,14 @@ def fp_round(
           sh = list((1,) * len(x.shape))
           sh[test_noise_axis] = noise_axis_size
           rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
-          rnd_bits = rnd_bits << 8
-          rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(
-              jnp.uint32
-          )
-          noise = (
-              jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
-              - 1.5
-              + 1.0 / 512  # to make noise symmetric to zero
-          )
         else:
-          noise = jax.random.uniform(key, orig_x.shape, dtype=jnp.float32) - 0.5
+          rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+        rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(jnp.uint32)
+        noise = (
+            jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
+            - 1.5
+            + 2 ** (-17)  # to make noise symmetric to zero
+        )
       else:
         noise = 0.0
       # SR within subnormal is adding random noise [-0.5, 0.5) then round.
@@ -377,8 +374,17 @@ def fp_round(
           sh = list((1,) * len(x.shape))
           sh[test_noise_axis] = noise_axis_size
           rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
-          rnd_bits = rnd_bits << 8
+          # Use 16-bit noise for deterministic SR tests.
+          # Note: adding left shift operation can adjust the effective noise bit
+          # For example rnd_bits = rnd_bits << 8 means using noise with
+          # (bits_dtype - 8) effective bits.
+          # The effective noise bit should be consistent with the number of
+          # inputs in determistic SR test, e.g., 8-bit noise requires 2**8
+          # inputs to the test.
         else:
+          # Note: bits_dtype affects the effective noise bit in the
+          # "test_noise_axis is not None" branch. Remember to change the shift
+          # operation and the number of inputs to the deterministic SR test.
           rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
         rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
         # rnd_bits here is 32 bits, with exponent 10000000, first 8 mantissa
@@ -390,6 +396,14 @@ def fp_round(
         # rx is 1 or -1 - SR of orig_x
         rx = (orig_x > rnd_floats) * 2 - 1.0
         x = jnp.where(jnp.abs(orig_x) < min_repr_float, rx, x)
+    # Deal with overflow
+    max_subnormal = jax.lax.convert_element_type(
+        2**cfg.minexp * (1 - 2 ** (-nmant)), input_dtype
+    )
+    if nexp == 0 and cfg.has_subnormals:
+      # Clip to max subnormal when there are no exponent bits and subnormal
+      # presents in the numerics.
+      x = jnp.clip(x, -max_subnormal, max_subnormal)
   else:
     x = jax.lax.bitcast_convert_type(x, input_dtype)
 
@@ -437,11 +451,15 @@ def fp_round_new(
   min_normal_repr = jax.lax.bitcast_convert_type(min_normal, bits_dtype)
   bias = 1 if cfg.has_subnormals else 0
   ctner_bias = 127
+  # TODO(yichizh): min_ctner_exp should be (ctner_bias - bias - cfg.min_exp)
   min_ctner_exp = bits_dtype(ctner_bias - bias)
   max_ctner_exp = bits_dtype(min_ctner_exp + 2**nexp - 1)
   max_ctner_mant = bits_dtype(ctner_mant_mask & ~mant_trunc_mask)
   max_normal_repr = (max_ctner_exp << ctner_nmant) + max_ctner_mant
   max_normal = jax.lax.bitcast_convert_type(max_normal_repr, input_dtype)
+  max_subnormal = jax.lax.convert_element_type(
+      2**cfg.minexp * (1 - 2 ** (-nmant)), input_dtype
+  )
 
   def trunc_and_clip_normal(x_in: float_repr) -> float_repr:
     sign = jnp.sign(x_in)
@@ -474,17 +492,14 @@ def fp_round_new(
           sh = list((1,) * len(x_in.shape))
           sh[test_noise_axis] = noise_axis_size
           rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
-          rnd_bits = rnd_bits << 8
-          rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(
-              jnp.uint32
-          )
-          noise = (
-              jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
-              - 1.5
-              + 0.001953125  # to make noise symmetric to zero
-          )
         else:
-          noise = jax.random.uniform(key, x_in.shape, dtype=jnp.float32) - 0.5
+          rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+        rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(jnp.uint32)
+        noise = (
+            jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
+            - 1.5
+            + 2 ** (-17)  # to make noise symmetric to zero
+        )
       else:
         noise = 0.0
       x_in = (jnp.round(x_in * 2**nmant + noise) / 2**nmant).astype(input_dtype)
@@ -495,7 +510,6 @@ def fp_round_new(
           sh = list((1,) * len(x_in.shape))
           sh[test_noise_axis] = noise_axis_size
           rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
-          rnd_bits = rnd_bits << 8
         else:
           rnd_bits = jax.random.bits(key, x_in.shape, bits_dtype)
         rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
@@ -514,17 +528,29 @@ def fp_round_new(
   normal = trunc_and_clip_normal(x)
   subnormal = round_subnormal(x)
   out = jnp.where(jnp.abs(x) < min_normal, subnormal, normal)
+  # Deal with overflow
+  if nexp == 0 and cfg.has_subnormals:
+    out = jnp.clip(out, -max_subnormal, max_subnormal)
   return out
 
 
 def fp_largest_representable(cfg: FpNumericsConfig):
+  """Compute maximum representable FP number."""
   nexp = cfg.nexp
   nmant = cfg.nmant
   assert cfg.minexp == 0, 'minexp not implemented'
   assert not cfg.has_naninf, 'naninf not implemented'
   max_exp = 2**nexp - 1 + cfg.minexp - (1 if cfg.has_subnormals else 0)
   max_mant = 2**nmant - 1 - (1 if cfg.has_two_nan else 0)
-  return 2**max_exp * (1 + (max_mant / 2**nmant))
+  max_normal = 2**max_exp * (1 + (max_mant / 2**nmant))
+  # TODO(yichizh): check max_subnormal again when minexp is not 0.
+  max_subnormal = 2**cfg.minexp * max_mant / 2**nmant
+  if cfg.has_subnormals and nexp == 0:
+    # When there is no exponent bits, e.g., e0mX, compute the maximum
+    # representable value by max subnormal instead of max normal.
+    return max_subnormal
+  else:
+    return max_normal
 
 
 @utils.flax_slots_kw_only_dataclass

@@ -14,6 +14,7 @@
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import fp_numerics
 import jax
 import jax.numpy as jnp
@@ -247,13 +248,43 @@ class FpTest(parameterized.TestCase):
   #   has_two_nan=False,
   #   has_naninf=False,
   @parameterized.parameters([
+      # FP4
       dict(nexp=3, minexp=0, nmant=0, has_subnormals=False),
       dict(nexp=3, minexp=0, nmant=0, has_subnormals=True),
       # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=False),
       # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=True),
-      dict(nexp=2, minexp=0, nmant=0, has_subnormals=False),
       dict(nexp=2, minexp=0, nmant=1, has_subnormals=False),
       dict(nexp=2, minexp=0, nmant=1, has_subnormals=True),
+      dict(nexp=1, minexp=0, nmant=2, has_subnormals=False),
+      dict(nexp=1, minexp=0, nmant=2, has_subnormals=True),
+      dict(nexp=0, minexp=0, nmant=3, has_subnormals=False),
+      dict(nexp=0, minexp=0, nmant=3, has_subnormals=True),
+      # FP6
+      dict(nexp=5, minexp=0, nmant=0, has_subnormals=True),
+      dict(nexp=5, minexp=0, nmant=0, has_subnormals=False),
+      dict(nexp=4, minexp=0, nmant=1, has_subnormals=True),
+      dict(nexp=4, minexp=0, nmant=1, has_subnormals=False),
+      dict(nexp=3, minexp=0, nmant=2, has_subnormals=True),
+      dict(nexp=3, minexp=0, nmant=2, has_subnormals=False),
+      dict(nexp=2, minexp=0, nmant=3, has_subnormals=True),
+      dict(nexp=2, minexp=0, nmant=3, has_subnormals=False),
+      dict(nexp=1, minexp=0, nmant=4, has_subnormals=True),
+      dict(nexp=1, minexp=0, nmant=4, has_subnormals=False),
+      dict(nexp=0, minexp=0, nmant=5, has_subnormals=True),
+      dict(nexp=0, minexp=0, nmant=5, has_subnormals=False),
+      # FP5
+      dict(nexp=4, minexp=0, nmant=0, has_subnormals=True),
+      dict(nexp=4, minexp=0, nmant=0, has_subnormals=False),
+      dict(nexp=3, minexp=0, nmant=1, has_subnormals=True),
+      dict(nexp=3, minexp=0, nmant=1, has_subnormals=False),
+      dict(nexp=2, minexp=0, nmant=2, has_subnormals=True),
+      dict(nexp=2, minexp=0, nmant=2, has_subnormals=False),
+      dict(nexp=1, minexp=0, nmant=3, has_subnormals=True),
+      dict(nexp=1, minexp=0, nmant=3, has_subnormals=False),
+      dict(nexp=0, minexp=0, nmant=4, has_subnormals=True),
+      dict(nexp=0, minexp=0, nmant=4, has_subnormals=False),
+      # Misc
+      dict(nexp=2, minexp=0, nmant=0, has_subnormals=False),
   ])
   def test_fp_round(
       self,
@@ -374,8 +405,10 @@ class FpTest(parameterized.TestCase):
         det_x_count,
         endpoint=True,
         dtype=jnp.float32,
-    )
-    bx = jnp.broadcast_to(x[:, jnp.newaxis], (det_x_count, 256))
+    ).astype(jnp.bfloat16)
+    # The number of broadcasts should be consistent with the effective noise bit
+    # For example, if using 16-bit noise, inputs should be replicated by 2**16.
+    bx = jnp.broadcast_to(x[:, jnp.newaxis], (det_x_count, 2**16))
     deterministic_qx = fp_numerics.fp_round(
         bx.astype(jnp.bfloat16),
         cfg=cfg,
@@ -394,7 +427,7 @@ class FpTest(parameterized.TestCase):
         x_count,
         endpoint=True,
         dtype=jnp.float32,
-    )
+    ).astype(jnp.bfloat16)
     bx = jnp.broadcast_to(x[:, jnp.newaxis], (x_count, sr_sample_count))
     qx = fp_numerics.fp_round(
         bx.astype(jnp.bfloat16),
@@ -434,20 +467,56 @@ class FpTest(parameterized.TestCase):
     assert (p_stderr < 2.0).all(), p_stderr
 
   @parameterized.parameters([
+      # FP4
       dict(cfg=fp_numerics.e3m0, sr=False),
-      dict(cfg=fp_numerics.e3m0, sr=True),
       dict(cfg=fp_numerics.e2m1, sr=False),
-      dict(cfg=fp_numerics.e2m1, sr=True),
-      dict(cfg=fp_numerics.e1m0, sr=False),
-      dict(cfg=fp_numerics.e1m0, sr=True),
+      dict(cfg=fp_numerics.e1m2, sr=False),
+      dict(cfg=fp_numerics.e0m3, sr=False),
       dict(cfg=fp_numerics.e3m0_ocp, sr=False),
-      dict(cfg=fp_numerics.e3m0_ocp, sr=True),
       dict(cfg=fp_numerics.e2m1_ocp, sr=False),
+      dict(cfg=fp_numerics.e1m2_ocp, sr=False),
+      dict(cfg=fp_numerics.e0m3_ocp, sr=False),
+      dict(cfg=fp_numerics.e3m0, sr=True),
+      dict(cfg=fp_numerics.e2m1, sr=True),
+      dict(cfg=fp_numerics.e1m2, sr=True),
+      dict(cfg=fp_numerics.e0m3, sr=True),
+      dict(cfg=fp_numerics.e3m0_ocp, sr=True),
       dict(cfg=fp_numerics.e2m1_ocp, sr=True),
+      dict(cfg=fp_numerics.e1m2_ocp, sr=True),
+      dict(cfg=fp_numerics.e0m3_ocp, sr=True),
+      # FP5
+      dict(cfg=fp_numerics.e4m0_ocp, sr=False),
+      dict(cfg=fp_numerics.e3m1_ocp, sr=False),
+      dict(cfg=fp_numerics.e2m2_ocp, sr=False),
+      dict(cfg=fp_numerics.e1m3_ocp, sr=False),
+      dict(cfg=fp_numerics.e0m4_ocp, sr=False),
+      dict(cfg=fp_numerics.e4m0_ocp, sr=True),
+      dict(cfg=fp_numerics.e3m1_ocp, sr=True),
+      dict(cfg=fp_numerics.e2m2_ocp, sr=True),
+      dict(cfg=fp_numerics.e1m3_ocp, sr=True),
+      dict(cfg=fp_numerics.e0m4_ocp, sr=True),
+      # FP6
+      dict(cfg=fp_numerics.e5m0_ocp, sr=False),
+      dict(cfg=fp_numerics.e4m1_ocp, sr=False),
+      dict(cfg=fp_numerics.e3m2_ocp, sr=False),
+      dict(cfg=fp_numerics.e2m3_ocp, sr=False),
+      dict(cfg=fp_numerics.e1m4_ocp, sr=False),
+      dict(cfg=fp_numerics.e0m5_ocp, sr=False),
+      dict(cfg=fp_numerics.e5m0_ocp, sr=True),
+      dict(cfg=fp_numerics.e4m1_ocp, sr=True),
+      dict(cfg=fp_numerics.e3m2_ocp, sr=True),
+      dict(cfg=fp_numerics.e2m3_ocp, sr=True),
+      dict(cfg=fp_numerics.e1m4_ocp, sr=True),
+      dict(cfg=fp_numerics.e0m5_ocp, sr=True),
       # minexp not implemented, hence the following cfgs are skipped
       # dict(cfg=fp_numerics.float8_e4m3fn),
       # dict(cfg=fp_numerics.float8_e5m2),
       # dict(cfg=fp_numerics.float16),
+      # Misc
+      dict(cfg=fp_numerics.e1m0, sr=False),
+      dict(cfg=fp_numerics.e1m0, sr=True),
+      dict(cfg=fp_numerics.e1m2, sr=False),
+      dict(cfg=fp_numerics.e1m2, sr=True),
   ])
   def test_fp_round_old_vs_new(
       self, cfg: fp_numerics.FpNumericsConfig, sr: bool
@@ -473,6 +542,20 @@ class FpTest(parameterized.TestCase):
       )
       assert (out[~nan_mask] == out_new[~nan_mask]).all()
       assert jnp.isnan(out_new[nan_mask]).all()
+
+  def test_e1m2_vs_e0m3(self):
+    e1m2 = fp_numerics.FpNumerics(cfg=fp_numerics.e1m2_ocp)
+    e0m3 = fp_numerics.FpNumerics(cfg=fp_numerics.e0m3_ocp)
+    context = utils.Context(key=None, train_step=None)
+    key = jax.random.PRNGKey(42)
+    x = jax.random.normal(key, shape=(64, 64), dtype=jnp.bfloat16)
+    x = x / jnp.abs(x).max()
+    e1m2_input = x * e1m2.abs_val_mapped_to()
+    e0m3_input = x * e0m3.abs_val_mapped_to()
+    assert (e1m2_input == (e0m3_input * 2)).all()
+    y_e1m2, _ = e1m2.vjp_fwd(e1m2_input, context=context)
+    y_e0m3, _ = e0m3.vjp_fwd(e0m3_input, context=context)
+    assert (y_e1m2 == y_e0m3 * 2).all()
 
 
 if __name__ == "__main__":
