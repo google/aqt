@@ -65,7 +65,7 @@ class Calibration(abc.ABC):
 
 @utils.flax_slots_kw_only_dataclass
 class ConstantCalibration(Calibration):
-  """Calibration with a constant per-tensor value."""
+  """Calibration with a constant per-tensor or per-channel value."""
 
   bound: Union[jnp.ndarray, float]
   bias: Union[jnp.ndarray, float] | None = None
@@ -78,14 +78,24 @@ class ConstantCalibration(Calibration):
       context: utils.Context | None = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     del shared_axes, context
-    assert self.bound > 0, 'Bound should be positive.'
+    if isinstance(self.bound, float) and self.bound <= 0.0:
+      raise ValueError(f'{self.bound=} should be positive.')
     dtype = self.dtype if self.dtype is not None else x.dtype
 
     # TODO(yichizh): hardcode bf16 for the scales, subject to quality evaluation
-    bound = jnp.full(x.shape, self.bound, x.dtype)
+    bound = self.bound
+    if jnp.isscalar(bound):
+      bound = jnp.full(x.shape, bound, x.dtype)
     scale = bound / numerics_.abs_val_mapped_to()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
-    bias = [] if self.bias is None else [jnp.full(x.shape, self.bias, dtype)]
+
+    if self.bias is None:
+      bias = []
+    elif jnp.isscalar(self.bias) or isinstance(self.bias, float):
+      # floats are scalars, but pytype can't infer that.
+      bias = [jnp.full(x.shape, self.bias, x.dtype)]
+    else:
+      bias = [self.bias.astype(dtype)]
     return [scale.astype(dtype)], bias
 
 
