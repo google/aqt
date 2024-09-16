@@ -18,9 +18,6 @@ import abc
 class AqtNumerics(abc.ABC):
   """Numerics for int8, int4, binary, etc."""
 
-  # TODO(lew): Currently this is a part of API, only because it is used to set
-  # it in test. Remove and leave only get_dtype(
-
   @abc.abstractmethod
   def get_dtype(self):
     pass
