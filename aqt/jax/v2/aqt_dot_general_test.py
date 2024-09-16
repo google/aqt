@@ -204,6 +204,7 @@ def _modify_dg(
     lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     use_fwd_quant: bool | None = None,
+    disable_rounding: bool = False,
     fwd_lhs_tricky_clip_and_round: bool = False,
     local_aqt: aqt.LocalAqt | None = None,
     clip_gradient: bool = False,
@@ -250,7 +251,7 @@ def _modify_dg(
     )
     _disable_quant_types(c, disable_lhs_quant, disable_rhs_quant)
 
-  if use_fwd_quant is not None:
+  if disable_rounding:
     # If we disable all rounding, we are just testing whether the scales are
     # correct. We don't even need to disable clipping and we are testing
     # that the scales are not too large.
@@ -268,16 +269,13 @@ def _modify_dg(
     disable_quant(dg.fwd)
     disable_quant(dg.dlhs)
     disable_quant(dg.drhs)
-    lhs_quant = not isinstance(
-        dg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics
-    )
-    rhs_quant = not isinstance(
-        dg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics
-    )
-    if lhs_quant:
+
+  if use_fwd_quant is not None:
+    if not isinstance(dg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics):
       dg.drhs.rhs.use_fwd_quant = use_fwd_quant
-    if rhs_quant:
+    if not isinstance(dg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics):
       dg.dlhs.rhs.use_fwd_quant = use_fwd_quant
+
   if local_aqt is not None:
     # Currently we are not supporting local_aqt in fwd pass
     # dg.fwd.local_aqt = local_aqt
@@ -303,6 +301,7 @@ def _aqt_dg_full_lr_diff(
     lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     use_fwd_quant: bool | None = None,
+    disable_rounding: bool = False,
     fwd_lhs_tricky_clip_and_round: bool = False,
     local_aqt: aqt.LocalAqt | None = None,
     *,
@@ -317,6 +316,7 @@ def _aqt_dg_full_lr_diff(
       lhs_calibration_mode=lhs_calibration_mode,
       rhs_calibration_mode=rhs_calibration_mode,
       use_fwd_quant=use_fwd_quant,
+      disable_rounding=disable_rounding,
       fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
       local_aqt=local_aqt,
       clip_gradient=clip_gradient,
@@ -329,6 +329,7 @@ def _aqt_dg_full(
     dequant_mode: aqt.DequantMode,
     calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     use_fwd_quant: bool | None = None,
+    disable_rounding: bool = False,
     fwd_lhs_tricky_clip_and_round: bool = False,
     local_aqt: aqt.LocalAqt | None = None,
     *,
@@ -337,16 +338,17 @@ def _aqt_dg_full(
     clip_gradient: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   return _aqt_dg_full_lr_diff(
-      dequant_mode,
-      dequant_mode,
-      calibration_mode,
-      calibration_mode,
-      use_fwd_quant,
-      fwd_lhs_tricky_clip_and_round,
-      local_aqt,
+      lhs_dequant_mode=dequant_mode,
+      rhs_dequant_mode=dequant_mode,
+      lhs_calibration_mode=calibration_mode,
+      rhs_calibration_mode=calibration_mode,
+      use_fwd_quant=use_fwd_quant,
+      disable_rounding=disable_rounding,
+      fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
+      local_aqt=local_aqt,
       readonly_dg=readonly_dg,
       dims=dims,
-      clip_gradient=clip_gradient
+      clip_gradient=clip_gradient,
   )
 
 
@@ -611,13 +613,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     check([
         (
-            "fwd_quant=T",
-            aqt_dg_full(aqt.DequantMode.OUTPUT, use_fwd_quant=False),
+            "fwd_quant=F",
+            aqt_dg_full(
+                aqt.DequantMode.OUTPUT,
+                use_fwd_quant=False,
+                disable_rounding=True,
+            ),
             dict(),
         ),
         (
-            "fwd_quant=F",
-            aqt_dg_full(aqt.DequantMode.OUTPUT, use_fwd_quant=True),
+            "fwd_quant=T",
+            aqt_dg_full(
+                aqt.DequantMode.OUTPUT,
+                use_fwd_quant=True,
+                disable_rounding=True,
+            ),
             dict(),
         ),
     ])
@@ -958,12 +968,20 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     check([
         (
             "CA         ",
-            aqt_dg_full(aqt.DequantMode.OUTPUT, use_fwd_quant=False),
+            aqt_dg_full(
+                aqt.DequantMode.OUTPUT,
+                use_fwd_quant=False,
+                disable_rounding=True,
+            ),
             dict(),
         ),
         (
             "CA fake    ",
-            aqt_dg_full(aqt.DequantMode.THIS_INPUT, use_fwd_quant=False),
+            aqt_dg_full(
+                aqt.DequantMode.THIS_INPUT,
+                use_fwd_quant=False,
+                disable_rounding=True,
+            ),
             dict(),
         ),
         (
