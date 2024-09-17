@@ -58,7 +58,7 @@ class IntNumerics(numerics.AqtNumerics):
   def get_center_of_last_int_bucket(self):
     return self.get_edge_of_last_int_bucket() - 0.5
 
-  def abs_val_mapped_to(self):
+  def get_quant_bound(self):
     if self.preserve_max_val:
       return self.get_center_of_last_int_bucket()
     else:

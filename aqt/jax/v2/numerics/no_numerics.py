@@ -33,7 +33,7 @@ class NoNumerics(numerics.AqtNumerics):
   def get_dtype(self):
     return None
 
-  def abs_val_mapped_to(self):
+  def get_quant_bound(self):
     pass
 
   def vjp_fwd(self, x, context):

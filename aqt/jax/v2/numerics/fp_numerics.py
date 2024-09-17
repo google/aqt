@@ -562,7 +562,7 @@ class FpNumerics(numerics.AqtNumerics):
   stochastic_rounding: bool = utils.static_field(default=False)
   clip_gradient: bool = utils.static_field(default=False)
 
-  def abs_val_mapped_to(self):
+  def get_quant_bound(self):
     return fp_largest_representable(cfg=self.cfg)
 
   def get_dtype(self):
@@ -582,6 +582,6 @@ class FpNumerics(numerics.AqtNumerics):
     ret = grad
     if self.clip_gradient:
       (x,) = res
-      clip_bound = self.abs_val_mapped_to()
+      clip_bound = self.get_quant_bound()
       ret *= (-clip_bound <= x) * (x <= clip_bound)
     return (ret, None)

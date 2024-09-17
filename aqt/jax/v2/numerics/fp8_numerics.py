@@ -73,7 +73,7 @@ class Fp8Numerics(numerics.AqtNumerics):
   def get_dtype(self):
     return self.dtype
 
-  def abs_val_mapped_to(self):
+  def get_quant_bound(self):
     return self._get_edge_of_last_fp8_bucket()
 
   def vjp_fwd(self, x, context):

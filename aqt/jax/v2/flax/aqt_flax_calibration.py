@@ -83,7 +83,7 @@ class MeanOfAbsMaxCalibration(calibration.Calibration, nn.Module):
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     dtype = self.dtype if self.dtype is not None else x.dtype
     bound = self.get_bound(x, shared_axes, context)
-    scale = bound / numerics_.abs_val_mapped_to()
+    scale = bound / numerics_.get_quant_bound()
     scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
     return [scale.astype(dtype)], []
 
@@ -246,6 +246,6 @@ class WeightedStatsCalibration(calibration.Calibration, nn.Module):
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     dtype = self.dtype if self.dtype is not None else x.dtype
     bound = self.get_bound(x, shared_axes, context)
-    scale = bound / numerics_.abs_val_mapped_to()
+    scale = bound / numerics_.get_quant_bound()
     scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
     return [scale.astype(dtype)], []

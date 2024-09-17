@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for dot_general."""
 import copy
 import functools
 from typing import Callable
@@ -179,7 +178,7 @@ class _TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
   def get_dtype(self):
     return self.dtype
 
-  def abs_val_mapped_to(self) -> jnp.ndarray:
+  def get_quant_bound(self) -> jnp.ndarray:
     return jnp.array(1.0)
 
   def fwd(self, x, context):

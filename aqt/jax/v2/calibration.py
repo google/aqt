@@ -86,7 +86,7 @@ class ConstantCalibration(Calibration):
     bound = self.bound
     if jnp.isscalar(bound):
       bound = jnp.full(x.shape, bound, x.dtype)
-    scale = bound / numerics_.abs_val_mapped_to()
+    scale = bound / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
 
     if self.bias is None:
@@ -148,7 +148,7 @@ class AbsMaxCalibration(Calibration):
     abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
     bound = abs_max * self.clipping_scale if self.clipping_scale else abs_max
 
-    scale = bound / numerics_.abs_val_mapped_to()
+    scale = bound / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
     return [scale.astype(dtype)], []
 
@@ -185,7 +185,7 @@ class AbsMeanCalibration(Calibration):
     abs_mean = abs_mean * self.clipping_scale
     abs_mean = jnp.where(abs_mean == 0.0, jnp.ones_like(abs_mean), abs_mean)
 
-    scale = abs_mean / numerics_.abs_val_mapped_to()
+    scale = abs_mean / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
     return [scale.astype(dtype)], []
 
@@ -274,7 +274,7 @@ class SnrBasedAutoCalibration(Calibration):
 
     # TODO(b/339746869): Generate a simple report for the clip distribution.
     bound = abs_max * best_subchannel_clip_scales
-    scale = bound / numerics_.abs_val_mapped_to()
+    scale = bound / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
     return [scale.astype(dtype)], []
 
@@ -369,7 +369,7 @@ class SnrBasedAutoCalibration(Calibration):
       The SNR tensor containing the SNR values for each subchannel group. Its
       shape will be the same as `x.shape` but with `shared_axes` collapsed to 1.
     """
-    scale = bound / numerics_.abs_val_mapped_to()
+    scale = bound / numerics_.get_quant_bound()
     scale = scale.astype(self.dtype if self.dtype is not None else x.dtype)
 
     q_tensor = aqt_tensor.QTensor(
