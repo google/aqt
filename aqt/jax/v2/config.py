@@ -143,7 +143,9 @@ def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
   # of 128, we use this setter to enable int2 dtype.
   # Remove this setter and enable int2 in utils.infer_dtype_from_bits()
   # when XLA supports general int2 casting.
-  assert isinstance(cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics)
+  assert isinstance(
+      cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric
+  )
   assert cfg.fwd.dg_quantizer.rhs.numerics.bits == 2
   # Disable pytype check since jnp.int2 is only dynamically to jax
   # when ml_dtypes package has it.
@@ -279,7 +281,7 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
     dg_quantizer = dot_general_raw.dg_quantizer
     for q_numerics in [dg_quantizer.lhs.numerics, dg_quantizer.rhs.numerics]:
-      if isinstance(q_numerics, int_numerics.IntNumerics):
+      if isinstance(q_numerics, int_numerics.IntSymmetric):
         q_numerics.preserve_zero = preserve_zero
         updated_dtype = (
             utils.infer_dtype_from_bits(q_numerics.bits)  # pytype: disable=attribute-error
@@ -361,7 +363,7 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
           **keywords,
       )
       if scale < 1.0 and isinstance(
-          quantizer.numerics, int_numerics.IntNumerics
+          quantizer.numerics, int_numerics.IntSymmetric
       ):
         quantizer.numerics.clip_gradient = True
 

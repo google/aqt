@@ -22,8 +22,8 @@ import jax.numpy as jnp
 
 
 @utils.flax_slots_kw_only_dataclass
-class IntNumerics(numerics.AqtNumerics):
-  """Numerics for int8, int4, binary, etc."""
+class IntSymmetric(numerics.AqtNumerics):
+  """Symmetric numerics for sint8, sint4, binary, etc."""
 
   bits: int
   preserve_zero: bool

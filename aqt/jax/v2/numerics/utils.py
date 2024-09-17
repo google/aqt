@@ -37,7 +37,7 @@ def get_numerics(
   else:
     pz = False if bits == 1 else True
     dtype = utils.infer_dtype_from_bits(bits) if pz else None
-    effective_numerics = int_numerics.IntNumerics(
+    effective_numerics = int_numerics.IntSymmetric(
         bits=bits,
         preserve_zero=pz,
         preserve_max_val=preserve_max_val,

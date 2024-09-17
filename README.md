@@ -169,7 +169,7 @@ from aqt.jax.v2 import utils as aqt_utils
 from aqt.jax.v2.numerics import int_numerics
 
 q = aqt_quantizer.Quantizer(
-    numerics=int_numerics.IntNumerics(
+    numerics=int_numerics.IntSymmetric(
         bits=4,
         preserve_zero=True,
         preserve_max_val=True,

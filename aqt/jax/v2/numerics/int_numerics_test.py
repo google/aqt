@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for int_numerics."""
 
 import operator
 
@@ -54,7 +53,7 @@ def assert_array_greater_or_equal(x, y, err_msg='', verbose=True):
   )
 
 
-class IntNumericsTest(parameterized.TestCase):
+class IntSymmetricTest(parameterized.TestCase):
 
   @parameterized.product(
       bits=[2, 4],
@@ -72,7 +71,7 @@ class IntNumericsTest(parameterized.TestCase):
     sint_min_restricted = sint_min + 1
 
     def quantize(x):
-      numerics_ = int_numerics.IntNumerics(
+      numerics_ = int_numerics.IntSymmetric(
           bits=bits,
           preserve_zero=preserve_zero,
           preserve_max_val=preserve_max_val,

@@ -42,10 +42,10 @@ def update_cfg_with_gptq(aqt_cfg: aqt_dot_general.DotGeneral) -> None:
       aqt_cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
   assert isinstance(
-      aqt_cfg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntNumerics
+      aqt_cfg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric
   )
   assert isinstance(
-      aqt_cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics
+      aqt_cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric
   )
   lhs_bits = aqt_cfg.fwd.dg_quantizer.lhs.numerics.bits
   rhs_bits = aqt_cfg.fwd.dg_quantizer.rhs.numerics.bits

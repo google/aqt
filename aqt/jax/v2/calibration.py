@@ -105,7 +105,7 @@ class AbsMaxCalibration(Calibration):
 
   Attributes:
     clipping_scale: Set it to something like 0.3, 0.1, 0.03. If clipping_scale <
-      1.0, setting IntNumerics.clip_gradient=True is likely to be important.
+      1.0, setting IntSymmetric.clip_gradient=True is likely to be important.
   """
 
   clipping_scale: float | None = None
@@ -141,7 +141,7 @@ class AbsMaxCalibration(Calibration):
     dtype = self.dtype if self.dtype is not None else x.dtype
 
     # NOTE: If you use a clipping_scale, consider using clip and clip_gradient
-    # in int_numerics.IntNumerics.
+    # in int_numerics.IntSymmetric.
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     # TODO(yichizh): the zero filtering is not needed anymore because inf is
     # filtered when calculating the reciprocal of scaling factor
@@ -159,7 +159,7 @@ class AbsMeanCalibration(Calibration):
 
   Attributes:
     clipping_scale: If clipping_scale < 1.0, setting
-      IntNumerics.clip_gradient=True is likely to be important.
+      IntSymmetric.clip_gradient=True is likely to be important.
     p: Set it to 1 for mean of absolute scaling.
   """
 

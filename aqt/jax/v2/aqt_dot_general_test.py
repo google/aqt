@@ -256,11 +256,11 @@ def _modify_dg(
     # that the scales are not too large.
     def disable_quant(c):
       _disable_quant_types(c)
-      if isinstance(c.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
+      if isinstance(c.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):
         c.dg_quantizer.lhs.numerics = (
             c.dg_quantizer.lhs.numerics.replace(round=False)
         )
-      if isinstance(c.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
+      if isinstance(c.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
         c.dg_quantizer.rhs.numerics = (
             c.dg_quantizer.rhs.numerics.replace(round=False)
         )
@@ -282,11 +282,11 @@ def _modify_dg(
     dg.drhs.local_aqt = local_aqt
 
     # When using abs-max scaling, this should be a no-op.
-  if isinstance(dg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
+  if isinstance(dg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):
     dg.fwd.dg_quantizer.lhs.numerics = (
         dg.fwd.dg_quantizer.lhs.numerics.replace(clip_gradient=clip_gradient)
     )
-  if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
+  if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
     dg.fwd.dg_quantizer.rhs.numerics = (
         dg.fwd.dg_quantizer.rhs.numerics.replace(clip_gradient=clip_gradient)
     )
@@ -404,7 +404,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_fq_noise(self, preserve_zero, prec, v, seed):
     key = jax.random.PRNGKey(seed)
     quantizer = config.quantizer_make(prec)
-    if isinstance(quantizer.numerics, int_numerics.IntNumerics):
+    if isinstance(quantizer.numerics, int_numerics.IntSymmetric):
       quantizer.numerics.preserve_zero = preserve_zero
       if not preserve_zero:
         quantizer.numerics.dtype = None
@@ -652,7 +652,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     if isinstance(
         readonly_dg.fwd.dg_quantizer.lhs.numerics,
-        int_numerics.IntNumerics,
+        int_numerics.IntSymmetric,
     ):
       check([
           (
@@ -1089,7 +1089,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_per_tensor(self):
     # TODO(lew): bits=8 started failing in VLP colab due x/x != 1.0 sometimes
     bits = 4
-    my_numerics = int_numerics.IntNumerics(
+    my_numerics = int_numerics.IntSymmetric(
         bits=bits,
         preserve_zero=True,
         preserve_max_val=False,

@@ -270,11 +270,11 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
     # Follow the quantization mode and num_bits of the kernel.
     if self.is_rhs_kernel:
       quant_mode = _get_quant_mode(self.rhs.context)
-      assert isinstance(self.rhs.numerics, int_numerics.IntNumerics)
+      assert isinstance(self.rhs.numerics, int_numerics.IntSymmetric)
       num_bits = self.rhs.numerics.bits
     else:
       quant_mode = _get_quant_mode(self.lhs.context)
-      assert isinstance(self.lhs.numerics, int_numerics.IntNumerics)
+      assert isinstance(self.lhs.numerics, int_numerics.IntSymmetric)
       num_bits = self.lhs.numerics.bits
 
     if quant_mode == utils.QuantMode.TRAIN:
