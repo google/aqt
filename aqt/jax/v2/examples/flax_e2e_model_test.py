@@ -61,7 +61,7 @@ class MnistTest(parameterized.TestCase):
       ),
   ])
   def test_mnist_training(self, configs, bits):
-    aqt_cfg = config.config_v4(**configs)
+    aqt_cfg_dg = config.config_v4(**configs)
     target_loss = {
         8: {
             "cpu": [
@@ -83,9 +83,9 @@ class MnistTest(parameterized.TestCase):
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
-    config.set_stochastic_rounding(aqt_cfg, True, True, "jax.uniform")
-    aqt_cfg.dlhs.rhs.use_fwd_quant = True
-    aqt_cfg.drhs.rhs.use_fwd_quant = True
+    config.set_stochastic_rounding(aqt_cfg_dg, True, True, "jax.uniform")
+    aqt_cfg_dg.dlhs.rhs.use_fwd_quant = True
+    aqt_cfg_dg.drhs.rhs.use_fwd_quant = True
 
     def forward(model, apply_fn):
       return apply_fn(
@@ -108,7 +108,7 @@ class MnistTest(parameterized.TestCase):
     ds = _dummy_dataset(ds_size, image_rng, label_rng)
 
     # Stage 1: regular training
-    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg_dg=aqt_cfg_dg)
 
     state, train_loss, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size=ds_size // 2, rng=input_rng
@@ -263,6 +263,261 @@ class MnistTest(parameterized.TestCase):
   @parameterized.parameters([
       (
           {
+              "fwd_bits": 8,
+              "fwd_accumulator_dtype": None,
+              "dlhs_accumulator_dtype": None,
+          },
+          8,
+      ),
+      (
+          {
+              "fwd_bits": 4,
+              "fwd_accumulator_dtype": None,
+              "dlhs_accumulator_dtype": None,
+          },
+          4,
+      ),
+  ])
+  def test_mnist_training_quantized_conv(self, configs, bits):
+    aqt_cfg_dg = config.config_v4(**configs)
+    aqt_cfg_conv = config.conv_general_dilated_make(
+        2, lhs_bits=bits, rhs_bits=bits, initialize_calibration=False
+    )
+    if aqt_cfg_conv.lhs:
+      aqt_cfg_conv.dg_quantizer.lhs.init_calibration()
+    if aqt_cfg_conv.rhs:
+      aqt_cfg_conv.dg_quantizer.rhs.init_calibration()
+    device_kind = jax.devices()[0].device_kind
+    if device_kind == "cpu" and bits == 4:
+      # Some 4-bit operations are not supported on cpu.
+      # Omitting tests on cpu with 4-bits.
+      return
+    target_loss = {
+        8: {
+            "cpu": [2.302584648132324218750000000000],
+            "TPU v2": [2.302581071853637695312500000000],
+            "TPU v3": [2.302581071853637695312500000000],
+            "TPU v4": [2.302581071853637695312500000000,],
+            "TPU v5 lite": [2.302581071853637695312500000000],
+        },
+        4: {
+            "TPU v2": [2.302409172058105468750000000000],
+            "TPU v3": [2.302409172058105468750000000000],
+            "TPU v4": [2.302409172058105468750000000000],
+            "TPU v5 lite": [2.302409172058105468750000000000],
+        },
+    }
+    # below 3 lines are differences between config_v4/v3 and fully_quantized
+    config.set_stochastic_rounding(aqt_cfg_dg, True, True, "jax.uniform")
+    aqt_cfg_dg.dlhs.rhs.use_fwd_quant = True
+    aqt_cfg_dg.drhs.rhs.use_fwd_quant = True
+
+    def forward(model, apply_fn):
+      return apply_fn(
+          model,
+          ds["image"],
+          rngs={"params": jax.random.PRNGKey(0)},
+          mutable=True,
+      )
+
+    # RNGs
+    rng = jax.random.key(0)
+    rng, init_rng = jax.random.split(rng)
+    rng, image_rng = jax.random.split(rng)
+    rng, label_rng = jax.random.split(rng)
+    rng, input_rng = jax.random.split(rng)
+    del rng
+
+    # Dataset
+    ds_size = 8
+    ds = _dummy_dataset(ds_size, image_rng, label_rng)
+
+    # Stage 1: regular training
+    state = flax_e2e_model.create_train_state(
+        init_rng, aqt_cfg_dg=aqt_cfg_dg, aqt_cfg_conv=aqt_cfg_conv)
+
+    state, train_loss, _ = flax_e2e_model.train_epoch(
+        state, ds, batch_size=ds_size // 2, rng=input_rng
+    )
+
+    device_kind = jax.devices()[0].device_kind
+    expected_train_loss = target_loss[bits][device_kind]
+    if train_loss not in expected_train_loss:
+      msg = "train_loss changed. Consider updating with the following:\n"
+      msg += f'        "{device_kind}": [{train_loss:.30f}]'
+      self.fail(msg)
+
+    # Run forward once more in the same mode to get logits for testing below.
+    logits_s1, _ = forward(state.model, state.cnn_eval.apply)
+
+    # Stage 2: Model conversion (quantized weights freezing)
+
+    apply_serving, model_serving = flax_e2e_model.serving_conversion(state)
+
+    dtype = jnp.dtype
+    expected_dtype = jnp.int4 if bits == 4 else jnp.int8
+    expected_aqt_pytree = {
+        "aqt": {
+            "AqtEinsum_0": {
+                "AqtDotGeneral_0": {
+                    "qlhs": {
+                        "frozen": aqt_tensor.QTensor(
+                            qvalue=(expected_dtype, (2, 5, 10)),
+                            scale=[(dtype("float32"), (2, 1, 10))],
+                            scale_t=None,
+                            bias=[],
+                            dequant_dtype=dtype("float32"),
+                            tiling_state=None,
+                        )
+                    }
+                }
+            },
+            "Conv_0": {
+                "AqtConvGeneralDilated_0": {
+                    "qrhs": {
+                        "frozen": aqt_tensor.QTensor(
+                            qvalue=(expected_dtype, (3, 3, 1, 32)),
+                            scale=[(dtype("float32"), (1, 1, 1, 32))],
+                            scale_t=None,
+                            bias=[],
+                            dequant_dtype=dtype("float32"),
+                            tiling_state=None)
+                    }
+                }
+            },
+            "Conv_1": {
+                "AqtConvGeneralDilated_0": {
+                    "qrhs": {"frozen": aqt_tensor.QTensor(
+                        qvalue=(expected_dtype, (3, 3, 32, 64)),
+                        scale=[(dtype("float32"), (1, 1, 1, 64))],
+                        scale_t=None,
+                        bias=[],
+                        dequant_dtype=dtype("float32"),
+                        tiling_state=None,
+                        )
+                             }
+                    }
+                },
+            "Dense_0": {
+                "AqtDotGeneral_0": {
+                    "qrhs": {
+                        "frozen": aqt_tensor.QTensor(
+                            # The weight shape was (3136, 256) before tiling.
+                            # After tiling it is (2, 1568, 256).
+                            # Contraction shape 3136 is tiled to (2, 1568).
+                            # The remaining shape 256 is not tiled.
+                            qvalue=(expected_dtype, (2, 1568, 256)),
+                            scale=[(dtype("float32"), (2, 1, 256))],
+                            # The scale_t shape was (1, 256) before tiling.
+                            # After tiling the scale shape is (2, 1, 256),
+                            # then transposed to (2, 1, 256).
+                            scale_t=None,
+                            bias=[],
+                            dequant_dtype=dtype("float32"),
+                            tiling_state=None,
+                        )
+                    }
+                }
+            },
+            "Dense_1": {
+                "AqtDotGeneral_0": {
+                    "qrhs": {
+                        "frozen": aqt_tensor.QTensor(
+                            # The weight shape was (256, 10) before tiling.
+                            # After tiling it is (2, 128, 10).
+                            # Contraction shape 256 is tiled to (2, 128).
+                            # The remaining shape 10 is not tiled.
+                            qvalue=(expected_dtype, (2, 128, 10)),
+                            scale=[(dtype("float32"), (2, 1, 10))],
+                            # The scale_t shape was (1, 10) before tiling.
+                            # After tiling the scale shape is (2, 1, 10),
+                            # then transposed to (2, 1, 10).
+                            scale_t=None,
+                            bias=[],
+                            dequant_dtype=dtype("float32"),
+                            tiling_state=None,
+                        )
+                    }
+                }
+            },
+        },
+        "batch_stats": {
+            "BatchNorm_0": {
+                "mean": (dtype("float32"), (32,)),
+                "var": (dtype("float32"), (32,)),
+            },
+            "BatchNorm_1": {
+                "mean": (dtype("float32"), (64,)),
+                "var": (dtype("float32"), (64,)),
+            },
+        },
+        "params": {
+            "BatchNorm_0": {
+                "bias": (dtype("float32"), (32,)),
+                "scale": (dtype("float32"), (32,)),
+            },
+            "BatchNorm_1": {
+                "bias": (dtype("float32"), (64,)),
+                "scale": (dtype("float32"), (64,)),
+            },
+            "Conv_0": {
+                "bias": (dtype("float32"), (32,)),
+                "kernel": (dtype("float32"), (3, 3, 1, 32)),
+            },
+            "Conv_1": {
+                "bias": (dtype("float32"), (64,)),
+                "kernel": (dtype("float32"), (3, 3, 32, 64)),
+            },
+            "Dense_0": {
+                "bias": (dtype("float32"), (256,)),
+                "kernel": (dtype("float32"), (3136, 256)),
+            },
+            "Dense_1": {
+                "bias": (dtype("float32"), (10,)),
+                "kernel": (dtype("float32"), (256, 10)),
+            },
+        },
+    }
+
+    serving_pytree = jax.tree_util.tree_map(
+        lambda x: (x.dtype, x.shape), model_serving
+    )
+
+    if serving_pytree != expected_aqt_pytree:
+      print()
+      print("serving_pytree:      ", serving_pytree)
+      print("expected_aqt_pytree: ", expected_aqt_pytree)
+      assert False, "serving_pytree != expected_aqt_pytree"
+
+    def zero_out_params(model, layer: str):
+      updated_model = copy.deepcopy(model)
+      updated_model["params"][layer]["kernel"] = jnp.zeros_like(
+          updated_model["params"][layer]["kernel"]
+      )
+      return updated_model
+
+    # We can, but do not have to delete unquantized weights.
+    model_serving = zero_out_params(model_serving, "Dense_0")
+    model_serving = zero_out_params(model_serving, "Dense_1")
+    model_serving = zero_out_params(model_serving, "Conv_0")
+    model_serving = zero_out_params(model_serving, "Conv_1")
+
+    # Stage 3: inference mode.
+    logits_s3, _ = forward(model_serving, apply_serving)
+    assert (logits_s3 == logits_s1).all()
+
+    # Sanity check 2: Frozen weights are indeed used for inference.
+    #   If we zero them out, loss would change.
+    qt = model_serving[
+        "aqt"
+        ]["Conv_0"]["AqtConvGeneralDilated_0"]["qrhs"]["frozen"]
+    qt.qvalue = jnp.zeros(qt.qvalue.shape).astype(qt.qvalue.dtype)
+    bad_logits, _ = forward(model_serving, apply_serving)
+    assert not (bad_logits == logits_s3).all()
+
+  @parameterized.parameters([
+      (
+          {
               "drhs_bits": 8,
               "drhs_accumulator_dtype": jnp.int32,  # overwrite the default None
           },
@@ -278,7 +533,7 @@ class MnistTest(parameterized.TestCase):
       ),
   ])
   def test_mnist_calibration(self, configs, bits):
-    aqt_cfg = config.config_v4(**configs)
+    aqt_cfg_dg = config.config_v4(**configs)
     device_kind = jax.devices()[0].device_kind
     if device_kind == "cpu" and bits == 4:
       # Some 4-bit operations are not supported on cpu.
@@ -301,15 +556,15 @@ class MnistTest(parameterized.TestCase):
     ds2 = _dummy_dataset(ds_size, image_rng2, label_rng2)
 
     # Stage 1: regular training
-    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg_dg=aqt_cfg_dg)
 
     state, _, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size, rng=input_rng
     )
 
     # Stage 2: Calibration.
-    flax_e2e_model.update_cfg_with_calibration(state.cnn_train.aqt_cfg)
-    flax_e2e_model.update_cfg_with_calibration(state.cnn_eval.aqt_cfg)
+    flax_e2e_model.update_cfg_with_calibration(state.cnn_train.aqt_cfg_dg)
+    flax_e2e_model.update_cfg_with_calibration(state.cnn_eval.aqt_cfg_dg)
     calibrate_f, model_calibrate = flax_e2e_model.calibration_conversion(state)
 
     calibration_steps = 4
@@ -506,7 +761,7 @@ class MnistTest(parameterized.TestCase):
       ),
   ])
   def test_mnist_weighted_stats_calibration(self, configs, bits):
-    aqt_cfg = config.config_v4(**configs)
+    aqt_cfg_dg = config.config_v4(**configs)
     device_kind = jax.devices()[0].device_kind
     if device_kind == "cpu" and bits == 4:
       # Some 4-bit operations are not supported on cpu.
@@ -522,8 +777,8 @@ class MnistTest(parameterized.TestCase):
         const_bound_coeff=1.0,
         quant_collection="qc",
     )
-    config.set_fwd_calibration(aqt_cfg, calibration_cls)
-    aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = "per_tensor"
+    config.set_fwd_calibration(aqt_cfg_dg, calibration_cls)
+    aqt_cfg_dg.fwd.dg_quantizer.lhs.calib_shared_axes = "per_tensor"
 
     # RNGs
     rng = jax.random.key(0)
@@ -538,7 +793,7 @@ class MnistTest(parameterized.TestCase):
     ds = _dummy_dataset(ds_size, image_rng, label_rng)
 
     # Stage 1: Training with collecting stats.
-    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg_dg=aqt_cfg_dg)
 
     state, _, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size, rng=input_rng
@@ -723,8 +978,8 @@ class MnistTest(parameterized.TestCase):
     num_train_steps = ds_size // batch_size
 
     # AQT Config
-    aqt_cfg = config.config_v4()
-    aqt_cfg = config.set_bits(aqt_cfg, *bits)
+    aqt_cfg_dg = config.config_v4()
+    aqt_cfg_dg = config.set_bits(aqt_cfg_dg, *bits)
 
     # Update cfg with DelayedScalingCalibration.
     # Setting history length to be greater than the number of training steps
@@ -734,15 +989,15 @@ class MnistTest(parameterized.TestCase):
         delayed_scaling_calibration.DelayedScalingCalibration,
         amax_history_length=amax_history_length,
     )
-    aqt_cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
-    aqt_cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls
-    aqt_cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
-    aqt_cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
-    aqt_cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
-    aqt_cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg_dg.fwd.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg_dg.fwd.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg_dg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg_dg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg_dg.drhs.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg_dg.drhs.dg_quantizer.rhs.calibration = calibration_cls
 
     # Stage 1: Training with Delayed Scaling Calibration
-    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg_dg=aqt_cfg_dg)
 
     state, _, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size, rng=input_rng
@@ -986,7 +1241,7 @@ class MnistTest(parameterized.TestCase):
     assert (logits_before_conversion == logits_after_conversion).all()
 
   def test_mnist_training_backward_compatibility(self):
-    aqt_cfg = config.config_v4()
+    aqt_cfg_dg = config.config_v4()
 
     def forward(model, apply_fn):
       return apply_fn(
@@ -1009,7 +1264,7 @@ class MnistTest(parameterized.TestCase):
     ds = _dummy_dataset(ds_size, image_rng, label_rng)
 
     # Stage 1: regular training
-    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = flax_e2e_model.create_train_state(init_rng, aqt_cfg_dg=aqt_cfg_dg)
 
     state, _, _ = flax_e2e_model.train_epoch(
         state, ds, batch_size=ds_size // 2, rng=input_rng

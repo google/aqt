@@ -80,7 +80,6 @@ However if there is any other use, we will drop that assumption."""
     cfg.dg_quantizer.assert_calib_shared_axes_value(
         list(range(1, rank)), list(range(0, rank - 1)), msg
     )
-
     (lhs, lhs_incomplete_qt), (rhs, rhs_incomplete_qt) = (
         cfg.dg_quantizer.calibrate((lhs, None), (rhs, None))
     )
@@ -103,14 +102,9 @@ However if there is any other use, we will drop that assumption."""
     lhs_qt = lhs_qt if lhs_qt is not None else lhs_qt_calculated
     rhs_qt = rhs_qt if rhs_qt is not None else rhs_qt_calculated
 
-    # Therefore, cast qvalue back to its original data dtype.
-    # Delete the following two lines when the constraint is lifted.
-    lhs_qt = lhs_qt.qvalue_astype(lhs.dtype)
-    rhs_qt = rhs_qt.qvalue_astype(rhs.dtype)
-
     out = lax.conv_general_dilated(
-        lhs=lhs_qt.qvalue,
-        rhs=rhs_qt.qvalue,
+        lhs=lhs_qt.qvalue_astype(lhs.dtype).qvalue,
+        rhs=rhs_qt.qvalue_astype(rhs.dtype).qvalue,
         window_strides=window_strides,
         padding=padding,
         lhs_dilation=lhs_dilation,

@@ -41,10 +41,40 @@ class CNN(nn.Module):
   """A simple CNN model."""
 
   bn_use_stats: bool
-  aqt_cfg: aqt_config.DotGeneral
+  aqt_cfg_dg: aqt_config.DotGeneral | None = None
+  aqt_cfg_conv: aqt_config.DotGeneralRaw | None = None
   weights_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
   activation_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
   use_legacy_freezer: bool = False
+
+  def get_flax_cls(
+      self,
+      aqt_cfg: aqt_config.DotGeneral | aqt_config.DotGeneralRaw,
+      tiling_cfg: tiled_dot_general.Cfg | None = None):
+    if isinstance(aqt_cfg, aqt_config.DotGeneral):
+      return functools.partial(
+          aqt_flax.AqtDotGeneral,
+          aqt_cfg,
+          lhs_quant_mode=self.activation_quant_mode,
+          rhs_quant_mode=self.weights_quant_mode,
+          tiling_cfg=tiling_cfg,
+          use_legacy_freezer=self.use_legacy_freezer,
+          lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
+          rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
+          )
+
+    if aqt_cfg is None:
+      return None
+    aqt_cfg_conv = aqt_config.default_unquantized_config()
+    aqt_cfg_conv = aqt_cfg_conv.replace(fwd=aqt_cfg)
+    return functools.partial(
+        aqt_flax.AqtConvGeneralDilated,
+        aqt_cfg_conv,
+        lhs_quant_mode=self.activation_quant_mode,
+        rhs_quant_mode=self.weights_quant_mode,
+        lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
+        rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
+    )
 
   @nn.compact
   def __call__(self, x):
@@ -66,22 +96,18 @@ class CNN(nn.Module):
             remaining_axes=[],
         ),
     )
-    aqt_dg = functools.partial(
-        aqt_flax.AqtDotGeneral,
-        self.aqt_cfg,
-        lhs_quant_mode=self.activation_quant_mode,
-        rhs_quant_mode=self.weights_quant_mode,
-        tiling_cfg=tiling_cfg,
-        use_legacy_freezer=self.use_legacy_freezer,
-        lhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION,
-        rhs_freeze_mode=aqt_flax.FreezerMode.CALIBRATION_AND_VALUE,
-    )
+
+    aqt_dg = self.get_flax_cls(self.aqt_cfg_dg, tiling_cfg=tiling_cfg)
+    aqt_conv = self.get_flax_cls(self.aqt_cfg_conv)
+
     use_running_avg = not self.bn_use_stats
-    x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+    x = nn.Conv(
+        features=32, kernel_size=(3, 3), conv_general_dilated_cls=aqt_conv)(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-    x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+    x = nn.Conv(
+        features=64, kernel_size=(3, 3), conv_general_dilated_cls=aqt_conv)(x)
     x = nn.BatchNorm(use_running_average=use_running_avg, dtype=x.dtype)(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
@@ -93,8 +119,9 @@ class CNN(nn.Module):
     # Simple demonstration of how to quantize einsum.
     # Since rhs is activation, we swap the configuration for lhs and rhs, since
     # activation's channelwise config should be set to 'per_tensor'.
-    aqt_cfg_rhs_activation = copy.deepcopy(self.aqt_cfg)
-    aqt_cfg_rhs_activation.fwd.dg_quantizer.swap_lhs_and_rhs()
+    aqt_cfg_rhs_activation = copy.deepcopy(self.aqt_cfg_dg)
+    if self.aqt_cfg_dg is not None:
+      aqt_cfg_rhs_activation.fwd.dg_quantizer.swap_lhs_and_rhs()
 
     identity = jnp.identity(10, dtype=x.dtype)
     einsum = aqt_flax.AqtEinsum(
@@ -221,14 +248,19 @@ class TrainState(struct.PyTreeNode):
   opt_state: optax.OptState = struct.field(pytree_node=True)
 
 
-def create_train_state(rng, aqt_cfg):
+def create_train_state(rng, aqt_cfg_dg=None, aqt_cfg_conv=None):
   """Creates initial `TrainState`."""
-  cnn_train = CNN(bn_use_stats=True, aqt_cfg=aqt_cfg)
+  cnn_train = CNN(
+      bn_use_stats=True, aqt_cfg_dg=aqt_cfg_dg, aqt_cfg_conv=None)
   model = cnn_train.init({'params': rng}, jnp.ones([1, 28, 28, 1]))
   learning_rate = 0.1
   momentum = 0.9
   tx = optax.sgd(learning_rate, momentum)
-  cnn_eval = CNN(bn_use_stats=False, aqt_cfg=aqt_cfg)
+  cnn_eval = CNN(
+      bn_use_stats=False,
+      aqt_cfg_dg=aqt_cfg_dg,
+      aqt_cfg_conv=aqt_cfg_conv
+      )
   return TrainState(
       cnn_train=cnn_train,
       cnn_eval=cnn_eval,
@@ -241,7 +273,8 @@ def create_train_state(rng, aqt_cfg):
 def train_and_evaluate(
     num_epochs: int,
     workdir: str,
-    aqt_cfg: aqt_config.DotGeneral | None = None,
+    aqt_cfg_dg: aqt_config.DotGeneral | None = None,
+    aqt_cfg_conv: aqt_config.DotGeneralRaw | None = None,
     state: TrainState | None = None,
     datasets: tuple[Dataset, Dataset] | None = None,
 ) -> TrainState:
@@ -256,8 +289,11 @@ def train_and_evaluate(
 
   rng, init_rng = jax.random.split(rng)
   if state is None:
-    assert aqt_cfg is not None
-    state = create_train_state(init_rng, aqt_cfg)
+    assert aqt_cfg_dg is not None
+    state = create_train_state(init_rng,
+                               aqt_cfg_dg=aqt_cfg_dg,
+                               aqt_cfg_conv=aqt_cfg_conv
+                               )
 
   batch_size = 128
   for epoch in range(1, num_epochs + 1):
@@ -307,14 +343,16 @@ def serving_conversion(
   Returns:
     A tuple of serving function, and converted model parameters.
   """
-  aqt_cfg = train_state.cnn_eval.aqt_cfg
+  aqt_cfg_dg = train_state.cnn_eval.aqt_cfg_dg
+  aqt_cfg_conv = train_state.cnn_eval.aqt_cfg_conv
   input_shape = (1, 28, 28, 1)
   activation_quant_mode = (
       utils.QuantMode.TRAIN if weight_only else utils.QuantMode.CONVERT
   )
   cnn_freeze = CNN(
       bn_use_stats=False,
-      aqt_cfg=aqt_cfg,
+      aqt_cfg_dg=aqt_cfg_dg,
+      aqt_cfg_conv=aqt_cfg_conv,
       weights_quant_mode=utils.QuantMode.CONVERT,
       activation_quant_mode=activation_quant_mode,
       use_legacy_freezer=legacy_for_freeze,
@@ -331,7 +369,8 @@ def serving_conversion(
   )
   cnn_serve = CNN(
       bn_use_stats=False,
-      aqt_cfg=aqt_cfg,
+      aqt_cfg_dg=aqt_cfg_dg,
+      aqt_cfg_conv=aqt_cfg_conv,
       weights_quant_mode=utils.QuantMode.SERVE,
       activation_quant_mode=activation_quant_mode,
       use_legacy_freezer=legacy_for_serve,
@@ -376,6 +415,19 @@ def update_cfg_with_calibration(aqt_cfg):
   aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = 'per_tensor'
 
 
+def update_cfg_raw_with_calibration(aqt_cfg_raw):
+  """Updates aqt_cfg for static range calibration."""
+  sr_calibration_cls = functools.partial(
+      aqt_flax_calibration.MeanOfAbsMaxCalibration,
+      quant_collection='qc',
+  )
+
+  aqt_cfg_raw.dg_quantizer.lhs.calibration = sr_calibration_cls
+  aqt_cfg_raw.dg_quantizer.rhs.calibration = sr_calibration_cls
+
+  aqt_cfg_raw.dg_quantizer.lhs.calib_shared_axes = 'per_tensor'
+
+
 def calibration_conversion(
     train_state: TrainState,
 ) -> tuple[Callable[..., Any], dict[str, Any]]:
@@ -393,7 +445,8 @@ def calibration_conversion(
   """
   cnn_calibrate = CNN(
       bn_use_stats=False,
-      aqt_cfg=train_state.cnn_eval.aqt_cfg,
+      aqt_cfg_dg=train_state.cnn_eval.aqt_cfg_dg,
+      aqt_cfg_conv=train_state.cnn_eval.aqt_cfg_conv,
       # Both side should be calibrated.
       weights_quant_mode=utils.QuantMode.CALIBRATE,
       activation_quant_mode=utils.QuantMode.CALIBRATE,
@@ -494,14 +547,14 @@ def main(argv):
   del argv
 
   # 1. TRAIN.
-  aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+  aqt_cfg_dg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
   state = train_and_evaluate(
-      num_epochs=1, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
+      num_epochs=1, workdir='/tmp/aqt_mnist_example', aqt_cfg_dg=aqt_cfg_dg
   )
 
   # 2. Calibration.
-  update_cfg_with_calibration(state.cnn_train.aqt_cfg)
-  update_cfg_with_calibration(state.cnn_eval.aqt_cfg)
+  update_cfg_with_calibration(state.cnn_train.aqt_cfg_dg)
+  update_cfg_with_calibration(state.cnn_eval.aqt_cfg_dg)
   state = calibrate(state, calibration_steps=10)
 
   # 3. TRAIN with the calibrated stats.

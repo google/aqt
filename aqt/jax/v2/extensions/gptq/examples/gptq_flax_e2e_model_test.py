@@ -38,7 +38,7 @@ def _dummy_dataset(ds_size, image_rng, label_rng):
 class GptqTest(parameterized.TestCase):
 
   def test_gptq(self):
-    aqt_cfg = config.config_v4()
+    aqt_cfg_dg = config.config_v4()
 
     # RNGs
     rng = jax.random.key(0)
@@ -54,15 +54,16 @@ class GptqTest(parameterized.TestCase):
     ds = _dummy_dataset(ds_size, image_rng, label_rng)
 
     # Stage 1: regular training
-    state = gptq_flax_e2e_model.create_train_state(init_rng, aqt_cfg)
+    state = gptq_flax_e2e_model.create_train_state(
+        init_rng, aqt_cfg_dg=aqt_cfg_dg)
 
     state, _, _ = gptq_flax_e2e_model.train_epoch(
         state, ds, batch_size, rng=input_rng
     )
 
     # Stage 2: Calibration.
-    gptq_flax_e2e_model.update_cfg_with_gptq(state.cnn_train.aqt_cfg)
-    gptq_flax_e2e_model.update_cfg_with_gptq(state.cnn_eval.aqt_cfg)
+    gptq_flax_e2e_model.update_cfg_with_gptq(state.cnn_train.aqt_cfg_dg)
+    gptq_flax_e2e_model.update_cfg_with_gptq(state.cnn_eval.aqt_cfg_dg)
 
     calibrate_f, model_calibrate = gptq_flax_e2e_model.calibration_conversion(
         state

@@ -62,9 +62,11 @@ def main(argv):
   del argv
 
   # 1. TRAIN.
-  aqt_cfg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+  aqt_cfg_dg = aqt_config.fully_quantized(fwd_bits=8, bwd_bits=8)
+  num_epochs = 1
+  workdir = '/tmp/aqt_mnist_example'
   state = train_and_evaluate(
-      num_epochs=1, workdir='/tmp/aqt_mnist_example', aqt_cfg=aqt_cfg
+      num_epochs, workdir, aqt_cfg_dg=aqt_cfg_dg
   )
 
   # 2. Apply GPTQ Calibration. (Hinv collection).
