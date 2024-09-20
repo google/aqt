@@ -322,14 +322,17 @@ class DotGeneralQuantizer(abc.ABC):
 
   def __call__(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[utils.AxisIdx]],
+      lhs: jax.Array,
+      rhs: jax.Array,
+      dimension_numbers: jax.lax.DotDimensionNumbers,
+      lhs_mode: CalibrationMode,
+      rhs_mode: CalibrationMode,
   ) -> tuple[
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
       tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn],
   ]:
     (lhs, lhs_qt), (rhs, rhs_qt) = self.calibrate(
-        lhs_quantization_info, rhs_quantization_info
+        lhs, rhs, dimension_numbers, lhs_mode, rhs_mode
     )
     return self.calculate_qvalue(lhs, lhs_qt, rhs, rhs_qt)
 
@@ -340,8 +343,11 @@ class DotGeneralQuantizer(abc.ABC):
   @abc.abstractmethod
   def calibrate(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      lhs: jax.Array,
+      rhs: jax.Array,
+      dimension_numbers: jax.lax.DotDimensionNumbers | None,
+      lhs_mode: CalibrationMode | None,
+      rhs_mode: CalibrationMode | None,
   ) -> tuple[
       tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
@@ -351,8 +357,11 @@ class DotGeneralQuantizer(abc.ABC):
     returns the updated lhs and rhs during calibration.
 
     Args:
-      lhs_quantization_info: left argument and its contracting axis.
-      rhs_quantization_info: right argument and its contracting axis:
+      lhs: lhs
+      rhs: rhs
+      dimension_numbers: dimension_numbers
+      lhs_mode: lhs_mode
+      rhs_mode: rhs_mode
 
     Returns:
       A tuple of (lhs, lhs_qt), (rhs, rhs_qt) where lhs and rhs are updated
@@ -415,16 +424,41 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def calibrate(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      lhs: jax.Array,
+      rhs: jax.Array,
+      dimension_numbers: jax.lax.DotDimensionNumbers | None,
+      lhs_mode: CalibrationMode | None,
+      rhs_mode: CalibrationMode | None,
   ) -> tuple[
       tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
-    lhs_input, lhs_ca = lhs_quantization_info
-    rhs_input, rhs_ca = rhs_quantization_info
-    lhs_qt = self.lhs.calibrate(lhs_input, calibration_axes=lhs_ca)
-    rhs_qt = self.rhs.calibrate(rhs_input, calibration_axes=rhs_ca)
-    return ((lhs_input, lhs_qt), (rhs_input, rhs_qt))
+    if dimension_numbers is None:
+      lhs_calib, rhs_calib = None, None
+    else:
+      (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+
+      def _get_calibration_axes(
+          mode: CalibrationMode,
+          ndim: int,
+          ca: Sequence[utils.AxisIdx],
+          ba: Sequence[utils.AxisIdx],
+      ) -> Sequence[utils.AxisIdx]:
+        """Computes calibration axes for the given Tensor."""
+        match mode:
+          case CalibrationMode.REMAINING_AXIS:
+            calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
+          case CalibrationMode.CONTRACTING_AXIS:
+            calibration_axes = ca
+          case _:
+            raise ValueError(f'Unknown calibration mode: {mode}')
+        return calibration_axes
+
+      lhs_calib = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)
+      rhs_calib = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)
+
+    lhs_qt = self.lhs.calibrate(lhs, calibration_axes=lhs_calib)
+    rhs_qt = self.rhs.calibrate(rhs, calibration_axes=rhs_calib)
+    return ((lhs, lhs_qt), (rhs, rhs_qt))
 
   def calculate_qvalue(
       self,
@@ -479,24 +513,6 @@ def quant(
 ]:
   """Quantizes the given lhs and rhs using dg_quantizer."""
 
-  def _get_calibration_axes(
-      tensor_cfg: Tensor,
-      ndim: int,
-      ca: Sequence[utils.AxisIdx],
-      ba: Sequence[utils.AxisIdx],
-  ) -> Sequence[utils.AxisIdx]:
-    """Computes calibration axes for the given Tensor."""
-    match tensor_cfg.calibration_mode:
-      case CalibrationMode.REMAINING_AXIS:
-        calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
-      case CalibrationMode.CONTRACTING_AXIS:
-        calibration_axes = ca
-      case _:
-        raise ValueError(
-            f'Unknown calibration mode: {tensor_cfg.calibration_mode}'
-        )
-    return calibration_axes
-
   def _postprocess_qtensor(
       input_qtensor: Optional[aqt_tensor.QTensor],
       calculated_qtensor: aqt_tensor.QTensor,
@@ -520,14 +536,14 @@ def quant(
 
     return output_qtensor, quant_grad
 
-  (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
-
-  lhs_calib_axes = _get_calibration_axes(lhs_cfg, lhs.ndim, lhs_ca, lhs_ba)
-  rhs_calib_axes = _get_calibration_axes(rhs_cfg, rhs.ndim, rhs_ca, rhs_ba)
-
   (lhs, lhs_incomplete_qt), (rhs, rhs_incomplete_qt) = dg_quantizer.calibrate(
-      (lhs, lhs_calib_axes), (rhs, rhs_calib_axes)
+      lhs,
+      rhs,
+      dimension_numbers,
+      lhs_cfg.calibration_mode,
+      rhs_cfg.calibration_mode,
   )
+
   if lhs_qt is not None and not lhs_qt.is_full():
     # Incomplete QTensor is provided as lhs_qt.
     lhs_incomplete_qt = lhs_qt
@@ -720,7 +736,7 @@ def _qtensor_dot_general(
     lhs_qt: aqt_tensor.QTensor,
     rhs_qt: aqt_tensor.QTensor,
     dimension_numbers: jax.lax.DotDimensionNumbers,
-    cfg: ...,  # DotGeneralRaw,
+    cfg: Any,
     # dequant_dtype: DType,
     dequant_dtype: jnp.dtype,
 ) -> aqt_tensor.QTensor:

@@ -20,6 +20,7 @@ from typing import Callable
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import tiled_dot_general
@@ -53,7 +54,14 @@ class AqtFlaxTest(parameterized.TestCase):
           # state with the one used in the einsum.
           dg_quantizer = self.aqt_cfg().fwd.dg_quantizer
           dg_quantizer.init_calibration()
-          (lhs_q, _), (rhs_q, _) = dg_quantizer((lhs, (2, 3)), (rhs, (1, 2)))
+          dimension_numbers = (((2, 3), (1, 2)), ((), ()))
+          (lhs_q, _), (rhs_q, _) = dg_quantizer(
+              lhs,
+              rhs,
+              dimension_numbers,
+              aqt_dot_general.CalibrationMode.CONTRACTING_AXIS,
+              aqt_dot_general.CalibrationMode.CONTRACTING_AXIS,
+          )
           lhs_dtype = aqt_cfg.fwd.dg_quantizer.lhs.numerics.get_dtype()
           rhs_dtype = aqt_cfg.fwd.dg_quantizer.rhs.numerics.get_dtype()
           if self.lhs_qt_external:

@@ -81,7 +81,7 @@ However if there is any other use, we will drop that assumption."""
         list(range(1, rank)), list(range(0, rank - 1)), msg
     )
     (lhs, lhs_incomplete_qt), (rhs, rhs_incomplete_qt) = (
-        cfg.dg_quantizer.calibrate((lhs, None), (rhs, None))
+        cfg.dg_quantizer.calibrate(lhs, rhs, None, None, None)
     )
     if lhs_qt is not None and not lhs_qt.is_full():
       # Incomplete QTensor is provided as lhs_qt.

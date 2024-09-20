@@ -250,23 +250,56 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
 
   def calibrate(
       self,
-      lhs_quantization_info: tuple[jax.Array, Sequence[int]],
-      rhs_quantization_info: tuple[jax.Array, Sequence[int]],
+      lhs: jax.Array,
+      rhs: jax.Array,
+      dimension_numbers: jax.lax.DotDimensionNumbers | None,
+      lhs_mode: aqt_dot_general.CalibrationMode | None,
+      rhs_mode: aqt_dot_general.CalibrationMode | None,
   ) -> tuple[
-      tuple[jax.Array, aqt_tensor.QTensor],
-      tuple[jax.Array, aqt_tensor.QTensor]
-  ]:
+      tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
+  ]:  # pylint: disable=g-doc-args
     """GPTQ calibration.
 
     Majority of the codes are copied from sharded_gptc.gptc_skeleton. we copied
     the code snippet to enable the collection of hinv statistics.
 
-    Args:
-      lhs_quantization_info: left argument and its contracting axis.
-      rhs_quantization_info: right argument and its contracting axis:
     Returns:
       Updated weight and incomplete QTensor for lhs and rhs.
     """
+    if dimension_numbers is None:
+      lhs_calib, rhs_calib = None, None
+    else:
+      (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+
+      def _get_calibration_axes(
+          mode: aqt_dot_general.CalibrationMode,
+          ndim: int,
+          ca: Sequence[utils.AxisIdx],
+          ba: Sequence[utils.AxisIdx],
+      ) -> Sequence[utils.AxisIdx]:
+        """Computes calibration axes for the given Tensor."""
+        match mode:
+          case aqt_dot_general.CalibrationMode.REMAINING_AXIS:
+            calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
+          case aqt_dot_general.CalibrationMode.CONTRACTING_AXIS:
+            calibration_axes = ca
+          case _:
+            raise ValueError(f"Unknown calibration mode: {mode}")
+        return calibration_axes
+
+      lhs_calib = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)
+      rhs_calib = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)
+    lhs_quantization_info = (lhs, lhs_calib)
+    rhs_quantization_info = (rhs, rhs_calib)
+
+    # TODO(lew): The block of code above is copied from
+    # aqt_dot_general.DefaultDotGeneralQuantizer.calibrate.
+    # [lr]hs_quantization_info are the arguments that were passed before.
+    # We should refactor it to make it more readable.
+    # TODO(lew): We should also consider refactoring the code below to make it
+    # more readable.
+    # Perhaps we can drop "The GPTQ assumes that 2+ dimensions" assumption too.
+
     # Follow the quantization mode and num_bits of the kernel.
     if self.is_rhs_kernel:
       quant_mode = _get_quant_mode(self.rhs.context)
@@ -281,7 +314,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       # During training, we should not allow collecting hinvs and updating
       # weights using it.
       return super(GptqDotGeneralQuantizer, self).calibrate(  # pytype: disable=attribute-error
-          lhs_quantization_info, rhs_quantization_info
+          lhs, rhs, dimension_numbers, lhs_mode, rhs_mode
       )
 
     if not self.is_rhs_kernel:
@@ -351,7 +384,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
 
     # Retrieve the scales using the updated lhs and rhs.
     return super(GptqDotGeneralQuantizer, self).calibrate(  # pytype: disable=attribute-error
-        (lhs, lhs_ca), (rhs, rhs_ca)
+        lhs, rhs, dimension_numbers, lhs_mode, rhs_mode
     )
 
   def swap_lhs_and_rhs(self) -> None:
