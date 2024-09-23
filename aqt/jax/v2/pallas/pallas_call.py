@@ -21,7 +21,6 @@ from aqt.jax.v2.pallas import pallas_tensor
 import jax
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
-import lazy_object_proxy
 
 
 BlockSpec = pl.BlockSpec
@@ -132,10 +131,7 @@ def pallas_call(
     def kernel(*args):
       # [Inside kernel] untranspose tensor to restore to the original shape.
       args = jax.tree_util.tree_map(
-          # Lazily untranspose tensor when the transposed tensor is actually
-          # used. This is to avoid unnecesary load & permutation when the tensor
-          # is not used.
-          lambda arg: lazy_object_proxy.Proxy(lambda: arg.untransposed)
+          lambda arg: arg.untransposed
           if isinstance(arg, TransposedTensor)
           else arg,
           args,
