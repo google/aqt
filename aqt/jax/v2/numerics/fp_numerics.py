@@ -30,6 +30,7 @@ class FpNumericsConfig:
   has_subnormals: bool
   has_two_nan: bool
   has_naninf: bool
+  radix: int
 
 ##########
 ## FP6
@@ -41,6 +42,7 @@ e5m0_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e4m1_ocp = FpNumericsConfig(
@@ -50,6 +52,7 @@ e4m1_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e3m2_ocp = FpNumericsConfig(
@@ -59,6 +62,7 @@ e3m2_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e2m3_ocp = FpNumericsConfig(
@@ -68,6 +72,7 @@ e2m3_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e1m4_ocp = FpNumericsConfig(
@@ -77,6 +82,7 @@ e1m4_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e0m5_ocp = FpNumericsConfig(
@@ -86,6 +92,7 @@ e0m5_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 ##########
@@ -98,6 +105,7 @@ e4m0_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e3m1_ocp = FpNumericsConfig(
@@ -107,6 +115,7 @@ e3m1_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e2m2_ocp = FpNumericsConfig(
@@ -116,6 +125,7 @@ e2m2_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e1m3_ocp = FpNumericsConfig(
@@ -125,6 +135,7 @@ e1m3_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e0m4_ocp = FpNumericsConfig(
@@ -134,6 +145,7 @@ e0m4_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 ##########
@@ -146,6 +158,7 @@ e3m0 = FpNumericsConfig(
     has_subnormals=False,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e3m0_ocp = FpNumericsConfig(
@@ -155,6 +168,7 @@ e3m0_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e2m1 = FpNumericsConfig(
@@ -164,6 +178,7 @@ e2m1 = FpNumericsConfig(
     has_subnormals=False,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e2m1_ocp = FpNumericsConfig(
@@ -173,6 +188,7 @@ e2m1_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e1m2 = FpNumericsConfig(
@@ -182,6 +198,7 @@ e1m2 = FpNumericsConfig(
     has_subnormals=False,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e1m2_ocp = FpNumericsConfig(
@@ -191,6 +208,7 @@ e1m2_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e0m3 = FpNumericsConfig(
@@ -200,6 +218,7 @@ e0m3 = FpNumericsConfig(
     has_subnormals=False,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 e0m3_ocp = FpNumericsConfig(
@@ -209,6 +228,7 @@ e0m3_ocp = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 ##########
@@ -221,6 +241,7 @@ e1m0 = FpNumericsConfig(
     has_subnormals=False,
     has_two_nan=False,
     has_naninf=False,
+    radix=2,
 )
 
 float8_e4m3fn = FpNumericsConfig(
@@ -230,6 +251,7 @@ float8_e4m3fn = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=True,
     has_naninf=False,
+    radix=2,
 )
 
 float8_e5m2 = FpNumericsConfig(
@@ -239,6 +261,7 @@ float8_e5m2 = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=True,
+    radix=2,
 )
 
 float16 = FpNumericsConfig(
@@ -248,11 +271,42 @@ float16 = FpNumericsConfig(
     has_subnormals=True,
     has_two_nan=False,
     has_naninf=True,
+    radix=2,
+)
+
+RADIX4 = FpNumericsConfig(
+    nexp=3,
+    minexp=0,
+    nmant=0,
+    has_subnormals=True,
+    has_two_nan=False,
+    has_naninf=False,
+    radix=4,
 )
 
 
-# TODO(lew): Add minexp.
 def fp_round(
+    x,
+    *,
+    cfg: FpNumericsConfig,
+    key: jax.Array,
+    stochastic_rounding: bool,
+    test_noise_axis=None,
+):
+  """Round function dispatcher."""
+  assert cfg.radix == 2 or cfg.radix == 4, 'Only radix 2 and 4 are supported.'
+  round_fn = radix2_round if cfg.radix == 2 else radix4_round
+  return round_fn(
+      x,
+      cfg=cfg,
+      key=key,
+      stochastic_rounding=stochastic_rounding,
+      test_noise_axis=test_noise_axis,
+  )
+
+
+# TODO(lew): Add minexp.
+def radix2_round(
     x,
     *,
     cfg: FpNumericsConfig,
@@ -540,6 +594,10 @@ def fp_largest_representable(cfg: FpNumericsConfig):
   nmant = cfg.nmant
   assert cfg.minexp == 0, 'minexp not implemented'
   assert not cfg.has_naninf, 'naninf not implemented'
+  if cfg == RADIX4:
+    return 64.0
+  else:
+    assert cfg.radix == 2, 'Only radix2 or radix4 is supported.'
   max_exp = 2**nexp - 1 + cfg.minexp - (1 if cfg.has_subnormals else 0)
   max_mant = 2**nmant - 1 - (1 if cfg.has_two_nan else 0)
   max_normal = 2**max_exp * (1 + (max_mant / 2**nmant))
@@ -585,3 +643,50 @@ class FpNumerics(numerics.AqtNumerics):
       clip_bound = self.get_quant_bound()
       ret *= (-clip_bound <= x) * (x <= clip_bound)
     return (ret, None)
+
+
+def radix4_round(
+    x,
+    *,
+    cfg: FpNumericsConfig,
+    key: jax.Array,
+    stochastic_rounding: bool,
+    test_noise_axis=None,
+    coeff: float = 1.6,
+):
+  """Round to nearest radix4 (4^n)."""
+  # TODO(yichizh): are the bucket centers the same in sc=True/False?
+  assert cfg == RADIX4
+  input_dtype = x.dtype
+  msg = f'Unsupported dtype for sthochastic rounding: {input_dtype}.'
+  bits_dtype = jnp.uint16 if input_dtype == jnp.bfloat16 else jnp.uint32
+  assert input_dtype == jnp.bfloat16, msg
+  x = x.astype(jnp.float32)  # upcast for log4 computation
+  if stochastic_rounding:
+    abs_x = jnp.abs(x)
+    lower_bucket_ebit = jnp.floor(jnp.log(abs_x) / jnp.log(4))
+    lower_bucket_center = 4**lower_bucket_ebit
+    higher_bucket_center = 4 ** (lower_bucket_ebit + 1)
+    # When input is 0, lower and higher bucket center are both -inf.
+    # Hence bucket size is 0.
+    bucket_size = higher_bucket_center - lower_bucket_center
+    if test_noise_axis is not None:
+      noise_axis_size = x.shape[test_noise_axis]
+      msg = 'Input repetition should be consistent with effective noise bits.'
+      assert noise_axis_size == 2**16, msg
+      sh = list((1,) * len(x.shape))
+      sh[test_noise_axis] = noise_axis_size
+      rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+    else:
+      rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+    rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(jnp.uint32)
+    noise = jax.lax.bitcast_convert_type(rnd_bits, jnp.float32) - 1.0  # [0, 1)
+    noise = noise * bucket_size
+    ebit = jnp.floor(jnp.log(abs_x + noise) / jnp.log(4))
+  else:
+    ebit = jnp.floor(jnp.log(jnp.abs(coeff * x)) / jnp.log(4))
+  subnormal = jnp.zeros_like(x)
+  overflow = jnp.sign(x) * 64
+  radix4 = jnp.sign(x) * 4**ebit
+  ret = jnp.where(ebit < -3, subnormal, jnp.where(ebit >= 3, overflow, radix4))
+  return ret.astype(input_dtype)

@@ -83,6 +83,11 @@ def fp_values(cfg: fp_numerics.FpNumericsConfig):
   exp = exp_bits.astype(jnp.float32)
   man = man_bits.astype(jnp.float32)
 
+  if cfg == fp_numerics.RADIX4:
+    values = 4 ** jnp.array([-3, -2, -1, 0, 1, 2, 3], dtype=jnp.bfloat16)
+    values = jnp.concatenate([jnp.zeros(1), values, -jnp.zeros(1), -values])
+    return bitmasks, values
+
   if has_subnormals:
     exp -= 1  # resereve exp=0
 
@@ -221,6 +226,14 @@ class FpTest(parameterized.TestCase):
               -0, -0.125, -0.25, -0.375, -0.5, -0.625, -0.75, -0.875,
           ],
       ),
+      dict(
+          nexp=3, minexp=0, nmant=0, has_subnormals=True,
+          expected_values=[
+              0, 4**-3, 4**-2, 4**-1, 4**0, 4**1, 4**2, 4**3,
+              -0, -4**-3, -4**-2, -4**-1, -4**0, -4**1, -4**2, -4**3,
+          ],
+          radix=4,
+      ),
   ])  # pyformat: disable
   def test_fp_some_fp_values(
       self,
@@ -229,6 +242,7 @@ class FpTest(parameterized.TestCase):
       nmant,
       has_subnormals,
       expected_values,
+      radix=2,
   ):
     cfg = fp_numerics.FpNumericsConfig(
         nexp=nexp,
@@ -237,6 +251,7 @@ class FpTest(parameterized.TestCase):
         has_subnormals=has_subnormals,
         has_two_nan=False,
         has_naninf=False,
+        radix=radix,
     )
 
     bitmasks, values = fp_values(cfg)
@@ -285,6 +300,7 @@ class FpTest(parameterized.TestCase):
       dict(nexp=0, minexp=0, nmant=4, has_subnormals=False),
       # Misc
       dict(nexp=2, minexp=0, nmant=0, has_subnormals=False),
+      dict(nexp=3, minexp=0, nmant=0, has_subnormals=True, radix=4),
   ])
   def test_fp_round(
       self,
@@ -292,6 +308,7 @@ class FpTest(parameterized.TestCase):
       minexp,
       nmant,
       has_subnormals,
+      radix=2,
       det_x_count=2**7,  # needs to be power of 2, test_noise_axis exact eq
       x_count=128,  # TODO(lew): Test fails for 100, why?
       sr_sample_count=1000000,
@@ -308,6 +325,7 @@ class FpTest(parameterized.TestCase):
         has_subnormals=has_subnormals,
         has_two_nan=False,
         has_naninf=False,
+        radix=radix,
     )
     _, bucket_centers = fp_values(cfg)
     assert bucket_centers.dtype == jnp.float32
@@ -334,6 +352,20 @@ class FpTest(parameterized.TestCase):
 
     bucket_lower = bucket_boundaries[:-1]
     bucket_upper = bucket_boundaries[1:]
+    if radix == 4:
+      # For 4-bit radix4, the edge between bucket 4**-3 and bucket 0 is not
+      # (4**-3 + 0) / 2. The edge is (4**-3 + 4**-4) / 2.
+      # That is where floor(log4(1.6 * x)) isexactly -3.
+      bucket_lower = jnp.where(
+          jnp.abs(bucket_lower) == (4**-3 / 2),
+          jnp.sign(bucket_lower) * (4**-3 + 4**-4) / 2,
+          bucket_lower,
+      )
+      bucket_upper = jnp.where(
+          jnp.abs(bucket_upper) == (4**-3 / 2),
+          jnp.sign(bucket_upper) * (4**-3 + 4**-4) / 2,
+          bucket_upper,
+      )
     data = jnp.linspace(
         bucket_lower,
         bucket_upper,
@@ -556,7 +588,6 @@ class FpTest(parameterized.TestCase):
     y_e1m2, _ = e1m2.vjp_fwd(e1m2_input, context=context)
     y_e0m3, _ = e0m3.vjp_fwd(e0m3_input, context=context)
     assert (y_e1m2 == y_e0m3 * 2).all()
-
 
 if __name__ == "__main__":
   absltest.main()
