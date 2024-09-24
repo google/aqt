@@ -216,7 +216,7 @@ def set_stochastic_rounding(
 
 
 def set_constant_calibration(
-    cfg: DotGeneral, bound: float = 1.0, bias: float | None = None
+    cfg: DotGeneral, bound: Union[jnp.ndarray, float], bias: float | None = None
 ):
   """Sets the static bound for calibration."""
   calibration_cls = functools.partial(
