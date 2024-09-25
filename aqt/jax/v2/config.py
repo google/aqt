@@ -370,12 +370,12 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
 
 def set_bits(
     cfg: DotGeneral,
-    fwd_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    fwd_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    dlhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    dlhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    drhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    drhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    fwd_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype] = None,
+    fwd_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype] = None,
+    dlhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype] = None,
+    dlhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype] = None,
+    drhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype] = None,
+    drhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype] = None,
 ) -> DotGeneral:
   """Set quantization bits for dot_general config."""
 
@@ -675,10 +675,6 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
       cfg,
       fwd_lhs_bit=fwd_bits,
       fwd_rhs_bit=fwd_bits,
-      dlhs_lhs_bit=None,
-      dlhs_rhs_bit=None,
-      drhs_lhs_bit=None,
-      drhs_rhs_bit=None,
   )
   set_stochastic_rounding(cfg, False, False, 'jax.uniform')
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
