@@ -13,6 +13,8 @@
 # limitations under the License.
 
 """Test for AQT tensor."""
+import dataclasses
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from aqt.jax.v2 import aqt_tensor
@@ -164,7 +166,7 @@ class AqtTensorTest(parameterized.TestCase):
         scale_t=None,
         bias=[],
         dequant_dtype=xlhs_scale.dtype,
-        tiling_state=xlhs,
+        tile_map=xlhs.tile_map,
     )
     qlhs = qlhs.quant(lhs)
 
@@ -174,7 +176,7 @@ class AqtTensorTest(parameterized.TestCase):
         scale_t=None,
         bias=[],
         dequant_dtype=xrhs_scale.dtype,
-        tiling_state=xrhs,
+        tile_map=xrhs.tile_map,
     )
     qrhs = qrhs.quant(rhs)
 
@@ -189,18 +191,18 @@ class AqtTensorTest(parameterized.TestCase):
     self.assertEqual(qlhs.dequant().shape, lhs.shape)
     self.assertEqual(qrhs.dequant().shape, rhs.shape)
 
-    # Check assertion raised when wrong tiling_state is given.
-    qlhs.tiling_state.tiled_shape = qrhs.qvalue.shape
+    # Check assertion raised when wrong tile_map is given.
+    wrong_qlhs = dataclasses.replace(qlhs, tile_map={0: [0], 1: [1], 2: [2]})
     with self.assertRaises(AssertionError):
-      qlhs.dequant()
+      wrong_qlhs.dequant()
     with self.assertRaises(AssertionError):
-      qlhs.shape  # pylint: disable=pointless-statement
+      wrong_qlhs.shape  # pylint: disable=pointless-statement
 
-    qrhs.tiling_state.tiled_shape = qlhs.qvalue.shape
+    wrong_qrhs = dataclasses.replace(qrhs, tile_map={0: [0], 1: [1], 2: [2]})
     with self.assertRaises(AssertionError):
-      qrhs.dequant()
+      wrong_qrhs.dequant()
     with self.assertRaises(AssertionError):
-      qrhs.shape  # pylint: disable=pointless-statement
+      wrong_qrhs.shape  # pylint: disable=pointless-statement
 
 
 if __name__ == "__main__":

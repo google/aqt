@@ -110,7 +110,7 @@ class Quantizer:
           scale_t=None,
           bias=[],
           dequant_dtype=x.dtype,
-          tiling_state=tiling_state,
+          tile_map=tiling_state.tile_map if tiling_state else None,
       )
       return qt
 
@@ -138,7 +138,7 @@ class Quantizer:
         scale_t=None,
         bias=bias,
         dequant_dtype=dequant_dtype,
-        tiling_state=tiling_state,
+        tile_map=tiling_state.tile_map if tiling_state else None,
     )
     return qt
 
