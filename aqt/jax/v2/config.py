@@ -284,7 +284,7 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
       if isinstance(q_numerics, int_numerics.IntSymmetric):
         q_numerics.preserve_zero = preserve_zero
         updated_dtype = (
-            utils.infer_dtype_from_bits(q_numerics.bits)  # pytype: disable=attribute-error
+            utils.infer_dtype_from_bits(q_numerics.bits)
             if preserve_zero
             else None
         )

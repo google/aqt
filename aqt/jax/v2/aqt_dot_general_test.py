@@ -29,7 +29,6 @@ import aqt.jax.v2.aqt_dot_general as aqt
 from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
-import flax.struct
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -171,7 +170,8 @@ def fqt_param_dict(s, use_fwd_quant, **kwargs):
   )
 
 
-class _TrickyNumerics(numerics.AqtNumerics, flax.struct.PyTreeNode):
+@utils.flax_slots_kw_only_dataclass
+class _TrickyNumerics(numerics.AqtNumerics):
   # Needed because int8 casting would do additional clip and round.
   dtype: jnp.dtype | None = None
 
@@ -224,13 +224,9 @@ def _modify_dg(
 
   def _disable_quant_types(c, on_lhs=True, on_rhs=True):
     if on_lhs:
-      c.dg_quantizer.lhs.numerics = (
-          c.dg_quantizer.lhs.numerics.replace(dtype=None)
-      )
+      c.dg_quantizer.lhs.numerics.dtype = None
     if on_rhs:
-      c.dg_quantizer.rhs.numerics = (
-          c.dg_quantizer.rhs.numerics.replace(dtype=None)
-      )
+      c.dg_quantizer.rhs.numerics.dtype = None
     if on_lhs or on_rhs:
       c.dg_accumulator_dtype = None
 
@@ -257,13 +253,9 @@ def _modify_dg(
     def disable_quant(c):
       _disable_quant_types(c)
       if isinstance(c.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):
-        c.dg_quantizer.lhs.numerics = (
-            c.dg_quantizer.lhs.numerics.replace(round=False)
-        )
+        c.dg_quantizer.lhs.numerics.round = False
       if isinstance(c.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
-        c.dg_quantizer.rhs.numerics = (
-            c.dg_quantizer.rhs.numerics.replace(round=False)
-        )
+        c.dg_quantizer.rhs.numerics.round = False
 
     disable_quant(dg.fwd)
     disable_quant(dg.dlhs)
@@ -283,13 +275,9 @@ def _modify_dg(
 
     # When using abs-max scaling, this should be a no-op.
   if isinstance(dg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):
-    dg.fwd.dg_quantizer.lhs.numerics = (
-        dg.fwd.dg_quantizer.lhs.numerics.replace(clip_gradient=clip_gradient)
-    )
+    dg.fwd.dg_quantizer.lhs.numerics.clip_gradient = clip_gradient
   if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
-    dg.fwd.dg_quantizer.rhs.numerics = (
-        dg.fwd.dg_quantizer.rhs.numerics.replace(clip_gradient=clip_gradient)
-    )
+    dg.fwd.dg_quantizer.rhs.numerics.clip_gradient = clip_gradient
 
   return dg
 
@@ -1063,18 +1051,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         use_stochastic_rounding=False,
         drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=shard_count),
     )
-    dg.fwd.dg_quantizer.lhs.numerics = (
-        dg.fwd.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
-    )
-    dg.fwd.dg_quantizer.rhs.numerics = (
-        dg.fwd.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
-    )
-    dg.drhs.dg_quantizer.lhs.numerics = (
-        dg.drhs.dg_quantizer.lhs.numerics.replace(preserve_max_val=True)
-    )
-    dg.drhs.dg_quantizer.rhs.numerics = (
-        dg.drhs.dg_quantizer.rhs.numerics.replace(preserve_max_val=True)
-    )
+    dg.fwd.dg_quantizer.lhs.numerics.preserve_max_val = True
+    dg.fwd.dg_quantizer.rhs.numerics.preserve_max_val = True
+    dg.drhs.dg_quantizer.lhs.numerics.preserve_max_val = True
+    dg.drhs.dg_quantizer.rhs.numerics.preserve_max_val = True
     dg_f = lambda lhs, rhs: dg(
         lhs,
         rhs,

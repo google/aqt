@@ -14,9 +14,12 @@
 """Base abstract class for all numerics."""
 import abc
 
+from aqt.jax.v2 import utils
 
+
+@utils.flax_slots_kw_only_dataclass
 class AqtNumerics(abc.ABC):
-  """Numerics for int8, int4, binary, etc."""
+  """Abstract class for various quantization numerics."""
 
   @abc.abstractmethod
   def get_dtype(self):
