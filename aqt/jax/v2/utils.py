@@ -97,11 +97,12 @@ def dynamic_field(**kwargs):
   return flax.struct.field(pytree_node=True, **kwargs)
 
 
-def print_diff(str_a: str, str_b: str):
-  diff_generator = difflib.context_diff(str_a.split(' '), str_b.split(' '))
-  print('Diff:')
-  for diff in diff_generator:
-    print(diff)
+def print_diff(str_a: str, str_b: str, do_print_diff=False):
+  if do_print_diff:
+    diff_generator = difflib.context_diff(str_a.split(' '), str_b.split(' '))
+    print('Diff:')
+    for diff in diff_generator:
+      print(diff)
   print(f'first string (actual):\n{str_a}')
 
 

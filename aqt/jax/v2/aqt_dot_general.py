@@ -131,7 +131,17 @@ def dot_general_raw_make(
   rhs = aqt_quantizer.quantizer_make(
       rhs_bits, initialize_calibration=initialize_calibration
   )
-  dg_quantizer = DefaultDotGeneralQuantizer(lhs=lhs, rhs=rhs)
+  # TODO(lew): This code (and surrounding code)is duplicated.
+  # We should dedup.
+  lhs_mid = aqt_quantizer.quantizer_make(
+      None, initialize_calibration=initialize_calibration
+  )
+  rhs_mid = aqt_quantizer.quantizer_make(
+      None, initialize_calibration=initialize_calibration
+  )
+  dg_quantizer = DefaultDotGeneralQuantizer(
+      lhs=lhs, rhs=rhs, lhs_mid=lhs_mid, rhs_mid=rhs_mid
+  )
 
   return DotGeneralRaw(
       lhs=lhs_cfg,
@@ -418,9 +428,36 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
   lhs: aqt_quantizer.Quantizer
   rhs: aqt_quantizer.Quantizer
 
+  # Quantizers for "middle" scale in "matmul" like SmoothQuant, AWQ, etc.
+  lhs_mid: aqt_quantizer.Quantizer
+  rhs_mid: aqt_quantizer.Quantizer
+
+  # The amount (exponent) of the scales that should be transferred to the
+  # other side. 0.0 = nothing, 1.0 = all.
+  lhs_mid_alpha: float | None = None
+  rhs_mid_alpha: float | None = None
+
+  # This is a hack to make QTensors compatible with the current
+  # _qtensor_dot_general.
+  # The QTensors that are returned do not include the mid-scales.
+  # But this is ok, because the skipped mid-scales are reciprocal of each other
+  # and they would cancel out in _qtensor_dot_general anyway.
+  # A good design would be to hardcode skip_mid_scales=False because it would
+  # maintain semantics of QTensor (QTensor.dequant).
+  # This also is needed to send a correct QTensor to backprop
+  # in  use_fwd_quant=True mode.
+  # We don't do it now mostly because it would require a separate mechanism
+  # in _qtensor_dot_general to skip the mid-scales
+  # (which do cancel each other mathematically).
+  skip_mid_scales: bool = True
+
   def init_calibration(self):
     self.lhs.init_calibration()
     self.rhs.init_calibration()
+    if self.lhs_mid_alpha is not None:
+      self.lhs_mid.init_calibration()
+    if self.rhs_mid_alpha is not None:
+      self.rhs_mid.init_calibration()
 
   def calibrate(
       self,
@@ -432,10 +469,10 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
   ) -> tuple[
       tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
-    if dimension_numbers is None:
-      lhs_calib, rhs_calib = None, None
-    else:
+    if dimension_numbers is not None:
       (lhs_ca, rhs_ca), (lhs_ba, rhs_ba) = dimension_numbers
+      lhs_ra = utils.get_remaining_axes(lhs.ndim, lhs_ca, lhs_ba)
+      rhs_ra = utils.get_remaining_axes(rhs.ndim, rhs_ca, rhs_ba)
 
       def _get_calibration_axes(
           mode: CalibrationMode,
@@ -447,17 +484,76 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
         match mode:
           case CalibrationMode.REMAINING_AXIS:
             calibration_axes = utils.get_remaining_axes(ndim, ca, ba)
+            m = 'mid-quantization is not supported for REMAINING_AXIS mode'
+            assert self.lhs_mid_alpha is None and self.rhs_mid_alpha is None, m
           case CalibrationMode.CONTRACTING_AXIS:
             calibration_axes = ca
           case _:
             raise ValueError(f'Unknown calibration mode: {mode}')
         return calibration_axes
 
-      lhs_calib = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)
-      rhs_calib = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)
+      lhs_calib_axes = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)
+      rhs_calib_axes = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)
+    else:
+      (lhs_ra, rhs_ra) = (None, None)
+      lhs_calib_axes = None
+      rhs_calib_axes = None
 
-    lhs_qt = self.lhs.calibrate(lhs, calibration_axes=lhs_calib)
-    rhs_qt = self.rhs.calibrate(rhs, calibration_axes=rhs_calib)
+    def dezero(x):
+      return jnp.where(x == 0.0, jnp.ones_like(x), x)
+
+    if self.lhs_mid_alpha is not None:
+      assert self.lhs_mid is not None
+      lhs_mid_qt = self.lhs_mid.calibrate(lhs, calibration_axes=lhs_ra)
+      assert len(lhs_mid_qt.scale) == 1, 'you must set some numerics'
+      lhs_mid_scale = dezero(lhs_mid_qt.scale[0])
+      lhs_mid_scale = lhs_mid_scale**self.lhs_mid_alpha
+      lhs_mid_scale_t = transpose.lhs_scale_transpose_for_rhs_input(
+          lhs_mid_scale, dimension_numbers, rhs.shape
+      )
+    else:
+      lhs_mid_scale = 1.0
+      lhs_mid_scale_t = 1.0
+
+    if self.rhs_mid_alpha is not None:
+      assert self.rhs_mid is not None
+      rhs_mid_qt = self.rhs_mid.calibrate(rhs, calibration_axes=rhs_ra)
+      assert len(rhs_mid_qt.scale) == 1, 'you must set some numerics'
+      rhs_mid_scale = dezero(rhs_mid_qt.scale[0])
+      rhs_mid_scale = rhs_mid_scale**self.rhs_mid_alpha
+      rhs_mid_scale_t = transpose.rhs_scale_transpose_for_lhs_input(
+          rhs_mid_scale, dimension_numbers, lhs.shape
+      )
+    else:
+      rhs_mid_scale = 1.0
+      rhs_mid_scale_t = 1.0
+
+    # This condition can be considered an optimization.
+    # ATM it also allows us to not deal with 1.0 being a scalar.
+    if self.lhs_mid_alpha is not None or self.rhs_mid_alpha is not None:
+      # Combined SmoothQuant scales
+      lhs_mid_scale_combined = lhs_mid_scale / rhs_mid_scale_t
+      rhs_mid_scale_combined = rhs_mid_scale / lhs_mid_scale_t
+
+      # Apply the combined scales before per-tensor calibration
+      lhs_mid = lhs / lhs_mid_scale_combined
+      rhs_mid = rhs / rhs_mid_scale_combined
+
+      # Per-tensor calibration, same as "else" branch.
+      lhs_qt = self.lhs.calibrate(lhs_mid, calibration_axes=lhs_calib_axes)
+      rhs_qt = self.rhs.calibrate(rhs_mid, calibration_axes=rhs_calib_axes)
+
+      # To maintain QTensor.dequant semantics, we need to append the combined
+      # scales.
+      assert lhs_qt.scale is not None
+      assert rhs_qt.scale is not None
+      if not self.skip_mid_scales:
+        lhs_qt.scale.append(lhs_mid_scale_combined)
+        rhs_qt.scale.append(rhs_mid_scale_combined)
+    else:
+      lhs_qt = self.lhs.calibrate(lhs, calibration_axes=lhs_calib_axes)
+      rhs_qt = self.rhs.calibrate(rhs, calibration_axes=rhs_calib_axes)
+
     return ((lhs, lhs_qt), (rhs, rhs_qt))
 
   def calculate_qvalue(
@@ -595,18 +691,24 @@ def _maybe_use_fwd_quant(
     A tuple of updated (lhs, rhs). If use_fwd_quant is True, lhs is multiplied
     with rhs scale, while rhs is set to the original rhs's qvalue.
   """
-  fwd_quantized = rhs.qx.scale is not None and len(rhs.qx.scale) == 1
+  scale_count = -1
+  if rhs.qx.scale is not None:
+    scale_count = len(rhs.qx.scale)
   msg = (
-      f'Found use_fwd_quant is {use_fwd_quant} in bwd, but fwd is not'
-      ' quantized.'
+      f'Found use_fwd_quant is {use_fwd_quant} in bwd. '
+      'It is supported only if there is exactly one scale in a good shape.\n'
+      f'{scale_count=}'
   )
   if use_fwd_quant:
-    assert fwd_quantized, msg
+    assert scale_count == 1, msg
     if rhs.qx.bias:
       raise NotImplementedError(
           'Quantization biases are not supported in forward quantization.'
       )
 
+    # It this transpose fails or the multpilication below fails,
+    # we have some misconfiguration. One way to deal with it is
+    # set use_fwd_quant to False.
     scale_t = transpose.rhs_scale_transpose_for_lhs_input(
         rhs.qx.scale[0], dimension_numbers, lhs.shape
     )
@@ -768,6 +870,11 @@ def _qtensor_dot_general(
     ), dtype_ms
 
   dtypes_can_be_scaled = [jnp.bfloat16, jnp.float32, jnp.float64]
+
+  # If the transposes below fail it might be because of a misconfiguration.
+  # For instance "mid" quantization in DefaultDotGeneralQuantizer is not
+  # compatible with DequantMode.OTHER_INPUT
+  # TODO(lew): One way to deal with it is to have a per-scale DequantMode.
 
   if cfg.lhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert rhs_qin.dtype in dtypes_can_be_scaled

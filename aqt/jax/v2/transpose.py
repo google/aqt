@@ -100,7 +100,7 @@ def _scale_trans(x, ca, ba):
   ca = list(ca)
   ba = list(ba)
   for i in ca:
-    assert x.shape[i] == 1
+    assert x.shape[i] == 1, (x.shape, ca, ba)
   ra = utils.get_remaining_axes(x.ndim, ca, ba)
   x = transpose(x, ba + ra + ca)
   # TODO(lew): x = jnp.squeeze(x, axis=range(len(ba+ra): len(x.shape))

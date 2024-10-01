@@ -51,8 +51,15 @@ def update_cfg_with_gptq(aqt_cfg: aqt_dot_general.DotGeneral) -> None:
   rhs_bits = aqt_cfg.fwd.dg_quantizer.rhs.numerics.bits
   lhs = aqt_quantizer.quantizer_make(lhs_bits, initialize_calibration=False)
   rhs = aqt_quantizer.quantizer_make(rhs_bits, initialize_calibration=False)
+  lhs_mid = aqt_quantizer.quantizer_make(lhs_bits, initialize_calibration=False)
+  rhs_mid = aqt_quantizer.quantizer_make(rhs_bits, initialize_calibration=False)
   gptq_dg_quantizer = gptq_dot_general_quantizer.GptqDotGeneralQuantizer(
-      lhs=lhs, rhs=rhs, sharding_axes=None, quant_collection='gptq'
+      lhs=lhs,
+      rhs=rhs,
+      lhs_mid=lhs_mid,
+      rhs_mid=rhs_mid,
+      sharding_axes=None,
+      quant_collection='gptq',
   )
 
   aqt_cfg.fwd.dg_quantizer = gptq_dg_quantizer

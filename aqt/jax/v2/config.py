@@ -13,6 +13,10 @@
 # limitations under the License.
 """Configuration dataclasses."""
 
+# pylint: disable=g-importing-member
+# pylint: disable=unused-import
+# pylint: disable=g-explicit-bool-comparison
+
 import copy
 import functools
 from typing import Literal, Optional, TypeAlias, Union
@@ -24,8 +28,6 @@ from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 # Temporary re-export from aqt.jax.v2.aqt_dot_general
 # TODO(lew): Remove these imports, use setters instead
-# pylint: disable=g-importing-member
-# pylint: disable=unused-import
 from aqt.jax.v2.aqt_conv_general import conv_general_dilated_make
 from aqt.jax.v2.aqt_dot_general import CalibrationMode
 from aqt.jax.v2.aqt_dot_general import DequantMode
@@ -260,10 +262,74 @@ def set_use_fwd_quant(
     dlhs_use_fwd_quant: Union[bool, None, SkipT],
     drhs_use_fwd_quant: Union[bool, None, SkipT],
 ):
+  """Enable resusing of fwd pass quantization for backprop."""
+  msg = 'use_fwd_quant is incompatible with use_mid_quant right now.'
+  assert cfg.fwd.dg_quantizer.lhs_mid_alpha is None, msg
+  assert cfg.fwd.dg_quantizer.rhs_mid_alpha is None, msg
+  assert cfg.dlhs.dg_quantizer.lhs_mid_alpha is None, msg
+  assert cfg.dlhs.dg_quantizer.rhs_mid_alpha is None, msg
+  assert cfg.drhs.dg_quantizer.lhs_mid_alpha is None, msg
+  assert cfg.drhs.dg_quantizer.rhs_mid_alpha is None, msg
   if dlhs_use_fwd_quant != SKIP:
     cfg.dlhs.rhs.use_fwd_quant = dlhs_use_fwd_quant
   if drhs_use_fwd_quant != SKIP:
     cfg.drhs.rhs.use_fwd_quant = drhs_use_fwd_quant
+
+
+def set_use_mid_quant(
+    cfg: DotGeneral,
+    fwd_mid_alpha_both: Union[SkipT, float],
+    dlhs_mid_alpha_both: Union[SkipT, float],
+    drhs_mid_alpha_both: Union[SkipT, float],
+):
+  """Enable middle quantization. Variant of SmoothQuant / AWQ."""
+  assert isinstance(
+      cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+  assert isinstance(
+      cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
+  )
+
+  msg = 'use_fwd_quant is incompatible with use_mid_quant right now.'
+  assert not cfg.dlhs.rhs.use_fwd_quant, msg
+  assert not cfg.drhs.rhs.use_fwd_quant, msg
+
+  @utils.flax_slots_kw_only_dataclass
+  class DummyNumerics(numerics.AqtNumerics):
+    """DummyNumerics for mid-quantization."""
+
+    def get_quant_bound(self):
+      return 1.0
+
+    def get_dtype(self):
+      assert False, 'Should not request dtype for mid-quantization.'
+
+    def vjp_fwd(self, x, context):
+      res = ()
+      return x, res
+
+    def vjp_bwd(self, res, grad):
+      assert res == ()
+      return grad
+
+  if fwd_mid_alpha_both != SKIP:
+    cfg.fwd.dg_quantizer.lhs_mid.numerics = DummyNumerics()
+    cfg.fwd.dg_quantizer.rhs_mid.numerics = DummyNumerics()
+    cfg.fwd.dg_quantizer.lhs_mid_alpha = fwd_mid_alpha_both
+    cfg.fwd.dg_quantizer.rhs_mid_alpha = fwd_mid_alpha_both
+  if dlhs_mid_alpha_both != SKIP:
+    cfg.dlhs.dg_quantizer.lhs_mid.numerics = DummyNumerics()
+    cfg.dlhs.dg_quantizer.rhs_mid.numerics = DummyNumerics()
+    cfg.dlhs.dg_quantizer.lhs_mid_alpha = dlhs_mid_alpha_both
+    cfg.dlhs.dg_quantizer.rhs_mid_alpha = dlhs_mid_alpha_both
+  if drhs_mid_alpha_both != SKIP:
+    cfg.drhs.dg_quantizer.lhs_mid.numerics = DummyNumerics()
+    cfg.drhs.dg_quantizer.rhs_mid.numerics = DummyNumerics()
+    cfg.drhs.dg_quantizer.lhs_mid_alpha = drhs_mid_alpha_both
+    cfg.drhs.dg_quantizer.rhs_mid_alpha = drhs_mid_alpha_both
 
 
 def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
@@ -466,7 +532,10 @@ def default_unquantized_config() -> DotGeneral:
         lhs=tensor_cfg(),
         rhs=tensor_cfg(),
         dg_quantizer=aqt_dot_general.DefaultDotGeneralQuantizer(
-            lhs=quantizer(), rhs=quantizer()
+            lhs=quantizer(),
+            rhs=quantizer(),
+            lhs_mid=quantizer(),
+            rhs_mid=quantizer(),
         ),
         dg_accumulator_dtype=None,
         local_aqt=None,
@@ -624,6 +693,9 @@ def config_v4(
     drhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
     dlhs_use_fwd_quant: Union[bool, None, SkipT] = SKIP,
     drhs_use_fwd_quant: Union[bool, None, SkipT] = SKIP,
+    fwd_mid_alpha_both: Union[SkipT, float] = SKIP,
+    dlhs_mid_alpha_both: Union[SkipT, float] = SKIP,
+    drhs_mid_alpha_both: Union[SkipT, float] = SKIP,
 ) -> DotGeneral:
   """Version 4 of user-visible AQT config."""
   cfg = default_unquantized_config()
@@ -660,6 +732,12 @@ def config_v4(
       cfg,
       dlhs_use_fwd_quant=dlhs_use_fwd_quant,
       drhs_use_fwd_quant=drhs_use_fwd_quant,
+  )
+  set_use_mid_quant(
+      cfg,
+      fwd_mid_alpha_both=fwd_mid_alpha_both,
+      dlhs_mid_alpha_both=dlhs_mid_alpha_both,
+      drhs_mid_alpha_both=drhs_mid_alpha_both,
   )
   assert cfg.fwd.local_aqt is None, 'local_aqt is not yet supported in fwd.'
   return cfg
