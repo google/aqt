@@ -71,6 +71,9 @@ def _freezer_qtensor_init_wrapper(
   scale_non_shard_axis_all = list(range(qt.ndim))
   scale_non_shard_axis_contracting = list(contracting_axis)
 
+  def _get_singleton_axes(x: jnp.ndarray) -> list[utils.AxisIdx]:
+    return [axis for axis, dim in enumerate(x.shape) if dim == 1]
+
   qt = qt.replace(
       qvalue=axis_metadata_wrapper(qt.qvalue, tile_map, []),
       scale=jax.tree.map(
@@ -87,6 +90,13 @@ def _freezer_qtensor_init_wrapper(
               x, tile_map, scale_non_shard_axis_all
           ),
           qt.scale_t,
+      ),
+      # Set the non-sharding axes for bias to the singleton dimensions.
+      bias=jax.tree.map(
+          lambda x: axis_metadata_wrapper(
+              x, tile_map, _get_singleton_axes(x)
+          ),
+          qt.bias,
       ),
   )
   return qt
