@@ -118,8 +118,8 @@ class QTensor:
   def astype(self, dtype: jnp.dtype) -> Self:
     return self.replace(dequant_dtype=dtype)  # pytype: disable=attribute-error
 
-  def quant(self, x):
-    """Quantizes the QTensor."""
+  def quant(self, x) -> Self:
+    """Quantizes x into a new QTensor."""
     assert not self.is_full(), 'Already quantized QTensor.'
     assert self.scale is not None, 'Missing scales to be used for quantization.'
     assert isinstance(
@@ -148,7 +148,7 @@ class QTensor:
     return self.replace(qvalue=qvalue)  # pytype: disable=attribute-error
 
   def dequant(self) -> jnp.ndarray:
-    """Dequantizes the QTensor."""
+    """Dequantizes the QTensor into a jax array."""
     assert self.scale is not None, 'Missing scales when dequantizing a QTensor.'
     assert isinstance(
         self.scale, list

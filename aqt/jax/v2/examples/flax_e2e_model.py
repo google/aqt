@@ -66,7 +66,7 @@ class CNN(nn.Module):
     if aqt_cfg is None:
       return None
     aqt_cfg_conv = aqt_config.default_unquantized_config()
-    aqt_cfg_conv = aqt_cfg_conv.replace(fwd=aqt_cfg)
+    aqt_cfg_conv.fwd = aqt_cfg
     return functools.partial(
         aqt_flax.AqtConvGeneralDilated,
         aqt_cfg_conv,

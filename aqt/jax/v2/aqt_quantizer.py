@@ -158,7 +158,7 @@ class Quantizer:
     x_q, res = self.numerics.vjp_fwd(qt.qvalue, self.context)
     quant_grad = jax.tree_util.Partial(self.numerics.vjp_bwd, res)
 
-    qt = qt.replace(qvalue=x_q)
+    qt.qvalue = x_q
     return qt, quant_grad
 
 

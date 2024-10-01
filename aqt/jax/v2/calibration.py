@@ -375,19 +375,20 @@ class SnrBasedAutoCalibration(Calibration):
     scale = bound / numerics_.get_quant_bound()
     scale = scale.astype(self.dtype if self.dtype is not None else x.dtype)
 
-    q_tensor = aqt_tensor.QTensor(
+    qt = aqt_tensor.QTensor(
         qvalue=None,
         scale=[scale],
         scale_t=None,
         bias=[],
         dequant_dtype=x.dtype,
-    ).quant(x)
+    )
+    qt = qt.quant(x)
 
     # This actually quantizes the tensor (clips, rounds, etc).
-    quantized_tensor, _ = numerics_.vjp_fwd(q_tensor.qvalue, context)
-    q_tensor = q_tensor.replace(qvalue=quantized_tensor)
+    quantized_tensor, _ = numerics_.vjp_fwd(qt.qvalue, context)
+    qt.qvalue = quantized_tensor
 
-    dequantized_tensor = q_tensor.dequant()
+    dequantized_tensor = qt.dequant()
     err = x - dequantized_tensor
 
     noise = jnp.sum(err**2, axis=shared_axes, keepdims=True)

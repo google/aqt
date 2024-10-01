@@ -24,20 +24,17 @@ DequantMode = aqt_dot_general.DequantMode
 
 # TODO(wppark): Match signature of load_qtensor with pl.load to support
 # partial loading of QTensor.
-def load_qtensor(qtensor: QTensor) -> QTensor:
+def load_qtensor(qt: QTensor) -> QTensor:
   """Materialize QTensor of MemoryRef of pallas into QTensor of jax.Array."""
-  qvalue = qtensor.qvalue
-  scale = qtensor.scale
-  scale_t = qtensor.scale_t
 
-  if qvalue is not None:
-    qvalue = qvalue[...]
-  if scale is not None:
-    scale = [s[...] for s in scale]
-  if scale_t is not None:
-    scale_t = [st[...] for st in scale_t]
+  if qt.qvalue is not None:
+    qt.qvalue = qt.qvalue[...]
+  if qt.scale is not None:
+    qt.scale = [s[...] for s in qt.scale]
+  if qt.scale_t is not None:
+    qt.scale_t = [st[...] for st in qt.scale_t]
 
-  return qtensor.replace(qvalue=qvalue, scale=scale, scale_t=scale_t)
+  return qt
 
 
 def _dtype_to_bits(dtype) -> int | None:
@@ -92,10 +89,10 @@ def dot_general(
   is_both_quantized = isinstance(lhs, QTensor) and isinstance(rhs, QTensor)
   if isinstance(lhs, QTensor) and not is_both_quantized:
     promoted_dtype = jnp.promote_types(lhs.dequant_dtype, rhs)
-    lhs = lhs.replace(qvalue=lhs.qvalue.astype(promoted_dtype))
+    lhs.qvalue = lhs.qvalue.astype(promoted_dtype)
   if isinstance(rhs, QTensor) and not is_both_quantized:
     promoted_dtype = jnp.promote_types(rhs.dequant_dtype, lhs)
-    rhs = rhs.replace(qvalue=rhs.qvalue.astype(promoted_dtype))
+    rhs.qvalue = rhs.qvalue.astype(promoted_dtype)
 
   if isinstance(lhs, jax.Array):
     lhs = QTensor(

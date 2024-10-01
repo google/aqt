@@ -65,6 +65,9 @@ def _freezer_qtensor_init_wrapper(
     tile_map: tiled_dot_general.AqtTileMap,
 ):
   """QTensor initialization wrapper function for the new freezer."""
+  # Copy to avoid mutating the input QTensor here or downstream (regardless of
+  # axis_metadata_wrapper's value).
+  qt = copy.deepcopy(qt)
   if axis_metadata_wrapper is None:
     return qt
 
@@ -74,30 +77,24 @@ def _freezer_qtensor_init_wrapper(
   def _get_singleton_axes(x: jnp.ndarray) -> list[utils.AxisIdx]:
     return [axis for axis, dim in enumerate(x.shape) if dim == 1]
 
-  qt = qt.replace(
-      qvalue=axis_metadata_wrapper(qt.qvalue, tile_map, []),
-      scale=jax.tree.map(
-          lambda x: axis_metadata_wrapper(
-              x, tile_map, scale_non_shard_axis_contracting
-          ),
-          qt.scale,
+  qt.qvalue = axis_metadata_wrapper(qt.qvalue, tile_map, [])
+  qt.scale = jax.tree.map(
+      lambda x: axis_metadata_wrapper(
+          x, tile_map, scale_non_shard_axis_contracting
       ),
-      # Passing scale_non_shard_axis_contracting would be incorrect due to
-      # scale transposition. scale_t is being removed from QTensor anyway
-      # so we just pass scale_non_shard_axis_all.
-      scale_t=jax.tree.map(
-          lambda x: axis_metadata_wrapper(
-              x, tile_map, scale_non_shard_axis_all
-          ),
-          qt.scale_t,
-      ),
-      # Set the non-sharding axes for bias to the singleton dimensions.
-      bias=jax.tree.map(
-          lambda x: axis_metadata_wrapper(
-              x, tile_map, _get_singleton_axes(x)
-          ),
-          qt.bias,
-      ),
+      qt.scale,
+  )
+  # Passing scale_non_shard_axis_contracting would be incorrect due to
+  # scale transposition. scale_t is being removed from QTensor anyway
+  # so we just pass scale_non_shard_axis_all.
+  qt.scale_t = jax.tree.map(
+      lambda x: axis_metadata_wrapper(x, tile_map, scale_non_shard_axis_all),
+      qt.scale_t,
+  )
+  # Set the non-sharding axes for bias to the singleton dimensions.
+  qt.bias = jax.tree.map(
+      lambda x: axis_metadata_wrapper(x, tile_map, _get_singleton_axes(x)),
+      qt.bias,
   )
   return qt
 
@@ -208,14 +205,12 @@ def _maybe_recover_scale_from_scale_t(
   transpose_fn = transpose.lhs_recover_scale_from_scale_t
   if is_rhs:
     transpose_fn = transpose.rhs_recover_scale_from_scale_t
-
-  return qt.replace(
-      scale=[
-          transpose_fn(scale_t, dimension_numbers, lhs_shape, rhs_shape)
-          for scale_t in qt.scale_t
-      ],
-      scale_t=None,
-  )
+  qt.scale = [
+      transpose_fn(scale_t, dimension_numbers, lhs_shape, rhs_shape)
+      for scale_t in qt.scale_t
+  ]
+  qt.scale_t = None
+  return qt
 
 
 def _populate_scale_t(
@@ -232,13 +227,11 @@ def _populate_scale_t(
   transpose_fn = transpose.lhs_scale_transpose_to_output
   if is_rhs:
     transpose_fn = transpose.rhs_scale_transpose_to_output
-
-  return qt.replace(
-      scale_t=[
-          transpose_fn(scale, dimension_numbers, lhs_shape, rhs_shape)
-          for scale in qt.scale
-      ]
-  )
+  qt.scale_t = [
+      transpose_fn(scale, dimension_numbers, lhs_shape, rhs_shape)
+      for scale in qt.scale
+  ]
+  return qt
 
 
 class AqtDotGeneral(nn.Module):
