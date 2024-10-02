@@ -37,7 +37,7 @@ def load_qtensor(qt: QTensor) -> QTensor:
   return qt
 
 
-def _dtype_to_bits(dtype) -> int | None:
+def _dtype_to_bits(dtype) -> None | int:
   if dtype in [jnp.bfloat16, jnp.float32]:
     return None
   if dtype == jnp.int8:

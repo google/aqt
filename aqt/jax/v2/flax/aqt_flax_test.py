@@ -36,7 +36,7 @@ class AqtFlaxTest(parameterized.TestCase):
 
   def test_aqt_einsum(self):
     class Model(nn.Module):
-      aqt_cfg: Callable[[], config.DotGeneral] | None
+      aqt_cfg: None | Callable[[], config.DotGeneral]
       lhs_qt_external: bool = False
       rhs_qt_external: bool = False
 
@@ -146,7 +146,7 @@ class AqtFlaxTest(parameterized.TestCase):
   @parameterized.parameters(True, False)
   def test_freezer(self, use_legacy_freezer: bool):
     class Model(nn.Module):
-      aqt_cfg: config.DotGeneral | None
+      aqt_cfg: None | config.DotGeneral
       lhs_quant_mode: aqt_flax.QuantMode
       rhs_quant_mode: aqt_flax.QuantMode
       use_legacy_freezer: bool
@@ -268,7 +268,7 @@ class AqtFlaxTest(parameterized.TestCase):
       return ret
 
     class Model(nn.Module):
-      aqt_cfg: config.DotGeneral | None
+      aqt_cfg: None | config.DotGeneral
       lhs_quant_mode: aqt_flax.QuantMode
       rhs_quant_mode: aqt_flax.QuantMode
 
@@ -340,7 +340,7 @@ class AqtFlaxTest(parameterized.TestCase):
       return tiled_dot_general.Cfg.from_einsum(eqn, {'d': tile_size})
 
     class Model(nn.Module):
-      aqt_cfg: config.DotGeneral | None
+      aqt_cfg: None | config.DotGeneral
       lhs_quant_mode: aqt_flax.QuantMode
       rhs_quant_mode: aqt_flax.QuantMode
 

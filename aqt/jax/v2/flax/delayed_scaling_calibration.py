@@ -57,8 +57,8 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
-      context: utils.Context | None = None,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      context: None | utils.Context = None,
   ) -> jnp.ndarray:
     del shared_axes
     # Right now we just support per_tensor calibration (i.e. one value).
@@ -94,9 +94,9 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     dtype = self.dtype if self.dtype is not None else x.dtype
     bound = self.get_bound(x, shared_axes, context)

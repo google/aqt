@@ -30,11 +30,11 @@ from praxis import base_layer
 class AqtEinsum(base_layer.BaseLayer):
   """Quantized Einsum class for model injection."""
 
-  cfg: aqt_config.DotGeneral | None = None
+  cfg: None | aqt_config.DotGeneral = None
   # Einsum can switch the argument order before they are passed to dot_general
   # tiling_cfg is a config for the underlying dot_general, not for the einsum.
   # TODO(lew): Port the switch logic from flax/ to pax/
-  tiling_cfg: tiled_dot_general.Cfg | None = None
+  tiling_cfg: None | tiled_dot_general.Cfg = None
   track_train_step: bool = False
 
   def setup(self) -> None:

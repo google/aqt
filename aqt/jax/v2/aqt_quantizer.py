@@ -38,14 +38,14 @@ class Quantizer:
   """Configuration of quantization of one tensor."""
 
   numerics: AbstractAqtNumerics = utils.static_field()
-  calib_shared_axes: Sequence[utils.AxisIdx] | Literal["per_tensor"] | None = (
+  calib_shared_axes: None | Sequence[utils.AxisIdx] | Literal["per_tensor"] = (
       utils.static_field()
   )
   scale_stop_grad: bool = utils.static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
   calibration: type[AbstractAqtCalibration] = utils.static_field()
-  _calibrator: AbstractAqtCalibration | None = utils.static_field(default=None)
+  _calibrator: None | AbstractAqtCalibration = utils.static_field(default=None)
   # TODO(yichizh): Factor out auxiliary dataclasses into a separate file.
   context: utils.Context
 
@@ -61,8 +61,8 @@ class Quantizer:
       self,
       x,
       *,
-      calibration_axes: Sequence[utils.AxisIdx] | None,
-      tiling_state: TilingState | None = None,
+      calibration_axes: None | Sequence[utils.AxisIdx],
+      tiling_state: None | TilingState = None,
   ) -> tuple[aqt_tensor.QTensor, aqt_tensor.GradientFn]:
     """The core quantizing function."""
     qt = self.calibrate(
@@ -75,8 +75,8 @@ class Quantizer:
       self,
       x,
       *,
-      calibration_axes: Sequence[utils.AxisIdx] | None,
-      tiling_state: TilingState | None = None,
+      calibration_axes: None | Sequence[utils.AxisIdx],
+      tiling_state: None | TilingState = None,
   ) -> aqt_tensor.QTensor:
     """Creates incomplete QTensor with only quantization parameters.
 
@@ -163,7 +163,7 @@ class Quantizer:
 
 
 def quantizer_make(
-    n_bits: int | fp8_numerics.FP8Dtype | None,
+    n_bits: None | int | fp8_numerics.FP8Dtype,
     preserve_max_val: bool = False,
     initialize_calibration: bool = True,
 ) -> Quantizer:

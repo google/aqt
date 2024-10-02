@@ -35,7 +35,7 @@ AxisIdx = int
 AxisSize = int
 
 # None means that the template matches any axis size
-ShapeTemplate = Sequence[int | None]
+ShapeTemplate = Sequence[None |int]
 
 # TODO(lew): We should get a better type for jax.lax.dot_general and variants.
 DotGeneralT = Any
@@ -117,7 +117,7 @@ def test_pprint_eq(
   assert str_input_a == str_input_b, print_diff(str_input_a, str_input_b)
 
 
-def infer_dtype_from_bits(bits: int) -> jnp.dtype | None:
+def infer_dtype_from_bits(bits: int) -> None | jnp.dtype:
   """Get the dtype for the number of bits provided.
 
   Args:
@@ -150,6 +150,6 @@ def get_remaining_axes(
 
 @flax_slots_dataclass
 class Context:
-  key: jax.Array | None = dynamic_field()
-  train_step: int | None = dynamic_field()
+  key: None | jax.Array = dynamic_field()
+  train_step: None | int = dynamic_field()
   quant_mode: QuantMode = static_field(default=QuantMode.TRAIN)

@@ -11,9 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for freezer."""
 
-from typing import Any, Mapping, Sequence, Callable
+from typing import Any, Callable, Mapping, Sequence
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -34,7 +33,7 @@ class _CustomStructure:
 
 class TestModel(nn.Module):
   freezer_mode: freezer.FreezerMode
-  axis_metadata_wrapper: Callable[..., nn_meta.AxisMetadata] | None = None
+  axis_metadata_wrapper: None | Callable[..., nn_meta.AxisMetadata] = None
 
   def setup(self):
     self.f = freezer.Freezer(

@@ -37,7 +37,7 @@ import jax.numpy as jnp
 
 NoShardingAxes = Sequence[utils.AxisIdx]
 AxisMetadataWrapper = Callable[
-    [jnp.ndarray, tiled_dot_general.AqtTileMap | None, NoShardingAxes],
+    [jnp.ndarray, None | tiled_dot_general.AqtTileMap, NoShardingAxes],
     nn_meta.AxisMetadata,
 ]
 DotGeneralTilingFn = Callable[
@@ -192,7 +192,7 @@ class Freezer(nn.Module):
 
 
 def _maybe_recover_scale_from_scale_t(
-    qt: aqt_tensor.QTensor | None,
+    qt: None | aqt_tensor.QTensor,
     dimension_numbers: jax.lax.DotDimensionNumbers,
     is_rhs: bool,
     lhs_shape: Sequence[int],
@@ -287,8 +287,8 @@ class AqtDotGeneral(nn.Module):
       lhs_shape,
       rhs_shape,
       dimension_numbers: tuple[Iterable[int], Iterable[int]],
-      lhs_tile_map: tiled_dot_general.AqtTileMap | None = None,
-      rhs_tile_map: tiled_dot_general.AqtTileMap | None = None,
+      lhs_tile_map: None | tiled_dot_general.AqtTileMap = None,
+      rhs_tile_map: None | tiled_dot_general.AqtTileMap = None,
   ):
     if self.cfg is None:
       return jax.lax.dot_general
@@ -872,12 +872,12 @@ class AqtConvGeneralDilated(nn.Module):
       rhs,
       window_strides: Sequence[int],
       padding: str | Sequence[tuple[int, int]],
-      lhs_dilation: Sequence[int] | None = None,
-      rhs_dilation: Sequence[int] | None = None,
+      lhs_dilation: None | Sequence[int] = None,
+      rhs_dilation: None | Sequence[int] = None,
       dimension_numbers: (
-          jax.lax.ConvGeneralDilatedDimensionNumbers
+          None
+          | jax.lax.ConvGeneralDilatedDimensionNumbers
           | tuple[str, str, str]
-          | None
       ) = None,
       feature_group_count: int = 1,
       batch_group_count: int = 1,

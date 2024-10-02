@@ -156,9 +156,9 @@ def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
 
 def set_accumulator_dtype(
     cfg: DotGeneral,
-    fwd_dtype: jnp.dtype | None | SkipT,
-    dlhs_dtype: jnp.dtype | None | SkipT,
-    drhs_dtype: jnp.dtype | None | SkipT,
+    fwd_dtype: None | jnp.dtype | SkipT,
+    dlhs_dtype: None | jnp.dtype | SkipT,
+    drhs_dtype: None | jnp.dtype | SkipT,
 ):
   if fwd_dtype != SKIP:
     cfg.fwd.dg_accumulator_dtype = fwd_dtype
@@ -218,7 +218,7 @@ def set_stochastic_rounding(
 
 
 def set_constant_calibration(
-    cfg: DotGeneral, bound: float = 1.0, bias: float | None = None
+    cfg: DotGeneral, bound: float = 1.0, bias: None | float = None
 ):
   """Sets the static bound for calibration."""
   calibration_cls = functools.partial(
@@ -245,9 +245,9 @@ def set_constant_calibration(
 
 def set_local_aqt(
     cfg: DotGeneral,
-    fwd_local_aqt: SkipT | LocalAqt | None,
-    dlhs_local_aqt: SkipT | LocalAqt | None,
-    drhs_local_aqt: SkipT | LocalAqt | None,
+    fwd_local_aqt: None | SkipT | LocalAqt,
+    dlhs_local_aqt: None | SkipT | LocalAqt,
+    drhs_local_aqt: None | SkipT | LocalAqt,
 ):
   if fwd_local_aqt != SKIP:
     cfg.fwd.local_aqt = fwd_local_aqt
@@ -259,8 +259,8 @@ def set_local_aqt(
 
 def set_use_fwd_quant(
     cfg: DotGeneral,
-    dlhs_use_fwd_quant: bool | None | SkipT,
-    drhs_use_fwd_quant: bool | None | SkipT,
+    dlhs_use_fwd_quant: None | bool | SkipT,
+    drhs_use_fwd_quant: None | bool | SkipT,
 ):
   """Enable resusing of fwd pass quantization for backprop."""
   msg = 'use_fwd_quant is incompatible with use_mid_quant right now.'
@@ -436,12 +436,12 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
 
 def set_bits(
     cfg: DotGeneral,
-    fwd_lhs_bit: int | None | fp8_numerics.FP8Dtype,
-    fwd_rhs_bit: int | None | fp8_numerics.FP8Dtype,
-    dlhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
-    dlhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
-    drhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
-    drhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+    fwd_lhs_bit: None | int | fp8_numerics.FP8Dtype,
+    fwd_rhs_bit: None | int | fp8_numerics.FP8Dtype,
+    dlhs_lhs_bit: None | int | fp8_numerics.FP8Dtype,
+    dlhs_rhs_bit: None | int | fp8_numerics.FP8Dtype,
+    drhs_lhs_bit: None | int | fp8_numerics.FP8Dtype,
+    drhs_rhs_bit: None | int | fp8_numerics.FP8Dtype,
 ) -> DotGeneral:
   """Set quantization bits for dot_general config."""
 
@@ -678,9 +678,9 @@ def config_v3(
 
 def config_v4(
     *,
-    fwd_bits: int | None | fp8_numerics.FP8Dtype = 8,
-    dlhs_bits: int | None | fp8_numerics.FP8Dtype = 8,
-    drhs_bits: int | None | fp8_numerics.FP8Dtype = None,
+    fwd_bits: None | int | fp8_numerics.FP8Dtype = 8,
+    dlhs_bits: None | int | fp8_numerics.FP8Dtype = 8,
+    drhs_bits: None | int | fp8_numerics.FP8Dtype = None,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
@@ -688,11 +688,11 @@ def config_v4(
     drhs_local_aqt: None | LocalAqt = None,
     # accumulator dtype by default is automatically set in set_bits,
     # but users can still configure a special dtype such as jnp.int16, etc.
-    fwd_accumulator_dtype: jnp.dtype | None | SkipT = SKIP,
-    dlhs_accumulator_dtype: jnp.dtype | None | SkipT = SKIP,
-    drhs_accumulator_dtype: jnp.dtype | None | SkipT = SKIP,
-    dlhs_use_fwd_quant: bool | None | SkipT = SKIP,
-    drhs_use_fwd_quant: bool | None | SkipT = SKIP,
+    fwd_accumulator_dtype: None | jnp.dtype | SkipT = SKIP,
+    dlhs_accumulator_dtype: None | jnp.dtype | SkipT = SKIP,
+    drhs_accumulator_dtype: None | jnp.dtype | SkipT = SKIP,
+    dlhs_use_fwd_quant: None | bool | SkipT = SKIP,
+    drhs_use_fwd_quant: None | bool | SkipT = SKIP,
     fwd_mid_alpha_both: SkipT | float = SKIP,
     dlhs_mid_alpha_both: SkipT | float = SKIP,
     drhs_mid_alpha_both: SkipT | float = SKIP,

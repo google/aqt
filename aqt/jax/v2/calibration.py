@@ -36,7 +36,7 @@ class Calibration(abc.ABC):
 
   # The dtype of the quantization scale and bias arrays. If not set, the arrays
   # will be in the same dtype as the input.
-  dtype: jnp.dtype | None = utils.static_field(default=None)
+  dtype: None | jnp.dtype = utils.static_field(default=None)
   # Round up the calibration to power of 2 (po2).
   po2_scale: bool = utils.static_field(default=False)
 
@@ -44,9 +44,9 @@ class Calibration(abc.ABC):
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     """Returns the quantizaiton scale and bias for the given input tensor."""
     # NOTE: The scale and bias calculation are handled by the Calibration
@@ -67,14 +67,14 @@ class ConstantCalibration(Calibration):
   """Calibration with a constant per-tensor or per-channel value."""
 
   bound: jnp.ndarray | float
-  bias: jnp.ndarray | float | None = None
+  bias: None | jnp.ndarray | float = None
 
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     del context
     if isinstance(self.bound, float) and self.bound <= 0.0:
@@ -110,14 +110,14 @@ class AbsMaxCalibration(Calibration):
       1.0, setting IntSymmetric.clip_gradient=True is likely to be important.
   """
 
-  clipping_scale: float | None = None
+  clipping_scale: None | float = None
 
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     """Calibration.
 
@@ -171,9 +171,9 @@ class AbsMeanCalibration(Calibration):
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     """Calibration."""
     del context
@@ -215,9 +215,9 @@ class SnrBasedAutoCalibration(Calibration):
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     """Produces the scale for quantization based on SNR values.
 

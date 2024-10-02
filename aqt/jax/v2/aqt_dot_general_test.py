@@ -185,7 +185,7 @@ def fqt_param_dict(s, use_fwd_quant, **kwargs):
 @utils.flax_slots_kw_only_dataclass
 class _TrickyNumerics(numerics.AqtNumerics):
   # Needed because int8 casting would do additional clip and round.
-  dtype: jnp.dtype | None = None
+  dtype: None | jnp.dtype = None
 
   def get_dtype(self):
     return self.dtype
@@ -214,10 +214,10 @@ def _modify_dg(
     rhs_dequant_mode: aqt.DequantMode = aqt.DequantMode.OUTPUT,
     lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
-    use_fwd_quant: bool | None = None,
+    use_fwd_quant: None | bool = None,
     disable_rounding: bool = False,
     fwd_lhs_tricky_clip_and_round: bool = False,
-    local_aqt: aqt.LocalAqt | None = None,
+    local_aqt: None | aqt.LocalAqt = None,
     use_mid_quant: bool = False,
     clip_gradient: bool = False,
 ) -> aqt.DotGeneral:
@@ -306,11 +306,11 @@ def _aqt_dg_full_lr_diff(
     rhs_dequant_mode: aqt.DequantMode,
     lhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
     rhs_calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
-    use_fwd_quant: bool | None = None,
+    use_fwd_quant: None | bool = None,
     use_mid_quant: bool = False,
     disable_rounding: bool = False,
     fwd_lhs_tricky_clip_and_round: bool = False,
-    local_aqt: aqt.LocalAqt | None = None,
+    local_aqt: None | aqt.LocalAqt = None,
     *,
     readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
@@ -336,10 +336,10 @@ def _aqt_dg_full_lr_diff(
 def _aqt_dg_full(
     dequant_mode: aqt.DequantMode,
     calibration_mode: aqt.CalibrationMode = aqt.CalibrationMode.CONTRACTING_AXIS,
-    use_fwd_quant: bool | None = None,
+    use_fwd_quant: None | bool = None,
     disable_rounding: bool = False,
     fwd_lhs_tricky_clip_and_round: bool = False,
-    local_aqt: aqt.LocalAqt | None = None,
+    local_aqt: None | aqt.LocalAqt = None,
     use_mid_quant: bool = False,
     *,
     readonly_dg: aqt.DotGeneral,

@@ -39,8 +39,8 @@ class MeanOfAbsMaxCalibration(calibration.Calibration, nn.Module):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
-      context: utils.Context | None = None,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      context: None | utils.Context = None,
   ) -> jnp.ndarray:
     abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
     quant_mode = context.quant_mode if context else utils.QuantMode.TRAIN
@@ -77,9 +77,9 @@ class MeanOfAbsMaxCalibration(calibration.Calibration, nn.Module):
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     dtype = self.dtype if self.dtype is not None else x.dtype
     bound = self.get_bound(x, shared_axes, context)
@@ -144,8 +144,8 @@ class WeightedStatsCalibration(calibration.Calibration, nn.Module):
       self,
       var: nn.Variable,
       s: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
-      weight: jnp.ndarray | None = None,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      weight: None | jnp.ndarray = None,
       reduce_max: bool = False,
   ):
     """Updates the given Flax variable."""
@@ -177,8 +177,8 @@ class WeightedStatsCalibration(calibration.Calibration, nn.Module):
   def get_bound(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
-      context: utils.Context | None = None,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      context: None | utils.Context = None,
   ) -> jnp.ndarray:
     if self.lp_order > 30:
       raise NotImplementedError("For higher norms we should add stabilization.")
@@ -240,9 +240,9 @@ class WeightedStatsCalibration(calibration.Calibration, nn.Module):
   def get_scale_and_bias(
       self,
       x: jnp.ndarray,
-      shared_axes: Sequence[utils.AxisIdx] | None,
+      shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
-      context: utils.Context | None = None,
+      context: None | utils.Context = None,
   ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
     dtype = self.dtype if self.dtype is not None else x.dtype
     bound = self.get_bound(x, shared_axes, context)

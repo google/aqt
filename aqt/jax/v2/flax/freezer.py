@@ -45,10 +45,10 @@ class Freezer(nn.Module):
 
   collection: str
   mode: FreezerMode
-  axis_metadata_wrapper: Callable[..., nn_meta.AxisMetadata] | None = None
+  axis_metadata_wrapper: None | Callable[..., nn_meta.AxisMetadata] = None
 
   @nn.compact
-  def _get_or_set(self, inputs: Any, is_set: bool) -> Any | None:
+  def _get_or_set(self, inputs: Any, is_set: bool) -> None | Any:
     def initializer():
       if self.axis_metadata_wrapper is not None:
         return self.axis_metadata_wrapper(inputs)
@@ -93,8 +93,8 @@ class Freezer(nn.Module):
           # Nothing matched.
           assert False, 'Unknown quant mode.'
 
-  def get(self) -> Any | None:
+  def get(self) -> None | Any:
     return self._get_or_set(None, is_set=False)
 
-  def set(self, inputs: Any) -> Any | None:
+  def set(self, inputs: Any) -> None | Any:
     return self._get_or_set(inputs, is_set=True)

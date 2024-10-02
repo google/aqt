@@ -48,8 +48,8 @@ class AxisTiling:
   """Axis tiling configuration for subchannel quantization."""
   axis: AxisIdx
   # At most one of tile_count, tile_size can be None.
-  tile_count: AxisSize | None = None
-  tile_size: AxisSize | None = None
+  tile_count: None | AxisSize = None
+  tile_size: None | AxisSize = None
 
   def __post_init__(self):
     msg = 'At most one of tile_count and tile_size can be None'
@@ -268,7 +268,7 @@ class TilingState:
   def to_tiled_axes_transposed(
       self,
       axes: Iterable[AxisIdx | str],
-  ) -> tuple[list[AxisIdx], list[AxisIdx] | None]:
+  ) -> tuple[list[AxisIdx], None | list[AxisIdx]]:
     # pylint: disable=g-doc-args,g-doc-return-or-yield
     """The given 'axes' parameter defines axes in untiled represented Array.
 

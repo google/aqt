@@ -41,8 +41,8 @@ class CNN(nn.Module):
   """A simple CNN model."""
 
   bn_use_stats: bool
-  aqt_cfg_dg: aqt_config.DotGeneral | None = None
-  aqt_cfg_conv: aqt_config.DotGeneralRaw | None = None
+  aqt_cfg_dg: None | aqt_config.DotGeneral = None
+  aqt_cfg_conv: None | aqt_config.DotGeneralRaw = None
   weights_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
   activation_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN
   use_legacy_freezer: bool = False
@@ -50,7 +50,7 @@ class CNN(nn.Module):
   def get_flax_cls(
       self,
       aqt_cfg: aqt_config.DotGeneral | aqt_config.DotGeneralRaw,
-      tiling_cfg: tiled_dot_general.Cfg | None = None):
+      tiling_cfg: None | tiled_dot_general.Cfg = None):
     if isinstance(aqt_cfg, aqt_config.DotGeneral):
       return functools.partial(
           aqt_flax.AqtDotGeneral,
@@ -273,10 +273,10 @@ def create_train_state(rng, aqt_cfg_dg=None, aqt_cfg_conv=None):
 def train_and_evaluate(
     num_epochs: int,
     workdir: str,
-    aqt_cfg_dg: aqt_config.DotGeneral | None = None,
-    aqt_cfg_conv: aqt_config.DotGeneralRaw | None = None,
-    state: TrainState | None = None,
-    datasets: tuple[Dataset, Dataset] | None = None,
+    aqt_cfg_dg: None | aqt_config.DotGeneral = None,
+    aqt_cfg_conv: None | aqt_config.DotGeneralRaw = None,
+    state: None | TrainState = None,
+    datasets: None | tuple[Dataset, Dataset] = None,
 ) -> TrainState:
   """Execute model training and evaluation loop."""
   if datasets is None:

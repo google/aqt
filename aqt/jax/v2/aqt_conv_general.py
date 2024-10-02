@@ -40,8 +40,8 @@ def make_conv_general_dilated_with_qt(cfg: aqt_dot_general.DotGeneralRaw):
       rhs,
       window_strides,
       padding,
-      lhs_qt: aqt_tensor.QTensor | None = None,
-      rhs_qt: aqt_tensor.QTensor | None = None,
+      lhs_qt: None | aqt_tensor.QTensor = None,
+      rhs_qt: None | aqt_tensor.QTensor = None,
       lhs_dilation=None,
       rhs_dilation=None,
       dimension_numbers=None,
@@ -192,8 +192,8 @@ def make_conv_general_dilated(cfg: aqt_dot_general.DotGeneralRaw):
 
 def conv_general_dilated_make(
     spatial_dimensions: int,
-    lhs_bits: int | None = None,
-    rhs_bits: int | None = None,
+    lhs_bits: None | int = None,
+    rhs_bits: None | int = None,
     initialize_calibration: bool = True,
 ) -> aqt_dot_general.DotGeneralRaw:
   """Create quantization config conv_general_dilated.

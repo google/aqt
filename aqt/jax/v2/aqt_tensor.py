@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import jax.typing as jax_typing
 from typing_extensions import Self  # for python version < 3.11
 
-GradientFn = Callable[..., Any] | None  # None when there is no numerics
+GradientFn = None | Callable[..., Any]  # None when there is no numerics
 _MSG_NO_QVALUE = (
     'QTensor does not have qvalue, but it is asked to access the qvalue.'
     ' Call QTensor.quant() before using the qvalue.'
@@ -90,7 +90,7 @@ class QTensor:
   )
 
   @property
-  def dtype(self) -> jnp.dtype | None:
+  def dtype(self) -> None | jnp.dtype:
     # As some dequant_dtype could actually be not a jnp.dtype (e.g.,
     # jnp.float16), even though it's not supposed to be, we need to
     # wrap with a redundant dtype call to make sure the returned
@@ -246,7 +246,7 @@ def zeros_with_scale(
     calibration_axis: Sequence[utils.AxisIdx],
     *,
     container_dtype: jnp.dtype,
-    scale_dtype: jnp.dtype | None = None,
+    scale_dtype: None | jnp.dtype = None,
     dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""

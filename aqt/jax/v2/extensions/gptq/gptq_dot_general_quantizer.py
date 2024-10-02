@@ -31,7 +31,7 @@ import numpy as np
 from rigl.projects.bigsparse import sharded_gptc
 
 
-def _get_quant_mode(context: utils.Context | None) -> utils.QuantMode:
+def _get_quant_mode(context: None | utils.Context) -> utils.QuantMode:
   return utils.QuantMode.TRAIN if context is None else context.quant_mode
 
 
@@ -59,9 +59,9 @@ def _get_divisible_blocksize(dim: int, blocksize_top: int) -> int:
 def _reshape_kernel_for_gptq(
     kernel: jnp.ndarray,
     ca: Sequence[utils.AxisIdx],
-    sharding_axes: str | None,
+    sharding_axes: None | str,
     act_order: bool,
-    perm: Sequence[utils.AxisIdx] | None,
+    perm: None | Sequence[utils.AxisIdx],
     blocksize: int,
 ) -> tuple[jnp.ndarray, Sequence[int]]:
   """Reshapes kernel to (features / blocksize, blocksize, -1) and potentially reshard."""
@@ -91,9 +91,9 @@ def _reshape_kernel_for_gptq(
 def _recover_kernel_from_gptq_result(
     kernel: jnp.ndarray,
     ca: Sequence[utils.AxisIdx],
-    sharding_axes: str | None,
+    sharding_axes: None | str,
     act_order: bool,
-    perm: Sequence[utils.AxisIdx] | None,
+    perm: None | Sequence[utils.AxisIdx],
     kernel_dtype: jnp.dtype,
     kernel_feature_grouped_shape: Sequence[int]
 ) -> jnp.ndarray:
@@ -131,7 +131,7 @@ class GptqHinvCollector(nn.Module):
   """
   quant_collection: str
 
-  sharding_axes: str | None
+  sharding_axes: None | str
 
   # Percentage of damping during hinv initialization.
   perc_damp: float = 0.01
@@ -146,7 +146,7 @@ class GptqHinvCollector(nn.Module):
       x: jnp.ndarray,
       ca: Sequence[utils.AxisIdx],
       quant_mode: utils.QuantMode,
-  ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
+  ) -> tuple[jnp.ndarray, None | jnp.ndarray]:
     """Collects Inverse of the hessian.
 
     Args:
@@ -234,7 +234,7 @@ class GptqHinvCollector(nn.Module):
 class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
   """GPTQ dot_general quantizer."""
 
-  sharding_axes: str | None = utils.static_field()
+  sharding_axes: None | str = utils.static_field()
 
   quant_collection: str = utils.static_field()
 
@@ -252,9 +252,9 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       self,
       lhs: jax.Array,
       rhs: jax.Array,
-      dimension_numbers: jax.lax.DotDimensionNumbers | None,
-      lhs_mode: aqt_dot_general.CalibrationMode | None,
-      rhs_mode: aqt_dot_general.CalibrationMode | None,
+      dimension_numbers: None | jax.lax.DotDimensionNumbers,
+      lhs_mode: None | aqt_dot_general.CalibrationMode,
+      rhs_mode: None | aqt_dot_general.CalibrationMode,
   ) -> tuple[
       tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:  # pylint: disable=g-doc-args

@@ -20,7 +20,7 @@ from aqt.jax.v2.numerics import no_numerics
 
 
 def get_numerics(
-    bits: int | None | fp8_numerics.FP8Dtype, preserve_max_val=False
+    bits: None | int | fp8_numerics.FP8Dtype, preserve_max_val=False
 ):
   """Get numerics object from number of bits."""
   if bits is None:

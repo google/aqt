@@ -82,8 +82,8 @@ class Tensor:
 
 @utils.flax_slots_kw_only_dataclass
 class LocalAqt:
-  contraction_axis_shard_count: int | None = utils.static_field(default=None)
-  contraction_axis_shard_size: int | None = utils.static_field(default=None)
+  contraction_axis_shard_count: None | int = utils.static_field(default=None)
+  contraction_axis_shard_size: None | int = utils.static_field(default=None)
   # tile_largest_shape=True will apply the factor_reshape_largest function,
   # where shard_size is required and shard_count should be None.
   # If it is False, the original factor_reshape function will be applied,
@@ -355,9 +355,9 @@ class DotGeneralQuantizer(abc.ABC):
       self,
       lhs: jax.Array,
       rhs: jax.Array,
-      dimension_numbers: jax.lax.DotDimensionNumbers | None,
-      lhs_mode: CalibrationMode | None,
-      rhs_mode: CalibrationMode | None,
+      dimension_numbers: None | jax.lax.DotDimensionNumbers,
+      lhs_mode: None | CalibrationMode,
+      rhs_mode: None | CalibrationMode,
   ) -> tuple[
       tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
@@ -403,8 +403,8 @@ class DotGeneralQuantizer(abc.ABC):
   @abc.abstractmethod
   def assert_calib_shared_axes_value(
       self,
-      lhs_val: Sequence[utils.AxisIdx] | None,
-      rhs_val: Sequence[utils.AxisIdx] | None,
+      lhs_val: None | Sequence[utils.AxisIdx],
+      rhs_val: None | Sequence[utils.AxisIdx],
       msg: str,
   ) -> None:
     """Asserts if calib_shared_axes have certain values."""
@@ -434,8 +434,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   # The amount (exponent) of the scales that should be transferred to the
   # other side. 0.0 = nothing, 1.0 = all.
-  lhs_mid_alpha: float | None = None
-  rhs_mid_alpha: float | None = None
+  lhs_mid_alpha: None | float = None
+  rhs_mid_alpha: None | float = None
 
   # This is a hack to make QTensors compatible with the current
   # _qtensor_dot_general.
@@ -463,9 +463,9 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
       self,
       lhs: jax.Array,
       rhs: jax.Array,
-      dimension_numbers: jax.lax.DotDimensionNumbers | None,
-      lhs_mode: CalibrationMode | None,
-      rhs_mode: CalibrationMode | None,
+      dimension_numbers: None | jax.lax.DotDimensionNumbers,
+      lhs_mode: None | CalibrationMode,
+      rhs_mode: None | CalibrationMode,
   ) -> tuple[
       tuple[jax.Array, aqt_tensor.QTensor], tuple[jax.Array, aqt_tensor.QTensor]
   ]:
@@ -577,8 +577,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 
   def assert_calib_shared_axes_value(
       self,
-      lhs_val: Sequence[utils.AxisIdx] | None,
-      rhs_val: Sequence[utils.AxisIdx] | None,
+      lhs_val: None | Sequence[utils.AxisIdx],
+      rhs_val: None | Sequence[utils.AxisIdx],
       msg: str,
   ) -> None:
     assert self.lhs.calib_shared_axes == lhs_val, msg
@@ -596,8 +596,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
 def quant(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
-    lhs_qt: aqt_tensor.QTensor | None,
-    rhs_qt: aqt_tensor.QTensor | None,
+    lhs_qt: None | aqt_tensor.QTensor,
+    rhs_qt: None | aqt_tensor.QTensor,
     dg_quantizer: DotGeneralQuantizer,
     lhs_cfg: Tensor,
     rhs_cfg: Tensor,
