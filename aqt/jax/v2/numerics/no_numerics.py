@@ -13,7 +13,7 @@
 # limitations under the License.
 """Identity numerics for passing through input as-is."""
 
-from typing import Any, Optional
+from typing import Any
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -25,8 +25,8 @@ class NoNumerics(numerics.AqtNumerics):
 
   # TODO(lew): This is a workaround. We should separate Stochastic Rounding.
   # noise_fn has no effect in NoNumerics.
-  noise_fn: Optional[stochastic_rounding.NoiseFn] = None
-  dtype: Optional[Any] = None
+  noise_fn: None | stochastic_rounding.NoiseFn = None
+  dtype: None | Any = None
 
   # TODO(lew): This is a hack. We treat check isinstance(NoNumerics) and treat
   # it in a special way right now. These functions are never called

@@ -25,7 +25,7 @@
 
 import abc
 import enum
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Sequence
 
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
@@ -157,9 +157,9 @@ def dot_general_raw_make(
 # TODO: b/343490088 - Move all the parameters to dataclass defaults,
 #   provide setters to modify the configuration.
 def dot_general_make(
-    lhs_bits: Optional[int | fp8_numerics.FP8Dtype] = None,
-    rhs_bits: Optional[int | fp8_numerics.FP8Dtype] = None,
-    bwd_bits: Optional[int | fp8_numerics.FP8Dtype] = None,
+    lhs_bits: None | int | fp8_numerics.FP8Dtype = None,
+    rhs_bits: None | int | fp8_numerics.FP8Dtype = None,
+    bwd_bits: None | int | fp8_numerics.FP8Dtype = None,
     use_fwd_quant: bool = True,
     dlhs_local_aqt=None,
     drhs_local_aqt=None,
@@ -610,7 +610,7 @@ def quant(
   """Quantizes the given lhs and rhs using dg_quantizer."""
 
   def _postprocess_qtensor(
-      input_qtensor: Optional[aqt_tensor.QTensor],
+      input_qtensor: None | aqt_tensor.QTensor,
       calculated_qtensor: aqt_tensor.QTensor,
       quant_grad: aqt_tensor.GradientFn,
   ) -> tuple[aqt_tensor.QTensor, str | aqt_tensor.GradientFn]:
@@ -734,8 +734,8 @@ class DotGeneralRaw:
   lhs: Tensor
   rhs: Tensor
   dg_quantizer: DotGeneralQuantizer
-  dg_accumulator_dtype: Optional[jnp.dtype] = utils.static_field()
-  local_aqt: Optional[LocalAqt] = utils.static_field()
+  dg_accumulator_dtype: None | jnp.dtype = utils.static_field()
+  local_aqt: None | LocalAqt = utils.static_field()
   jax_scope_name: str = utils.static_field()
 
   # Set it to true in order to train with non-None lhs_qt or rhs_qt.
@@ -755,10 +755,10 @@ class DotGeneralRaw:
   def __call__(
       self,
       lhs: jnp.ndarray,
-      rhs: Union[jnp.ndarray, MultiTensor],
+      rhs: jnp.ndarray | MultiTensor,
       # xhs_qt are used in serving.
-      lhs_qt: Optional[aqt_tensor.QTensor],
-      rhs_qt: Optional[aqt_tensor.QTensor],
+      lhs_qt: None | aqt_tensor.QTensor,
+      rhs_qt: None | aqt_tensor.QTensor,
       dimension_numbers: jax.lax.DotDimensionNumbers,
   ):
     """A quantized dot_general function without custom gradient."""
@@ -968,8 +968,8 @@ class DotGeneral:
       self,
       lhs: jnp.ndarray,
       rhs: jnp.ndarray,
-      lhs_qt: Optional[aqt_tensor.QTensor],
-      rhs_qt: Optional[aqt_tensor.QTensor],
+      lhs_qt: None | aqt_tensor.QTensor,
+      rhs_qt: None | aqt_tensor.QTensor,
       dimension_numbers: lax.DotDimensionNumbers,
   ):
     """dot_general function with expanded API."""
@@ -1073,8 +1073,8 @@ class DotGeneral:
 def _dg_core(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
-    lhs_qt: Optional[aqt_tensor.QTensor],
-    rhs_qt: Optional[aqt_tensor.QTensor],
+    lhs_qt: None | aqt_tensor.QTensor,
+    rhs_qt: None | aqt_tensor.QTensor,
     dimension_numbers: lax.DotDimensionNumbers,
     cfg: DotGeneral,
 ):
@@ -1090,8 +1090,8 @@ def _dg_core(
 def dg_core_vjp_fwd(
     lhs: jnp.ndarray,
     rhs: jnp.ndarray,
-    lhs_qt: Optional[aqt_tensor.QTensor],
-    rhs_qt: Optional[aqt_tensor.QTensor],
+    lhs_qt: None | aqt_tensor.QTensor,
+    rhs_qt: None | aqt_tensor.QTensor,
     dimension_numbers: lax.DotDimensionNumbers,
     cfg: DotGeneral,
 ):
@@ -1168,7 +1168,7 @@ def _update_dimension_numbers_for_backward(
 
 def dg_core_vjp_bwd(
     fwd_dimension_numbers: lax.DotDimensionNumbers,
-    res: tuple[Optional[DotGeneralRes], DotGeneral],
+    res: tuple[None | DotGeneralRes, DotGeneral],
     g,
 ):
   """custom_vjp bwd pass."""

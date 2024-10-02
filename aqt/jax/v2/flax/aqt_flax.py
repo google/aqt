@@ -18,7 +18,7 @@
 import copy
 import enum
 import functools
-from typing import Callable, Iterable, Optional, Sequence, Union
+from typing import Callable, Iterable, Sequence
 from aqt.jax.v2 import aqt_conv_general
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
@@ -61,7 +61,7 @@ _QUANT_TO_FREEZER_MODE = {
 def _freezer_qtensor_init_wrapper(
     qt: aqt_tensor.QTensor,
     contracting_axis: Sequence[utils.AxisIdx],
-    axis_metadata_wrapper: Optional[AxisMetadataWrapper],
+    axis_metadata_wrapper: None | AxisMetadataWrapper,
     tile_map: tiled_dot_general.AqtTileMap,
 ):
   """QTensor initialization wrapper function for the new freezer."""
@@ -144,7 +144,7 @@ class Freezer(nn.Module):
       self.qvalue = self.variable(collection, 'value', q_init, q_shape, q_dtype)
       self.scale_t = self.variable(collection, 'scale', s_init, s_shape)
 
-  def get(self) -> Optional[aqt_tensor.QTensor]:
+  def get(self) -> None | aqt_tensor.QTensor:
     if self.quant_mode == QuantMode.TRAIN:
       return None
     elif self.quant_mode == QuantMode.CALIBRATE:
@@ -237,8 +237,8 @@ def _populate_scale_t(
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
-  cfg: Optional[aqt_dot_general.DotGeneral] = None
-  prng_name: Optional[str] = 'params'
+  cfg: None | aqt_dot_general.DotGeneral = None
+  prng_name: None | str = 'params'
 
   # TODO(lew): split out separate class for each side.
   # Quant mode determines whether flax variables are created to store quantized
@@ -247,12 +247,12 @@ class AqtDotGeneral(nn.Module):
   # apply_quant_mode determines if using Freezer in cfg.get/set_tensor
   lhs_apply_quant_mode: bool = True
   lhs_var_name: str = 'qlhs'
-  lhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  lhs_qtensor: None | aqt_tensor.QTensor = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
   rhs_var_name: str = 'qrhs'
-  rhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  rhs_qtensor: None | aqt_tensor.QTensor = None
 
   # Variables only for the legacy Freezer.
   lhs_init: nn.initializers.Initializer = jnp.zeros
@@ -262,8 +262,8 @@ class AqtDotGeneral(nn.Module):
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
 
   # Variables only for the new Freezer.
-  lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
-  rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
+  lhs_axis_metadata_wrapper: None | AxisMetadataWrapper = None
+  rhs_axis_metadata_wrapper: None | AxisMetadataWrapper = None
 
   # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
   # CALIBRATION_AND_VALUE to store both scales and quantized values.
@@ -275,8 +275,8 @@ class AqtDotGeneral(nn.Module):
   quant_collection: str = 'aqt'
 
   # Tiling configs. tilling_fn is valid only when tiling_cfg is None.
-  tiling_cfg: Optional[tiled_dot_general.Cfg] = None
-  tiling_fn: Optional[DotGeneralTilingFn] = None
+  tiling_cfg: None | tiled_dot_general.Cfg = None
+  tiling_fn: None | DotGeneralTilingFn = None
 
   # If set to True, use the current Freezer. Otherwise, use the new
   # QuantFreezer.
@@ -532,8 +532,8 @@ class AqtDotGeneral(nn.Module):
 class AqtEinsum(nn.Module):
   """Quantized Einsum class for model injection."""
 
-  cfg: Optional[config.DotGeneral] = None
-  prng_name: Optional[str] = 'params'
+  cfg: None | config.DotGeneral = None
+  prng_name: None | str = 'params'
 
   # TODO(lew): split out separate class for each side.
   lhs_quant_mode: QuantMode = QuantMode.TRAIN
@@ -550,8 +550,8 @@ class AqtEinsum(nn.Module):
   rhs_scale_init: nn.initializers.Initializer = jnp.zeros
 
   # Variables only for the new Freezer.
-  lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
-  rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
+  lhs_axis_metadata_wrapper: None | AxisMetadataWrapper = None
+  rhs_axis_metadata_wrapper: None | AxisMetadataWrapper = None
 
   # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
   # CALIBRATION_AND_VALUE to store both scales and quantized values.
@@ -562,11 +562,11 @@ class AqtEinsum(nn.Module):
   # these variables from the optimizer.
   quant_collection: str = 'aqt'
 
-  assert_eqn: Optional[str] = None
-  assert_lhs_shape: Optional[utils.ShapeTemplate] = None
-  assert_rhs_shape: Optional[utils.ShapeTemplate] = None
-  tile_sizes: Optional[tiled_dot_general.EinsumTileSizes] = None
-  tiling_fn: Optional[EinsumTilingFn] = None
+  assert_eqn: None | str = None
+  assert_lhs_shape: None | utils.ShapeTemplate = None
+  assert_rhs_shape: None | utils.ShapeTemplate = None
+  tile_sizes: None | tiled_dot_general.EinsumTileSizes = None
+  tiling_fn: None | EinsumTilingFn = None
 
   # If set to True, use the current Freezer. Otherwise, use the new
   # QTensorFreezer.
@@ -576,8 +576,8 @@ class AqtEinsum(nn.Module):
   def __call__(
       self,
       eqn,
-      lhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
-      rhs_g: Union[jnp.ndarray, aqt_tensor.QTensor],
+      lhs_g: jnp.ndarray | aqt_tensor.QTensor,
+      rhs_g: jnp.ndarray | aqt_tensor.QTensor,
   ):
     if self.assert_eqn is not None:
       utils.assert_eq(eqn, self.assert_eqn, 'einsum_eqn')
@@ -702,8 +702,8 @@ class AqtEinsum(nn.Module):
 class AqtConvGeneralDilated(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
-  cfg: Optional[aqt_dot_general.DotGeneral] = None
-  prng_name: Optional[str] = 'params'
+  cfg: None | aqt_dot_general.DotGeneral = None
+  prng_name: None | str = 'params'
 
   # TODO(lew): split out separate class for each side.
   # Quant mode determines whether flax variables are created to store quantized
@@ -712,16 +712,16 @@ class AqtConvGeneralDilated(nn.Module):
   # apply_quant_mode determines if using Freezer in cfg.get/set_tensor
   lhs_apply_quant_mode: bool = True
   lhs_var_name: str = 'qlhs'
-  lhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  lhs_qtensor: None | aqt_tensor.QTensor = None
 
   rhs_quant_mode: QuantMode = QuantMode.TRAIN
   rhs_apply_quant_mode: bool = True
   rhs_var_name: str = 'qrhs'
-  rhs_qtensor: Optional[aqt_tensor.QTensor] = None
+  rhs_qtensor: None | aqt_tensor.QTensor = None
 
   # Variables only for the new Freezer.
-  lhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
-  rhs_axis_metadata_wrapper: Optional[AxisMetadataWrapper] = None
+  lhs_axis_metadata_wrapper: None | AxisMetadataWrapper = None
+  rhs_axis_metadata_wrapper: None | AxisMetadataWrapper = None
 
   # Freeze mode. Set as FreezerMode.CALIBRATION to store only scales; set as
   # CALIBRATION_AND_VALUE to store both scales and quantized values.

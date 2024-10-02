@@ -13,7 +13,7 @@
 # limitations under the License.
 """Numerics for int8, int4, binary and other integer types."""
 
-from typing import Any, Optional
+from typing import Any
 from aqt.jax.v2 import stochastic_rounding
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -35,8 +35,8 @@ class IntSymmetric(numerics.AqtNumerics):
   clip: bool
   clip_gradient: bool
   round: bool
-  noise_fn: Optional[stochastic_rounding.NoiseFn]
-  dtype: Optional[Any] = None
+  noise_fn: None | stochastic_rounding.NoiseFn
+  dtype: None | Any = None
 
   # pylint: disable=line-too-long
   # Verifying the correctness of these functions amounts to verifying this table:

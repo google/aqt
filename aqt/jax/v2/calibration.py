@@ -15,7 +15,6 @@
 
 import abc
 from collections.abc import Sequence
-from typing import Union
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import numerics
@@ -67,8 +66,8 @@ class Calibration(abc.ABC):
 class ConstantCalibration(Calibration):
   """Calibration with a constant per-tensor or per-channel value."""
 
-  bound: Union[jnp.ndarray, float]
-  bias: Union[jnp.ndarray, float] | None = None
+  bound: jnp.ndarray | float
+  bias: jnp.ndarray | float | None = None
 
   def get_scale_and_bias(
       self,

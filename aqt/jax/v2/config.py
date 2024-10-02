@@ -19,7 +19,7 @@
 
 import copy
 import functools
-from typing import Literal, Optional, TypeAlias, Union
+from typing import Literal, TypeAlias
 
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
@@ -58,21 +58,21 @@ SKIP = 'skip'
 SkipT: TypeAlias = Literal[SKIP]
 
 
-def _split_key(key: Optional[jax.Array], num_splits: int):
+def _split_key(key: None | jax.Array, num_splits: int):
   default = (None,) * num_splits
   return default if key is None else jax.random.split(key, num_splits)
 
 
 def set_context(
     cfg: DotGeneral,
-    key: Optional[jax.Array],
-    train_step: Optional[int],
+    key: None | jax.Array,
+    train_step: None | int,
     lhs_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN,
     rhs_quant_mode: utils.QuantMode = utils.QuantMode.TRAIN,
 ):
   """Set context with prng keys and train_steps for dot_general config."""
 
-  def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: Optional[jax.Array]):
+  def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: None | jax.Array):
     key1, key2 = _split_key(key, num_splits=2)
     lhs_context = utils.Context(
         key=key1, train_step=train_step, quant_mode=lhs_quant_mode
@@ -93,8 +93,8 @@ def set_context(
 def set_fwd_dequant_mode(
     cfg: DotGeneral,
     *,
-    lhs_dequant_mode: Optional[DequantMode] = None,
-    rhs_dequant_mode: Optional[DequantMode] = None,
+    lhs_dequant_mode: None | DequantMode = None,
+    rhs_dequant_mode: None | DequantMode = None,
 ):
   if lhs_dequant_mode is not None:
     cfg.fwd.lhs.dequant_mode = lhs_dequant_mode
@@ -156,9 +156,9 @@ def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
 
 def set_accumulator_dtype(
     cfg: DotGeneral,
-    fwd_dtype: Union[jnp.dtype, None, SkipT],
-    dlhs_dtype: Union[jnp.dtype, None, SkipT],
-    drhs_dtype: Union[jnp.dtype, None, SkipT],
+    fwd_dtype: jnp.dtype | None | SkipT,
+    dlhs_dtype: jnp.dtype | None | SkipT,
+    drhs_dtype: jnp.dtype | None | SkipT,
 ):
   if fwd_dtype != SKIP:
     cfg.fwd.dg_accumulator_dtype = fwd_dtype
@@ -245,9 +245,9 @@ def set_constant_calibration(
 
 def set_local_aqt(
     cfg: DotGeneral,
-    fwd_local_aqt: Union[SkipT, LocalAqt, None],
-    dlhs_local_aqt: Union[SkipT, LocalAqt, None],
-    drhs_local_aqt: Union[SkipT, LocalAqt, None],
+    fwd_local_aqt: SkipT | LocalAqt | None,
+    dlhs_local_aqt: SkipT | LocalAqt | None,
+    drhs_local_aqt: SkipT | LocalAqt | None,
 ):
   if fwd_local_aqt != SKIP:
     cfg.fwd.local_aqt = fwd_local_aqt
@@ -259,8 +259,8 @@ def set_local_aqt(
 
 def set_use_fwd_quant(
     cfg: DotGeneral,
-    dlhs_use_fwd_quant: Union[bool, None, SkipT],
-    drhs_use_fwd_quant: Union[bool, None, SkipT],
+    dlhs_use_fwd_quant: bool | None | SkipT,
+    drhs_use_fwd_quant: bool | None | SkipT,
 ):
   """Enable resusing of fwd pass quantization for backprop."""
   msg = 'use_fwd_quant is incompatible with use_mid_quant right now.'
@@ -278,9 +278,9 @@ def set_use_fwd_quant(
 
 def set_use_mid_quant(
     cfg: DotGeneral,
-    fwd_mid_alpha_both: Union[SkipT, float],
-    dlhs_mid_alpha_both: Union[SkipT, float],
-    drhs_mid_alpha_both: Union[SkipT, float],
+    fwd_mid_alpha_both: SkipT | float,
+    dlhs_mid_alpha_both: SkipT | float,
+    drhs_mid_alpha_both: SkipT | float,
 ):
   """Enable middle quantization. Variant of SmoothQuant / AWQ."""
   assert isinstance(
@@ -436,12 +436,12 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
 
 def set_bits(
     cfg: DotGeneral,
-    fwd_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    fwd_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    dlhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    dlhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    drhs_lhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
-    drhs_rhs_bit: Union[int, None, fp8_numerics.FP8Dtype],
+    fwd_lhs_bit: int | None | fp8_numerics.FP8Dtype,
+    fwd_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+    dlhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
+    dlhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
+    drhs_lhs_bit: int | None | fp8_numerics.FP8Dtype,
+    drhs_rhs_bit: int | None | fp8_numerics.FP8Dtype,
 ) -> DotGeneral:
   """Set quantization bits for dot_general config."""
 
@@ -552,19 +552,19 @@ def default_unquantized_config() -> DotGeneral:
 
 def fully_quantized(
     *,
-    fwd_bits: Optional[int] = 8,
-    bwd_bits: Optional[int] = 8,
+    fwd_bits: None | int = 8,
+    bwd_bits: None | int = 8,
     use_fwd_quant: bool = True,
-    use_stochastic_rounding: Optional[bool] = True,
+    use_stochastic_rounding: None | bool = True,
     # Typically we have (but it's a caller's responsibility to check):
     # - vjp_lhs_stochastic_rounding is referring to the gradient and
     # - vjp_rhs_stochastic_rounding is referring to the activations/weights.
-    vjp_lhs_stochastic_rounding: Optional[bool] = None,
-    vjp_rhs_stochastic_rounding: Optional[bool] = None,
+    vjp_lhs_stochastic_rounding: None | bool = None,
+    vjp_rhs_stochastic_rounding: None | bool = None,
     # The dummy static bound flag is temporary, for performance benchmarking.
     use_dummy_static_bound: bool = False,
-    dlhs_local_aqt: Optional[LocalAqt] = None,
-    drhs_local_aqt: Optional[LocalAqt] = None,
+    dlhs_local_aqt: None | LocalAqt = None,
+    drhs_local_aqt: None | LocalAqt = None,
 ) -> DotGeneral:
   """Fully Quantized Training."""
   cfg = dot_general_make(
@@ -615,14 +615,14 @@ def fully_quantized(
 
 def config_v3(
     *,
-    fwd_bits: Optional[int] = 8,
-    dlhs_bits: Optional[int] = 8,
-    drhs_bits: Optional[int] = None,
+    fwd_bits: None | int = 8,
+    dlhs_bits: None | int = 8,
+    drhs_bits: None | int = None,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
-    dlhs_local_aqt: Optional[LocalAqt] = None,
-    drhs_local_aqt: Optional[LocalAqt] = None,
+    dlhs_local_aqt: None | LocalAqt = None,
+    drhs_local_aqt: None | LocalAqt = None,
     fwd_accumulator_dtype: ... = jnp.int32,
     dlhs_accumulator_dtype: ... = jnp.int32,
     drhs_accumulator_dtype: ... = None,
@@ -678,24 +678,24 @@ def config_v3(
 
 def config_v4(
     *,
-    fwd_bits: Union[int, None, fp8_numerics.FP8Dtype] = 8,
-    dlhs_bits: Union[int, None, fp8_numerics.FP8Dtype] = 8,
-    drhs_bits: Union[int, None, fp8_numerics.FP8Dtype] = None,
+    fwd_bits: int | None | fp8_numerics.FP8Dtype = 8,
+    dlhs_bits: int | None | fp8_numerics.FP8Dtype = 8,
+    drhs_bits: int | None | fp8_numerics.FP8Dtype = None,
     # The dummy static bound flag is for performance benchmarking.
     use_dummy_static_bound: bool = False,
     rng_type: str = 'jax.uniform',  # 'custom-1'
-    dlhs_local_aqt: Optional[LocalAqt] = None,
-    drhs_local_aqt: Optional[LocalAqt] = None,
+    dlhs_local_aqt: None | LocalAqt = None,
+    drhs_local_aqt: None | LocalAqt = None,
     # accumulator dtype by default is automatically set in set_bits,
     # but users can still configure a special dtype such as jnp.int16, etc.
-    fwd_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
-    dlhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
-    drhs_accumulator_dtype: Union[jnp.dtype, None, SkipT] = SKIP,
-    dlhs_use_fwd_quant: Union[bool, None, SkipT] = SKIP,
-    drhs_use_fwd_quant: Union[bool, None, SkipT] = SKIP,
-    fwd_mid_alpha_both: Union[SkipT, float] = SKIP,
-    dlhs_mid_alpha_both: Union[SkipT, float] = SKIP,
-    drhs_mid_alpha_both: Union[SkipT, float] = SKIP,
+    fwd_accumulator_dtype: jnp.dtype | None | SkipT = SKIP,
+    dlhs_accumulator_dtype: jnp.dtype | None | SkipT = SKIP,
+    drhs_accumulator_dtype: jnp.dtype | None | SkipT = SKIP,
+    dlhs_use_fwd_quant: bool | None | SkipT = SKIP,
+    drhs_use_fwd_quant: bool | None | SkipT = SKIP,
+    fwd_mid_alpha_both: SkipT | float = SKIP,
+    dlhs_mid_alpha_both: SkipT | float = SKIP,
+    drhs_mid_alpha_both: SkipT | float = SKIP,
 ) -> DotGeneral:
   """Version 4 of user-visible AQT config."""
   cfg = default_unquantized_config()

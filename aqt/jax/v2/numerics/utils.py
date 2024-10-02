@@ -13,8 +13,6 @@
 # limitations under the License.
 """Util functions for numerics in AQT v2."""
 
-from typing import Union
-
 from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import fp8_numerics
 from aqt.jax.v2.numerics import int_numerics
@@ -22,7 +20,7 @@ from aqt.jax.v2.numerics import no_numerics
 
 
 def get_numerics(
-    bits: Union[int, None, fp8_numerics.FP8Dtype], preserve_max_val=False
+    bits: int | None | fp8_numerics.FP8Dtype, preserve_max_val=False
 ):
   """Get numerics object from number of bits."""
   if bits is None:

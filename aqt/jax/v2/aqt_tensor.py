@@ -23,7 +23,7 @@
 # pylint: disable=g-explicit-bool-comparison
 # pylint: disable=g-explicit-length-test
 import typing
-from typing import Any, Callable, Optional, Sequence, TypeAlias
+from typing import Any, Callable, Sequence, TypeAlias
 from aqt.jax.v2 import tiled_dot_general
 from aqt.jax.v2 import utils
 import flax.cursor
@@ -57,11 +57,11 @@ class QTensor:
 
   # Quantized (compressed) representation of tensor.
   # Use dequant() method to "decompress" to the original tensor.
-  qvalue: Optional[ArrayT]
+  qvalue: None | ArrayT
 
   # (scale == None) means that scale is unknown/invalid;
   # Otherwise, check dequant(self) for semantics.
-  scale: Optional[list[ArrayT]]
+  scale: None | list[ArrayT]
 
   # Used in dot_general, transposed scales used in post dot_general scaling.
   # The same comments apply as to scale.
@@ -70,7 +70,7 @@ class QTensor:
   # - scale_t is used both in backprop of dot_general and in post-scaling.
   #   We avoid transposing scale twice.
   # TODO(lew): Move scale_t from QTensor to some dot-general specific type?
-  scale_t: Optional[list[ArrayT]]
+  scale_t: None | list[ArrayT]
 
   # len(bias) == 0 means bias should not be applied.
   # Quantization and dequantization are defined such that:
@@ -80,12 +80,12 @@ class QTensor:
 
   # DType of the tensor before quantized.
   # NOTE: AQT Users should use the public property, dtype, instead.
-  dequant_dtype: Optional[jnp.dtype] = flax.struct.field(
+  dequant_dtype: None | jnp.dtype = flax.struct.field(
       pytree_node=False, default=None
   )
 
   # Tiling state of the tensor.
-  tiling_state: Optional[TilingState] = flax.struct.field(
+  tiling_state: None | TilingState = flax.struct.field(
       pytree_node=False, default=None
   )
 
