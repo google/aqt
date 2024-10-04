@@ -20,17 +20,34 @@ from aqt.jax.v2.numerics import no_numerics
 
 
 def get_numerics(
-    bits: None | int | fp8_numerics.FP8Dtype, preserve_max_val=False
+    bits: None | int | fp8_numerics.FP8Dtype,
+    use_asymmetric: bool,
+    preserve_max_val: bool = False,
 ):
   """Get numerics object from number of bits."""
   if bits is None:
     effective_numerics = no_numerics.NoNumerics()
   elif bits in fp8_numerics.fp8_map.keys():
+    if use_asymmetric:
+      raise ValueError('Only int numerics support asymmetric quantization.')
     exponent_bits, mantissa_bits = int(bits[1]), int(bits[3])
     effective_numerics = fp8_numerics.Fp8Numerics(
         exponent_bits=exponent_bits,
         mantissa_bits=mantissa_bits,
         dtype=fp8_numerics.fp8_map[bits],
+    )
+  elif use_asymmetric:
+    if preserve_max_val:
+      raise NotImplementedError(
+          'preserve_max_val is not implemented for IntAsymmetric.'
+      )
+    effective_numerics = int_numerics.IntAsymmetric(
+        bits=bits,
+        clip=False,
+        clip_gradient=False,
+        round=True,
+        noise_fn=None,
+        dtype=utils.infer_dtype_from_bits(bits),
     )
   else:
     pz = False if bits == 1 else True
@@ -40,9 +57,9 @@ def get_numerics(
         preserve_zero=pz,
         preserve_max_val=preserve_max_val,
         clip=True,
+        clip_gradient=False,  # Can be disabled when using abs-max scaling.
         round=True,
         noise_fn=None,
-        clip_gradient=False,  # Can be disabled when using abs-max scaling.
         dtype=dtype,
     )
   return effective_numerics

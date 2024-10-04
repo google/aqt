@@ -17,6 +17,7 @@ import abc
 from collections.abc import Sequence
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import utils
+from aqt.jax.v2.numerics import int_numerics
 from aqt.jax.v2.numerics import numerics
 import jax
 import jax.numpy as jnp
@@ -395,3 +396,50 @@ class SnrBasedAutoCalibration(Calibration):
     snr = jnp.log(1 + signal / noise)
 
     return snr
+
+
+@utils.flax_slots_kw_only_dataclass
+class MinMaxCalibration(Calibration):
+  """Calibration between the min and max values.
+
+  Attributes:
+    eps: Optional epsilon to add to the bound to avoid division by zero. Inf
+      filtering is also performed by QTensor.quant() after division.
+  """
+
+  eps: float | None = None
+
+  def get_scale_and_bias(
+      self,
+      x: jnp.ndarray,
+      shared_axes: Sequence[utils.AxisIdx] | None,
+      numerics_: int_numerics.IntAsymmetric,
+      context: utils.Context | None = None,
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    del context
+    msg = (
+        'Perhaps you are using DequantMode.THIS_INPUT (fake_quant) and forgot'
+        ' to set them.'
+    )
+    assert shared_axes is not None, msg
+    if not isinstance(numerics_, int_numerics.IntAsymmetric):
+      raise NotImplementedError(
+          'MinMaxCalibration only supports int_numerics.IntAsymmetric, but got '
+          f'{numerics}'
+      )
+    dtype = self.dtype if self.dtype is not None else x.dtype
+
+    # Scale the full width of x to the full width of the quantization range.
+    x_min = jnp.min(x, axis=shared_axes, keepdims=True)
+    x_max = jnp.max(x, axis=shared_axes, keepdims=True)
+    bound = x_max - x_min
+    if self.eps is not None:
+      bound += self.eps
+    scale = bound / numerics_.get_quant_bound()
+    scale = ceil_to_po2(scale) if self.po2_scale else scale
+
+    # Calculate bias s.t. quant(min(x)) = (min(x) + bias) / scale = quant_min.
+    quant_min, _ = numerics_.get_quant_range()
+    bias = quant_min * scale - x_min
+
+    return [scale.astype(dtype)], [bias.astype(dtype)]

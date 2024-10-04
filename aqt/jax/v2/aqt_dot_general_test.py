@@ -210,6 +210,48 @@ class _TrickyNumerics(numerics.AqtNumerics):
     return (ret, None)
 
 
+def _get_asym_numerics(numerics_: numerics.AqtNumerics):
+  """Gets the asymmetric equivalent of the given numerics."""
+  if isinstance(
+      numerics_, (int_numerics.IntAsymmetric, no_numerics.NoNumerics)
+  ):
+    return numerics_
+  elif isinstance(numerics_, int_numerics.IntSymmetric):
+    return int_numerics.IntAsymmetric(
+        bits=numerics_.bits,
+        clip=numerics_.clip,
+        clip_gradient=numerics_.clip_gradient,
+        round=numerics_.round,
+        noise_fn=numerics_.noise_fn,
+        dtype=numerics_.dtype,
+    )
+  else:
+    raise NotImplementedError(
+        "Asymmetric quantization currently only supports integer numerics,"
+        f" but got {numerics_}"
+    )
+
+
+def _set_asymmetric_quantization(cfg: aqt.DotGeneralRaw):
+  """Replaces symmetric quantization with asymmetric quantization."""
+  config.set_numerics(
+      cfg,
+      _get_asym_numerics(cfg.dg_quantizer.lhs.numerics),
+      _get_asym_numerics(cfg.dg_quantizer.rhs.numerics),
+  )
+
+  def replace_calibration(quantizer: aqt_quantizer.Quantizer):
+    if isinstance(quantizer.calibration, functools.partial):
+      quantizer.calibration = functools.partial(
+          calibration.MinMaxCalibration, **quantizer.calibration.keywords
+      )
+    else:
+      quantizer.calibration = calibration.MinMaxCalibration
+
+  replace_calibration(cfg.dg_quantizer.lhs)
+  replace_calibration(cfg.dg_quantizer.rhs)
+
+
 def _modify_dg(
     readonly_dg: aqt.DotGeneral,
     *,
@@ -223,6 +265,7 @@ def _modify_dg(
     local_aqt: None | aqt.LocalAqt = None,
     use_mid_quant: bool = False,
     clip_gradient: bool = False,
+    use_asymmetric: bool = False,
 ) -> aqt.DotGeneral:
   dg = copy.deepcopy(readonly_dg)
   if fwd_lhs_tricky_clip_and_round:
@@ -266,9 +309,9 @@ def _modify_dg(
     # that the scales are not too large.
     def disable_quant(c):
       _disable_quant_types(c)
-      if isinstance(c.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):
+      if isinstance(c.dg_quantizer.lhs.numerics, int_numerics.IntNumerics):
         c.dg_quantizer.lhs.numerics.round = False
-      if isinstance(c.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
+      if isinstance(c.dg_quantizer.rhs.numerics, int_numerics.IntNumerics):
         c.dg_quantizer.rhs.numerics.round = False
 
     disable_quant(dg.fwd)
@@ -301,6 +344,14 @@ def _modify_dg(
   if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
     dg.fwd.dg_quantizer.rhs.numerics.clip_gradient = clip_gradient
 
+  if use_asymmetric:
+    _set_asymmetric_quantization(dg.fwd)
+    _set_asymmetric_quantization(dg.dlhs)
+    _set_asymmetric_quantization(dg.drhs)
+    # TODO(aqt): use native asymmetric quantization once it is supported.
+    # https://github.com/google/aqt/issues/725
+    config.set_fake_quant(dg)
+
   return dg
 
 
@@ -318,6 +369,7 @@ def _aqt_dg_full_lr_diff(
     readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
     clip_gradient: bool = False,
+    use_asymmetric: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   dg = _modify_dg(
       readonly_dg,
@@ -331,6 +383,7 @@ def _aqt_dg_full_lr_diff(
       fwd_lhs_tricky_clip_and_round=fwd_lhs_tricky_clip_and_round,
       local_aqt=local_aqt,
       clip_gradient=clip_gradient,
+      use_asymmetric=use_asymmetric,
   )
   dg = config.set_context(dg, key=jax.random.PRNGKey(4), train_step=None)
   return lambda lhs, rhs: dg(lhs, rhs, dims)
@@ -348,6 +401,7 @@ def _aqt_dg_full(
     readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
     clip_gradient: bool = False,
+    use_asymmetric: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   return _aqt_dg_full_lr_diff(
       lhs_dequant_mode=dequant_mode,
@@ -362,6 +416,7 @@ def _aqt_dg_full(
       readonly_dg=readonly_dg,
       dims=dims,
       clip_gradient=clip_gradient,
+      use_asymmetric=use_asymmetric,
   )
 
 
@@ -373,6 +428,7 @@ def _aqt_dg_raw_lr_diff(
     *,
     readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
+    use_asymmetric: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   dg = _modify_dg(
       readonly_dg,
@@ -380,6 +436,7 @@ def _aqt_dg_raw_lr_diff(
       rhs_dequant_mode=rhs_dequant_mode,
       lhs_calibration_mode=lhs_calibration_mode,
       rhs_calibration_mode=rhs_calibration_mode,
+      use_asymmetric=use_asymmetric,
   )
   dg = config.set_context(dg, key=jax.random.PRNGKey(4), train_step=None)
   dg.fwd.dg_quantizer.init_calibration()
@@ -392,6 +449,7 @@ def _aqt_dg_raw(
     *,
     readonly_dg: aqt.DotGeneral,
     dims: jax.lax.DotDimensionNumbers,
+    use_asymmetric: bool = False,
 ) -> Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
   return _aqt_dg_raw_lr_diff(
       dequant_mode,
@@ -400,6 +458,7 @@ def _aqt_dg_raw(
       calibration_mode,
       readonly_dg=readonly_dg,
       dims=dims,
+      use_asymmetric=use_asymmetric,
   )
 
 
@@ -571,6 +630,15 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dtype=jnp.float32,
       clip_gradient=False,
   ):
+    is_quantized = not all([
+        isinstance(dg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics),
+        isinstance(dg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics),
+        isinstance(dg.dlhs.dg_quantizer.lhs.numerics, no_numerics.NoNumerics),
+        isinstance(dg.dlhs.dg_quantizer.rhs.numerics, no_numerics.NoNumerics),
+        isinstance(dg.drhs.dg_quantizer.lhs.numerics, no_numerics.NoNumerics),
+        isinstance(dg.drhs.dg_quantizer.rhs.numerics, no_numerics.NoNumerics),
+    ])
+
     readonly_dg = dg
     del dg
 
@@ -585,8 +653,20 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         dims=dims,
         clip_gradient=clip_gradient,
     )
+    asym_dg_full = functools.partial(
+        aqt_dg_full,
+        # This should be removed once asymmetric quant supports use_fwd_quant.
+        use_fwd_quant=False,
+        use_asymmetric=True,
+    )
     aqt_dg_raw = functools.partial(
-        _aqt_dg_raw, readonly_dg=readonly_dg, dims=dims
+        _aqt_dg_raw,
+        readonly_dg=readonly_dg,
+        dims=dims,
+    )
+    asym_dg_raw = functools.partial(
+        aqt_dg_raw,
+        use_asymmetric=True,
     )
     modify_dg = functools.partial(_modify_dg, readonly_dg=readonly_dg)
     check = functools.partial(_check_result_eq, lhs=lhs, rhs=rhs, gra=gra)
@@ -620,6 +700,20 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         (
             "raw fwd FQ ",
             aqt_dg_raw(aqt.DequantMode.THIS_INPUT),
+            dict(test_gradient=False),
+        ),
+    ])
+    check([
+        ("default    ", asym_dg_full(aqt.DequantMode.OUTPUT), dict()),
+        ("FQ         ", asym_dg_full(aqt.DequantMode.THIS_INPUT), dict()),
+        (
+            "raw fwd    ",
+            asym_dg_raw(aqt.DequantMode.OUTPUT),
+            dict(test_gradient=False),
+        ),
+        (
+            "raw fwd FQ ",
+            asym_dg_raw(aqt.DequantMode.THIS_INPUT),
             dict(test_gradient=False),
         ),
     ])
@@ -666,6 +760,30 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         ),
     ])
 
+    if is_quantized:
+      # Asymmetric quantization does not currently support forward quantization.
+      with self.assertRaisesRegex(NotImplementedError, r"biases.*forward"):
+        check([
+            (
+                "fwd_quant=F",
+                aqt_dg_full(
+                    aqt.DequantMode.OUTPUT,
+                    use_fwd_quant=False,
+                    use_asymmetric=True,
+                ),
+                dict(),
+            ),
+            (
+                "fwd_quant=T",
+                aqt_dg_full(
+                    aqt.DequantMode.OUTPUT,
+                    use_fwd_quant=True,
+                    use_asymmetric=True,
+                ),
+                dict(),
+            ),
+        ])
+
     check([
         (
             "default    ",
@@ -676,8 +794,26 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             dict(),
         ),
         (
-            "default    ",
+            "FQ         ",
             aqt_dg_full(
+                aqt.DequantMode.THIS_INPUT,
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+            ),
+            dict(),
+        ),
+    ])
+    check([
+        (
+            "default    ",
+            asym_dg_full(
+                aqt.DequantMode.OUTPUT,
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+            ),
+            dict(),
+        ),
+        (
+            "FQ         ",
+            asym_dg_full(
                 aqt.DequantMode.THIS_INPUT,
                 local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
             ),
@@ -1211,6 +1347,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # With mid scales all values in a, b will be equal to 2.0 and
     # binary quantization will be lossless.
     test_eq("", make_binary_dg(True)(a, b, dimension_numbers), ret)
+
+  def test_asym_exact_equality(self):
+    # Tests that 2-bit asymmetric quant exactly represents 4 equidistant values.
+    x = jnp.arange(32, dtype=jnp.float32).reshape([8, 4])
+    w = jnp.arange(32, dtype=jnp.float32).reshape([4, 8])
+
+    dimension_numbers = (((1,), (0,)), ((), ()))  # Standard matmul/"ab,bc->ac".
+    y_expected = jax.lax.dot_general(x, w, dimension_numbers)
+
+    aqt_cfg_dg = config.config_v4(fwd_bits=2, use_asymmetric=True)
+    config.set_fake_quant(aqt_cfg_dg)
+    y_quant = aqt_cfg_dg(x, w, dimension_numbers=dimension_numbers)
+    np.testing.assert_array_equal(y_quant, y_expected)
 
 
 if __name__ == "__main__":

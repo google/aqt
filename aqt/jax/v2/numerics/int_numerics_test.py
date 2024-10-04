@@ -36,7 +36,7 @@ def assert_array_less_or_equal(x, y, err_msg='', verbose=True):
       y,
       err_msg=err_msg,
       verbose=verbose,
-      header='x is not less than or equal to y',
+      header=f'x is not less than or equal to {y = }',
       equal_inf=False,
   )
 
@@ -48,19 +48,31 @@ def assert_array_greater_or_equal(x, y, err_msg='', verbose=True):
       y,
       err_msg=err_msg,
       verbose=verbose,
-      header='x is not greater than or equal to y',
+      header=f'x is not greater than or equal to {y = }',
       equal_inf=False,
   )
 
 
-class IntSymmetricTest(parameterized.TestCase):
+def assert_array_contains(x, y, err_msg='', verbose=True):
+  np.testing.assert_array_compare(
+      operator.__contains__,
+      x,
+      y,
+      err_msg=err_msg,
+      verbose=verbose,
+      header=f'x does not contain {y = }',
+      equal_inf=False,
+  )
+
+
+class IntNumericsTest(parameterized.TestCase):
 
   @parameterized.product(
       bits=[2, 4],
       preserve_zero=[False, True],
       preserve_max_val=[False, True],
   )
-  def test_quant_range(
+  def test_symmetric_quant_range(
       self,
       bits,
       preserve_zero,
@@ -75,7 +87,7 @@ class IntSymmetricTest(parameterized.TestCase):
           bits=bits,
           preserve_zero=preserve_zero,
           preserve_max_val=preserve_max_val,
-          # The quantized values are only guarenteed to be within the
+          # The quantized values are only guaranteed to be within the
           # appropriate signed int range if clip=True and round=True.
           clip=True,
           clip_gradient=False,
@@ -113,6 +125,79 @@ class IntSymmetricTest(parameterized.TestCase):
     assert_array_greater_or_equal(qx_neg_max_abs.qvalue, sint_min_restricted)
     assert_array_greater_or_equal(qx_eq_max_abs.qvalue, sint_min_restricted)
     assert_array_greater_or_equal(qx_pos_max_abs.qvalue, sint_min_restricted)
+
+    # Test that the quantized value includes the min and max values.
+    # E.g. -127 and 127 for bits=8, and -1 and 1 for bits=2.
+
+    # Only the min is always included when sign(x) @ max(abs(x)) is negative.
+    assert_array_contains(qx_neg_max_abs.qvalue, sint_min_restricted)
+
+    # Both the min and max are always included when min(x) == -max(x).
+    assert_array_contains(qx_eq_max_abs.qvalue, sint_min_restricted)
+    assert_array_contains(qx_eq_max_abs.qvalue, sint_max)
+
+    # Only the max is always included when sign(x) @ max(abs(x)) is positive.
+    assert_array_contains(qx_pos_max_abs.qvalue, sint_max)
+
+  @parameterized.product(
+      bits=[1, 2, 4],
+      # Test that the quantized values are in the appropriate signed int
+      # range even if clip=False.
+      clip=[False, True],
+  )
+  def test_asymmetric_quant_range(
+      self,
+      bits,
+      clip,
+  ):
+    if bits == 1:
+      sint_min, sint_max = 0, 1
+    else:
+      sint_min = -(2 ** (bits - 1))
+      sint_max = 2 ** (bits - 1) - 1
+
+    def quantize(x):
+      numerics_ = int_numerics.IntAsymmetric(
+          bits=bits,
+          clip=clip,
+          clip_gradient=False,
+          round=True,
+          noise_fn=None,
+          dtype=jnp.int8,
+      )
+      q = aqt_quantizer.Quantizer(
+          numerics=numerics_,
+          calib_shared_axes=None,
+          scale_stop_grad=True,
+          calibration=calibration.MinMaxCalibration,
+          context=utils.Context(key=None, train_step=None),
+      )
+      q.init_calibration()
+      qx, _ = q.quant(x, calibration_axes=-1)
+      return qx
+
+    step_size = 0.25
+    qx_neg_max_abs = quantize(inclusive_arange(-2, 1, step_size))
+    qx_eq_max_abs = quantize(inclusive_arange(-1, 1, step_size))
+    qx_pos_max_abs = quantize(inclusive_arange(-1, 2, step_size))
+
+    # Test that the quantized value is not outside of the signed int range.
+    # E.g. [-2, 1] for bits=2.
+    assert_array_less_or_equal(qx_neg_max_abs.qvalue, sint_max)
+    assert_array_less_or_equal(qx_eq_max_abs.qvalue, sint_max)
+    assert_array_less_or_equal(qx_pos_max_abs.qvalue, sint_max)
+    assert_array_greater_or_equal(qx_neg_max_abs.qvalue, sint_min)
+    assert_array_greater_or_equal(qx_eq_max_abs.qvalue, sint_min)
+    assert_array_greater_or_equal(qx_pos_max_abs.qvalue, sint_min)
+
+    # Test that the quantized value includes the min and max values.
+    # E.g. -128 and 127 for bits=8, and -2 and 1 for bits=2.
+    assert_array_contains(qx_neg_max_abs.qvalue, sint_min)
+    assert_array_contains(qx_neg_max_abs.qvalue, sint_max)
+    assert_array_contains(qx_eq_max_abs.qvalue, sint_min)
+    assert_array_contains(qx_eq_max_abs.qvalue, sint_max)
+    assert_array_contains(qx_pos_max_abs.qvalue, sint_min)
+    assert_array_contains(qx_pos_max_abs.qvalue, sint_max)
 
 
 if __name__ == '__main__':
