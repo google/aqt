@@ -44,7 +44,9 @@ class Quantizer:
   scale_stop_grad: bool = utils.static_field()
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
-  calibration: type[AbstractAqtCalibration] = utils.static_field()
+  calibration: None | type[AbstractAqtCalibration] = utils.static_field(
+      default=None
+  )
   _calibrator: None | AbstractAqtCalibration = utils.static_field(default=None)
   # TODO(yichizh): Factor out auxiliary dataclasses into a separate file.
   context: utils.Context
@@ -53,8 +55,9 @@ class Quantizer:
   # outside of bwd pass.
   def init_calibration(self):
     assert self._calibrator is None, "second call to self.init_calibration()"
-    self._calibrator = self.calibration()
-    self._calibrator.init_calibration()
+    if self.calibration is not None:
+      self._calibrator = self.calibration()
+      self._calibrator.init_calibration()
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(
@@ -123,6 +126,11 @@ class Quantizer:
     else:
       shared_axes = self.calib_shared_axes or calibration_axes
 
+    msg = (
+        f"{self.calibration = } must be set if {self.numerics = } is not"
+        " NoNumerics"
+    )
+    assert self.calibration is not None, msg
     assert self._calibrator is not None, "forgot self.init_calibration()?"
     scale, bias = self._calibrator.get_scale_and_bias(
         x, shared_axes, self.numerics, self.context
@@ -169,11 +177,17 @@ def quantizer_make(
 ) -> Quantizer:
   """Makes Quantizer."""
   effective_numerics = numerics_utils.get_numerics(n_bits, preserve_max_val)
+
+  if n_bits is None:
+    calibration_cls = None
+  else:
+    calibration_cls = calibration.AbsMaxCalibration
+
   quantizer = Quantizer(
       numerics=effective_numerics,
       calib_shared_axes=None,
       scale_stop_grad=True,
-      calibration=calibration.AbsMaxCalibration,
+      calibration=calibration_cls,
       context=utils.Context(key=None, train_step=None),
   )
   # TODO(lew): We should try to move to to class constructor or post-init.

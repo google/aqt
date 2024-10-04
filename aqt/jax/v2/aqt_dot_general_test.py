@@ -35,6 +35,9 @@ import scipy.stats
 
 
 def _apply_po2_scale(quantizer):
+  if quantizer.calibration is None:
+    return
+
   calibration_cls = quantizer.calibration
   # TODO(lew): Remove partial inspection wherever possible.
   # Partial inspection is needed because the current implementation of delayed
@@ -107,7 +110,7 @@ def rand_unif(shape, maxval, seed, dtype=jnp.float32):
 #
 # TODO(lew): Tests are a bit incomplete. What we need:
 # On top of that we shell test:
-#  - Gradinent is 1 in the range, 0 outside the abs-max range.
+#  - Gradient is 1 in the range, 0 outside the abs-max range.
 
 
 def test_eq(name, a, b):

@@ -315,19 +315,26 @@ def set_use_mid_quant(
       assert res == ()
       return grad
 
+  calibration_cls = calibration.AbsMaxCalibration
   if fwd_mid_alpha_both != SKIP:
     cfg.fwd.dg_quantizer.lhs_mid.numerics = DummyNumerics()
     cfg.fwd.dg_quantizer.rhs_mid.numerics = DummyNumerics()
+    cfg.fwd.dg_quantizer.lhs_mid.calibration = calibration_cls
+    cfg.fwd.dg_quantizer.rhs_mid.calibration = calibration_cls
     cfg.fwd.dg_quantizer.lhs_mid_alpha = fwd_mid_alpha_both
     cfg.fwd.dg_quantizer.rhs_mid_alpha = fwd_mid_alpha_both
   if dlhs_mid_alpha_both != SKIP:
     cfg.dlhs.dg_quantizer.lhs_mid.numerics = DummyNumerics()
     cfg.dlhs.dg_quantizer.rhs_mid.numerics = DummyNumerics()
+    cfg.dlhs.dg_quantizer.lhs_mid.calibration = calibration_cls
+    cfg.dlhs.dg_quantizer.rhs_mid.calibration = calibration_cls
     cfg.dlhs.dg_quantizer.lhs_mid_alpha = dlhs_mid_alpha_both
     cfg.dlhs.dg_quantizer.rhs_mid_alpha = dlhs_mid_alpha_both
   if drhs_mid_alpha_both != SKIP:
     cfg.drhs.dg_quantizer.lhs_mid.numerics = DummyNumerics()
     cfg.drhs.dg_quantizer.rhs_mid.numerics = DummyNumerics()
+    cfg.drhs.dg_quantizer.lhs_mid.calibration = calibration_cls
+    cfg.drhs.dg_quantizer.rhs_mid.calibration = calibration_cls
     cfg.drhs.dg_quantizer.lhs_mid_alpha = drhs_mid_alpha_both
     cfg.drhs.dg_quantizer.rhs_mid_alpha = drhs_mid_alpha_both
 
@@ -396,7 +403,15 @@ def set_auto_calib_scale(
 
 
 def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
-  """Set AbsMaxCalibration clipping_scale and clip_gradient accordingly."""
+  """Set clipping_scale and clip_gradient for AbsMaxCalibration quantizers.
+
+  Does not modify the configuration for quantizers with other calibration
+  classes or None calibration.
+
+  Args:
+    cfg: The config to be updated.
+    scale: The clipping scale.
+  """
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
@@ -411,6 +426,9 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
     dg_quantizer = dot_general_raw.dg_quantizer
     for quantizer in [dg_quantizer.lhs, dg_quantizer.rhs]:
       calibration_cls = quantizer.calibration
+      if calibration_cls is None:
+        continue
+
       # TODO(lew): Remove partial inspection wherever possible.
       # Partial inspection is needed because the current implementation of
       # delayed calibration initialization requires the configuration to be set
@@ -443,23 +461,39 @@ def set_bits(
     drhs_lhs_bit: None | int | fp8_numerics.FP8Dtype,
     drhs_rhs_bit: None | int | fp8_numerics.FP8Dtype,
 ) -> DotGeneral:
-  """Set quantization bits for dot_general config."""
+  """Set quant bits for dot_general. Overwrites with AbsMaxCalibration."""
+  calibration_cls = calibration.AbsMaxCalibration
 
   set_numerics(
       cfg.fwd,
       numerics_utils.get_numerics(fwd_lhs_bit),
       numerics_utils.get_numerics(fwd_rhs_bit),
   )
+  if fwd_lhs_bit is not None:
+    cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
+  if fwd_rhs_bit is not None:
+    cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls
+
   set_numerics(
       cfg.dlhs,
       numerics_utils.get_numerics(dlhs_lhs_bit),
       numerics_utils.get_numerics(dlhs_rhs_bit),
   )
+  if dlhs_lhs_bit is not None:
+    cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
+  if dlhs_rhs_bit is not None:
+    cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
+
   set_numerics(
       cfg.drhs,
       numerics_utils.get_numerics(drhs_lhs_bit),
       numerics_utils.get_numerics(drhs_rhs_bit),
   )
+  if drhs_lhs_bit is not None:
+    cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
+  if drhs_rhs_bit is not None:
+    cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls
+
   # use_fwd_quant is by default set to False if fwd pass is quantized.
   # This is to make the configuration logically correct,
   # i.e., use_fwd_quant cannot be None when fwd is quantized.
@@ -484,6 +518,9 @@ def set_scale_and_bias_dtype(cfg: DotGeneral, dtype: jnp.dtype):
 
   def _update_dtype(quantizer: aqt_quantizer.Quantizer):
     calibration_cls = quantizer.calibration
+    if calibration_cls is None:
+      return
+
     # TODO(lew): Remove partial inspection wherever possible.
     # Partial inspection is needed because the current implementation of delayed
     # calibration initialization requires the configuration to be set via
@@ -523,7 +560,7 @@ def default_unquantized_config() -> DotGeneral:
         numerics=no_numerics.NoNumerics(),
         calib_shared_axes=None,
         scale_stop_grad=True,
-        calibration=calibration.AbsMaxCalibration,
+        calibration=None,
         context=utils.Context(key=None, train_step=None),
     )
 
@@ -653,7 +690,7 @@ def config_v3(
   cfg.dlhs.rhs.use_fwd_quant = False
   cfg.drhs.rhs.use_fwd_quant = False
 
-  # Typically we have (but I don't know if it is guraranteed):
+  # Typically we have (but I don't know if it is guaranteed):
   # - vjp_lhs_stochastic_rounding is referring to the gradient and
   # - vjp_rhs_stochastic_rounding is referring to the activations/weights.
   set_stochastic_rounding(

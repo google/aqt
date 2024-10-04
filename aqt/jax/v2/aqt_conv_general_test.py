@@ -31,6 +31,9 @@ def rand_unif(shape, maxval, seed, dtype=jnp.float32):
 
 
 def _apply_po2_scale(quantizer):
+  if quantizer.calibration is None:
+    return
+
   calibration_cls = quantizer.calibration
   # TODO(lew): Remove partial inspection wherever possible.
   # Partial inspection is needed because the current implementation of delayed
