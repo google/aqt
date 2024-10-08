@@ -24,6 +24,7 @@ from aqt.jax.v2.numerics import no_numerics
 from aqt.jax.v2.numerics import numerics
 from aqt.jax.v2.numerics import utils as numerics_utils
 import jax
+import jax.numpy as jnp
 
 
 AbstractAqtNumerics = numerics.AqtNumerics
@@ -42,6 +43,7 @@ class Quantizer:
       utils.static_field()
   )
   scale_stop_grad: bool = utils.static_field()
+  scale_dtype: None | jnp.dtype = utils.static_field(default=None)
   # noise+clip+round
   # We apply gradient of clip_and_round in bwd pass.
   calibration: None | type[AbstractAqtCalibration] = utils.static_field(
@@ -56,7 +58,7 @@ class Quantizer:
   def init_calibration(self):
     assert self._calibrator is None, "second call to self.init_calibration()"
     if self.calibration is not None:
-      self._calibrator = self.calibration()
+      self._calibrator = self.calibration(dtype=self.scale_dtype)
       self._calibrator.init_calibration()
 
   # TODO(yichizh): Need to add type annotation back to cfg.
@@ -174,6 +176,8 @@ def quantizer_make(
     n_bits: None | int | fp8_numerics.FP8Dtype,
     preserve_max_val: bool = False,
     initialize_calibration: bool = True,
+    scale_stop_grad: bool = True,
+    scale_dtype: None | jnp.dtype = None,
 ) -> Quantizer:
   """Makes Quantizer."""
   effective_numerics = numerics_utils.get_numerics(n_bits, preserve_max_val)
@@ -186,7 +190,8 @@ def quantizer_make(
   quantizer = Quantizer(
       numerics=effective_numerics,
       calib_shared_axes=None,
-      scale_stop_grad=True,
+      scale_stop_grad=scale_stop_grad,
+      scale_dtype=scale_dtype,
       calibration=calibration_cls,
       context=utils.Context(key=None, train_step=None),
   )
