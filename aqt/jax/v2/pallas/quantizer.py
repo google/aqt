@@ -40,7 +40,6 @@ def quant(
     x: input tensor
     n_bits: the precision for quantization.
     calibration_axes: the calibration axes.
-
   Returns:
     A quantized QTensor
   """
@@ -48,9 +47,12 @@ def quant(
   # jax.lax.stop_gradient is not supported in pallas, thus disable
   # scale_stop_grad in the quantizer.
   quantizer.scale_stop_grad = False
-  qx, _ = quantizer.quant(x, calibration_axes=calibration_axes)
   # VPU ops only support float32. jax implicitly converts tensor into float32.
   # However, pallas requires explicit casting. Therefore, we need to enforce
-  # the dequant dtype to be float32.
+  # the scale factor and dequant dtype to be float32.
+
+  # enforce scale dtype to be float32
+  quantizer._calibrator.dtype = jnp.float32  # pylint: disable=protected-access
+  qx, _ = quantizer.quant(x, calibration_axes=calibration_axes)
   qx.dequant_dtype = jnp.float32  # enforce dequant dtype to be float32
   return qx
