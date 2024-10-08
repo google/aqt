@@ -71,10 +71,10 @@ def transpose_tensor_for_memory_saving(
 
   # If the size of the last dimension is less than 128, padding will be
   # added to make up the difference, which results in wasted memory space.
-  # To prevent this, if the second minor most dimension is greater than 128,
+  # To prevent this, if the second minor most dimension is greater than 1,
   # a transpose between the most minor and second minor most dimensions
   # will be performed.
-  transpose_last_two_axes = (s.shape[-1] == 1 and s.shape[-2] >= 128)
+  transpose_last_two_axes = (s.shape[-1] == 1 and s.shape[-2] > 1)
   if not transpose_last_two_axes:
     return s, block_spec
 
