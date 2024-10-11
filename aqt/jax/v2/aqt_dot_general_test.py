@@ -1143,18 +1143,11 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
   def test_per_subchannel(self):
     # TODO(lew): bits=8 started failing in VLP colab due x/x != 1.0 sometimes
     bits = 4
-    quantizer = aqt_quantizer.quantizer_make(bits, initialize_calibration=False)
-    x = jnp.arange(0, 64).reshape((4, 4, 4))
 
     # NOTE: The scale dtype must be set to a float dtype when quantizing an
     # integer input, as jax does not support taking the inverse of an integer.
-    assert not isinstance(
-        quantizer.calibration, functools.partial
-    ), "The line below must be updated to reflect this change."
-    quantizer.calibration = functools.partial(
-        quantizer.calibration, dtype=jnp.float32
-    )
-    quantizer.init_calibration()
+    quantizer = aqt_quantizer.quantizer_make(bits, scale_dtype=jnp.float32)
+    x = jnp.arange(0, 64).reshape((4, 4, 4))
 
     tiling_state = tiled_dot_general.generate_tiling_state(
         x,
