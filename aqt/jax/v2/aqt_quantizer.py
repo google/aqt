@@ -55,11 +55,11 @@ class Quantizer:
 
   # we need to speed up this initialization for the backward pass to happen
   # outside of bwd pass.
-  def init_calibration(self):
+  def init_calibration(self, calibration_stats: utils.DelayedScalingCalibrationStats = None):
     assert self._calibrator is None, "second call to self.init_calibration()"
     if self.calibration is not None:
       self._calibrator = self.calibration(dtype=self.scale_dtype)
-      self._calibrator.init_calibration()
+      self._calibrator.init_calibration(calibration_stats)
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(

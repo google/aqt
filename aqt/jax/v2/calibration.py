@@ -58,7 +58,7 @@ class Calibration(abc.ABC):
     # quantized value aligns with the minimum quantization bucket.
     pass
 
-  def init_calibration(self):
+  def init_calibration(self, calibration_stats: utils.DelayedScalingCalibrationStats = None):
     pass
 
 
