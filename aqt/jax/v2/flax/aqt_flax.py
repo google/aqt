@@ -234,6 +234,39 @@ def _populate_scale_t(
   return qt
 
 
+def create_initial_owg_stats():
+  return utils.OWGVariables(fwd=utils.CalibrationConfig(
+      lhs=utils.DelayedScalingCalibrationStats(
+          amax_history=jnp.zeros((1024,)),
+          bound=jnp.ones((1,))
+      ),
+      rhs=utils.DelayedScalingCalibrationStats(
+          amax_history=jnp.zeros((1024,)),
+          bound=jnp.ones((1,))
+      )
+  ),
+      dlhs=utils.CalibrationConfig(
+          lhs=utils.DelayedScalingCalibrationStats(
+              amax_history=jnp.zeros((1024,)),
+              bound=jnp.zeros((1,))
+          ),
+          rhs=utils.DelayedScalingCalibrationStats(
+              amax_history=jnp.zeros((1024,)),
+              bound=jnp.zeros((1,))
+          )
+      ),
+      drhs=utils.CalibrationConfig(
+          lhs=utils.DelayedScalingCalibrationStats(
+              amax_history=jnp.zeros((1024,)),
+              bound=jnp.zeros((1,))
+          ),
+          rhs=utils.DelayedScalingCalibrationStats(
+              amax_history=jnp.zeros((1024,)),
+              bound=jnp.zeros((1,))
+          )
+      ),
+  )
+
 class AqtDotGeneral(nn.Module):
   """A layer that can be injected into flax.nn.Dense, etc."""
 
@@ -380,6 +413,12 @@ class AqtDotGeneral(nn.Module):
         rhs_quant_mode=self.rhs_quant_mode,
     )
 
+    owg_variables = self.variable(
+        '_overwrite_with_gradient',
+        'OWGVariables',
+        lambda: create_initial_owg_stats(),
+    )
+
     def ret_dg(
         lhs,
         rhs,
@@ -417,9 +456,14 @@ class AqtDotGeneral(nn.Module):
       )
 
       cfg.apply_custom_vjp_on_jax = False
-      out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(
-          lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg
-      )
+      out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(lhs,
+                                                                           rhs,
+                                                                           lhs_qt,
+                                                                           rhs_qt,
+                                                                           dimension_numbers,
+                                                                           owg_variables.value,
+                                                                           self,
+                                                                           cfg)
 
       # Remove qvalue of the activation to not to store it in Freezer.
       match self.lhs_freeze_mode:
