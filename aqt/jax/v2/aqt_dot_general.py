@@ -1215,12 +1215,11 @@ def dg_core_vjp_bwd(
         if isinstance(calibrator, DelayedScalingCalibrationOWG):
           calibration_config.amax_history = calibrator.amax_history
           calibration_config.bound = calibrator.bound
-
-          calibrator.amax_history = None
-          calibrator.bound = None
+      dg.dg_quantizer.lhs._calibrator = None
+      dg.dg_quantizer.rhs._calibrator = None
     return cfg
 
   # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
   # None as grad to it. This is because it is a tuple of Python integers
   # that cannot be traced by Jax.
-  return (dlhs, drhs, None, None, cfg)
+  return (dlhs, drhs, None, None, update_differentiable_config_values(cfg))
