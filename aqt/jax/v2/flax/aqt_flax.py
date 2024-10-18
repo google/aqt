@@ -417,8 +417,20 @@ class AqtDotGeneral(nn.Module):
       )
 
       cfg.apply_custom_vjp_on_jax = False
+
+      def create_initial_cfg_for_custom_vjp(cfg):
+        for dg in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+          dg.dg_quantizer.lhs.calibration_config = dg.dg_quantizer.lhs.calibration_config or utils.CalibrationConfig(jnp.ones((1,)), jnp.zeros((1024,)))
+          dg.dg_quantizer.rhs.calibration_config = dg.dg_quantizer.rhs.calibration_config or utils.CalibrationConfig(jnp.ones((1,)), jnp.zeros((1024,)))
+        return cfg
+
+      cfg_variable = self.variable(
+          '_overwrite_with_gradient',
+          'cfg',
+          lambda: create_initial_cfg_for_custom_vjp(cfg),
+      )
       out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(
-          lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg
+          lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg_variable.value
       )
 
       # Remove qvalue of the activation to not to store it in Freezer.

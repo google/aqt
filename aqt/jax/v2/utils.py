@@ -153,3 +153,8 @@ class Context:
   key: None | jax.Array = dynamic_field()
   train_step: None | int = dynamic_field()
   quant_mode: QuantMode = static_field(default=QuantMode.TRAIN)
+
+@flax_slots_dataclass
+class CalibrationConfig:
+  bound: None | jax.Array = dynamic_field()
+  amax_history: None | jax.Array = dynamic_field()
