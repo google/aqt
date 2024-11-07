@@ -134,8 +134,11 @@ class Quantizer:
     )
     assert self.calibration is not None, msg
     assert self._calibrator is not None, "forgot self.init_calibration()?"
-    scale, bias = self._calibrator.get_scale_and_bias(
-        x, shared_axes, self.numerics, self.context
+
+    scale, bias, sparsity_mask = (
+        self._calibrator.get_scale_and_bias_and_sparsity(
+            x, shared_axes, self.numerics, self.context
+        )
     )
     if self.scale_stop_grad:
       # TODO(lew): Does not matter in DG, because we are using custom gradient.
@@ -144,6 +147,7 @@ class Quantizer:
 
     qt = aqt_tensor.QTensor(
         qvalue=None,
+        sparsity_mask=sparsity_mask,
         scale=scale,
         scale_t=None,
         bias=bias,

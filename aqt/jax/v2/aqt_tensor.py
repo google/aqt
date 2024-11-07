@@ -59,6 +59,10 @@ class QTensor:
   # Use dequant() method to "decompress" to the original tensor.
   qvalue: None | ArrayT
 
+  sparsity_mask: None | ArrayT = flax.struct.field(
+      pytree_node=True, default=None
+  )
+
   # (scale == None) means that scale is unknown/invalid;
   # Otherwise, check dequant(self) for semantics.
   scale: None | list[ArrayT]
@@ -137,6 +141,13 @@ class QTensor:
     for b in self.bias:
       qvalue += b
 
+    # TODO(lew): We could apply sparsity AFTER biases and maybe we could still
+    # efficiently compute the post-matmul bias correction (how big is it?)
+    # But the math is more complex, and it is not a superset, it is additional
+    # option, so we can do it later.
+    if self.sparsity_mask is not None:
+      qvalue = qvalue * self.sparsity_mask
+
     for s in self.scale:
       # TODO(lew): We could store s_inv for faster activation quantization.
       s_inv = jax.lax.reciprocal(s)
@@ -170,6 +181,9 @@ class QTensor:
     # dequant(q) = q * s - b
     for s in self.scale:
       ret *= s
+
+    if self.sparsity_mask is not None:
+      ret = ret * self.sparsity_mask
 
     # Apply bias after all rescaling is done. There may be more biases than
     # scales, e.g. in native asymmetric matmul output dequantization.

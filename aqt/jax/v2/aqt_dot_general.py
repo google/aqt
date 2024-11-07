@@ -851,6 +851,8 @@ def _qtensor_dot_general(
       output = input_qtensor.dequant()
     else:
       output = input_qtensor.qvalue
+      if input_qtensor.sparsity_mask is not None:
+        output = output * input_qtensor.sparsity_mask
     return output
 
   # Dequantize before the lax dg call if in fake quant mode

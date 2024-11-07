@@ -91,18 +91,18 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
       amax_history_mutable_arr[:] = new_history[:]
     return new_bound.reshape((1,) * len(x.shape))
 
-  def get_scale_and_bias(
+  def get_scale_and_bias_and_sparsity(
       self,
       x: jnp.ndarray,
       shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
       context: None | utils.Context = None,
-  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
     dtype = self.dtype if self.dtype is not None else x.dtype
     bound = self.get_bound(x, shared_axes, context)
     scale = bound / numerics_.get_quant_bound()
     scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
-    return [scale.astype(dtype)], []
+    return [scale.astype(dtype)], [], None
 
   def compute_bound(self, amax, prev_bound):
     new_bound = jnp.copy(amax)

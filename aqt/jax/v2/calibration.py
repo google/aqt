@@ -41,14 +41,16 @@ class Calibration(abc.ABC):
   po2_scale: bool = utils.static_field(default=False)
 
   @abc.abstractmethod
-  def get_scale_and_bias(
+  def get_scale_and_bias_and_sparsity(
       self,
       x: jnp.ndarray,
       shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
       context: None | utils.Context = None,
-  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
     """Returns the quantizaiton scale and bias for the given input tensor."""
+    # NOTE: The sparsity,  has to be compatible with scale and bias.
+    # The equation is defind in QTensor.quant() and QTensor.dequant() functions.
     # NOTE: The scale and bias calculation are handled by the Calibration
     # class because there is not a single order in which they should be
     # calculated. In the case of symmetric quantization, the scale depends on
@@ -69,13 +71,13 @@ class ConstantCalibration(Calibration):
   bound: jnp.ndarray | float
   bias: None | jnp.ndarray | float = None
 
-  def get_scale_and_bias(
+  def get_scale_and_bias_and_sparsity(
       self,
       x: jnp.ndarray,
       shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
       context: None | utils.Context = None,
-  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
     del context
     if isinstance(self.bound, float) and self.bound <= 0.0:
       raise ValueError(f'{self.bound=} should be positive.')
@@ -98,7 +100,7 @@ class ConstantCalibration(Calibration):
       bias = [jnp.full(x.shape, self.bias, x.dtype)]
     else:
       bias = [self.bias.astype(dtype)]
-    return [scale.astype(dtype)], bias
+    return [scale.astype(dtype)], bias, None
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -112,13 +114,13 @@ class AbsMaxCalibration(Calibration):
 
   clipping_scale: None | float = None
 
-  def get_scale_and_bias(
+  def get_scale_and_bias_and_sparsity(
       self,
       x: jnp.ndarray,
       shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
       context: None | utils.Context = None,
-  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
     """Calibration.
 
     Args:
@@ -152,7 +154,7 @@ class AbsMaxCalibration(Calibration):
 
     scale = bound / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
-    return [scale.astype(dtype)], []
+    return [scale.astype(dtype)], [], None
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -168,13 +170,13 @@ class AbsMeanCalibration(Calibration):
   clipping_scale: float
   p: float
 
-  def get_scale_and_bias(
+  def get_scale_and_bias_and_sparsity(
       self,
       x: jnp.ndarray,
       shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
       context: None | utils.Context = None,
-  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
     """Calibration."""
     del context
     assert shared_axes is not None
@@ -189,7 +191,7 @@ class AbsMeanCalibration(Calibration):
 
     scale = abs_mean / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
-    return [scale.astype(dtype)], []
+    return [scale.astype(dtype)], [], None
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -212,13 +214,13 @@ class SnrBasedAutoCalibration(Calibration):
 
   auto_clip_search_config: utils.AutoScaleSearchConfig
 
-  def get_scale_and_bias(
+  def get_scale_and_bias_and_sparsity(
       self,
       x: jnp.ndarray,
       shared_axes: None | Sequence[utils.AxisIdx],
       numerics_: numerics.AqtNumerics,
       context: None | utils.Context = None,
-  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
     """Produces the scale for quantization based on SNR values.
 
     Args:
@@ -278,7 +280,7 @@ class SnrBasedAutoCalibration(Calibration):
     bound = abs_max * best_subchannel_clip_scales
     scale = bound / numerics_.get_quant_bound()
     scale = ceil_to_po2(scale) if self.po2_scale else scale
-    return [scale.astype(dtype)], []
+    return [scale.astype(dtype)], [], None
 
   def _update_best_clip_scales_and_max_snr(
       self,
