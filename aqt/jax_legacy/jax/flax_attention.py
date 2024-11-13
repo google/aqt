@@ -30,9 +30,6 @@ from aqt.jax_legacy.jax.quantization import quantized_dynamic_dot_general
 from aqt.jax_legacy.jax.quantization import QuantOps
 from aqt.jax_legacy.jax.quantization import QuantType
 from flax import linen as nn
-# TODO(malmaud): Remove reliance on these 'legacy' nn.attention methods
-from flax.deprecated.nn.attention import _make_causal_mask
-from flax.deprecated.nn.attention import make_padding_mask
 from flax.linen import initializers
 import jax
 from jax import lax
@@ -43,6 +40,112 @@ import numpy as onp
 T = TypeVar('T')
 
 dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+
+
+def make_padding_mask(padding_mask_query,
+                      padding_mask_key,
+                      query_shape,
+                      key_shape,
+                      attention_axis=None,
+                      segmentation_mask=False):
+  """Makes padding mask for attention weights.
+
+  In case of 1d inputs (i.e., `[bs, len, features]`, the attention weights will
+  be `[bs, len, len]` and this function makes a square matrix [len, len].
+
+  Args:
+    padding_mask_query: padding mask of query <bs, qdim1,.., qdimn>
+    padding_mask_key: padding mask of query <bs, key1,.., keyn>
+    query_shape: shape of the query
+    key_shape: shape of the key, which is equal to the shape of value.
+    attention_axis: axis over which attention is applied.
+    segmentation_mask: bool: if true use equality on cartesian product rather
+      than outer product for constructing segmentation masks.
+
+  Returns:
+    The padding mask for attention weights.
+  """
+  assert query_shape[0] == key_shape[0]
+  assert len(query_shape) == len(key_shape)
+
+  ndim = len(key_shape)
+  if attention_axis is None:
+    attention_axis = tuple(range(1, ndim - 2))
+  assert isinstance(attention_axis, tuple)
+  for ax in attention_axis:
+    if not (ndim >= 3 and 1 <= ax < ndim - 2):
+      raise ValueError(
+          'Attention axis must be between the batch axis and the last-two axes.'
+      )
+
+  mask_shape_final = (query_shape[0], 1)  #  batch_size, 1 (for all heads)s
+  for ax in attention_axis:
+    mask_shape_final += (query_shape[ax],)
+  for ax in attention_axis:
+    mask_shape_final += (key_shape[ax],)
+
+  padding_mask_query = padding_mask_query[..., None]
+  padding_mask_key = padding_mask_key[..., None]
+  perm = (0,) + tuple(onp.flip(onp.arange(padding_mask_key.ndim)))[:-1]
+  if segmentation_mask:
+    mask = jnp.equal(padding_mask_query, padding_mask_key.transpose(perm))
+  else:
+    mask = jnp.multiply(padding_mask_query, padding_mask_key.transpose(perm))
+
+  mask = mask.reshape(mask_shape_final)
+  mask = jax.lax.convert_element_type(mask, jnp.float32)
+  return mask
+
+
+def _make_causal_mask(key, attention_axis=None, self_mask=False):
+  """Makes a causal mask, to be used for masking out the future for attention.
+
+  In case of 1d inputs (i.e., `[bs, len, features]`, the attention weights will
+  be `[bs, len, len]` and this function makes a square matrix [len, len] with
+  zeros in upper triangle and ones in lower triangle.
+
+  Args:
+    key: shape of the key, which is equal to the shape of value and is assumed
+      to be equal to the shape of the query (since this is used in
+      self-attention when decoding).
+    attention_axis: axis over which attention is applied.
+    self_mask: if mask out the diagonal or not.
+
+  Returns:
+    A causal mask to be used to mask out future positions.
+  """
+  if attention_axis is None:
+    attention_axis = tuple(range(1, key.ndim - 2))
+  assert isinstance(attention_axis, tuple)
+  for ax in attention_axis:
+    if not (key.ndim >= 3 and 1 <= ax < key.ndim - 2):
+      raise ValueError(
+          'Attention axis must be between the batch axis and the last-two axes.'
+      )
+
+  mask_shape = tuple([1] * (key.ndim - len(attention_axis) - 1))
+  mask_shape_final = mask_shape
+  for _ in range(2):
+    flatten_dim = 1
+    for ax in attention_axis:
+      mask_shape_final += (key.shape[ax],)
+      flatten_dim *= key.shape[ax]
+    mask_shape += (flatten_dim,)
+
+  def tri(n, m, k=0):
+    # Tie in the key to avoid the mask becoming a constant.
+    # This way XLA can construct the mask during computation and fuse it
+    # with the attention ops.
+    x = jnp.arange(n, dtype=jnp.int32)
+    y = jnp.arange(m, dtype=jnp.int32)
+    mask = lax.ge(
+        (lax.broadcast_in_dim(x, shape=(n, m), broadcast_dimensions=(0,))) + k,
+        lax.broadcast(y, [n]))
+    return mask
+
+  k = -1 if self_mask else 0
+  mask = tri(*mask_shape[-2:], k=k).reshape(mask_shape_final)
+  return mask
 
 
 @dataclass
