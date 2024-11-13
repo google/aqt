@@ -34,23 +34,6 @@ import numpy as np
 import scipy.stats
 
 
-def _apply_po2_scale(quantizer):
-  if quantizer.calibration is None:
-    return
-
-  calibration_cls = quantizer.calibration
-  # TODO(lew): Remove partial inspection wherever possible.
-  # Partial inspection is needed because the current implementation of delayed
-  # calibration initialization requires the configuration to be set via
-  # functools.partial.
-  keywords = {}
-  if isinstance(calibration_cls, functools.partial):
-    keywords = calibration_cls.keywords
-    calibration_cls = calibration_cls.func
-  keywords.update(po2_scale=True)
-  quantizer.calibration = functools.partial(calibration_cls, **keywords)
-
-
 def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
   """Tests whether dot_generals in f conform to dtypes inside of dg_raws."""
 
@@ -94,6 +77,13 @@ def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
 def rand_unif(shape, maxval, seed, dtype=jnp.float32):
   key = jax.random.PRNGKey(seed)
   return jax.random.uniform(
+      key=key, shape=shape, minval=-maxval, maxval=maxval, dtype=dtype
+  )
+
+
+def rand_int(shape, maxval, seed, dtype=int):
+  key = jax.random.PRNGKey(seed)
+  return jax.random.randint(
       key=key, shape=shape, minval=-maxval, maxval=maxval, dtype=dtype
   )
 
@@ -253,8 +243,8 @@ def _modify_dg(
     # have the same numerics when scales are power of two (po2).
     # We are passing dims to config so that we can reuse it in fake_quant.
     # Power-of-2 scales allow FQ and AQT to be exactly the same.
-    _apply_po2_scale(c.dg_quantizer.lhs)
-    _apply_po2_scale(c.dg_quantizer.rhs)
+    config.set_quantizer_po2_scale(c.dg_quantizer.lhs)
+    config.set_quantizer_po2_scale(c.dg_quantizer.rhs)
 
     _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode)
     _apply_calibration_mode(c, lhs_calibration_mode, rhs_calibration_mode)
@@ -456,6 +446,41 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     custom_1_noise = noise_fn(shape, jax.random.PRNGKey(11))
     assert_clt(custom_1_noise)
 
+  def test_sum(self):
+    # This is a test showing that the following will produce *different* results
+    # (1) Contract 2 axes using jax.lax.dot_general
+    # (2) First contract 1 axix using jax.lax.dot_general, then contract the
+    #     other axis using jnp.sum.
+    # This means that fake quant subchannel will produce different results from
+    # the real quant subchannel.
+    key = jax.random.PRNGKey(0)
+    key1, key2 = jax.random.split(key)
+    dtype = jnp.float32
+    lhs = jax.random.normal(key1, shape=(2, 3, 4), dtype=dtype)
+    rhs = jax.random.normal(key2, shape=(3, 4, 5), dtype=dtype)
+
+    def product1(x, y):
+      return jax.lax.dot_general(
+          x, y, dimension_numbers=(((1, 2), (0, 1)), ((), ()))
+      )
+
+    def product2(x, y):
+      intermediate = jax.lax.dot_general(
+          x, y, dimension_numbers=(((1,), (0,)), ((2,), (1,)))
+      )
+      return jnp.sum(intermediate, axis=0)
+
+    def print_err(x, y):
+      print(f"{x=}")
+      print(f"{y=}")
+      mse = jnp.mean(jnp.square(x - y))
+      print(f"{mse=}")
+
+    out1 = product1(lhs, rhs)
+    out2 = product2(lhs, rhs)
+    print_err(out1, out2)
+    assert not (out1 == out2).all()
+
   @parameterized.parameters([
       dict(bits=1),
   ])
@@ -466,7 +491,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       shape=(20, 1),
   ):
     quantizer = config.quantizer_make(bits, initialize_calibration=False)
-    _apply_po2_scale(quantizer)
+    config.set_quantizer_po2_scale(quantizer)
     quantizer.init_calibration()
     quantizer.calib_shared_axes = (0,)
     x = jnp.linspace(-maxval, maxval, num=shape[0]).reshape(shape)
@@ -516,8 +541,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
       # We do this test anyway, to catch jax-compilation-time errors.
-      dict(dg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
-      dict(dg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
+      dict(dg=config.dot_general_make(2, 2), dtype=jnp.float32),
+      dict(dg=config.dot_general_make(8, 8), dtype=jnp.float32),
       dict(dg=config.dot_general_make(None, 8)),
       dict(dg=config.dot_general_make(8, None)),
       dict(
@@ -529,6 +554,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           gra_shape=(4, 3, 6),
       ),
       dict(
+          # This tests fake subchannel implementation as well.
           dg=fqt_param_dict(
               s=10,
               use_fwd_quant=True,
@@ -574,9 +600,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     readonly_dg = dg
     del dg
 
-    lhs = rand_unif(lhs_shape, lhs_maxval, seed, dtype)
-    rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
-    gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
+    # Use integer inputs to avoid the mismatch between fake & real quant results
+    lhs = rand_int(lhs_shape, lhs_maxval, seed).astype(dtype)
+    rhs = rand_int(rhs_shape, rhs_maxval, seed + 1).astype(dtype)
+    gra = rand_int(gra_shape, gra_maxval, seed + 2).astype(dtype)
 
     # Prepare utility functions for test.
     aqt_dg_full = functools.partial(
@@ -741,8 +768,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       # can't keep in the product of int8*int8 accurately.
       # It just so happens that this test does not fail but others do.
       # We do this test anyway, to catch jax-compilation-time errors.
-      dict(dg=config.dot_general_make(2, 2), dtype=jnp.bfloat16),
-      dict(dg=config.dot_general_make(8, 8), dtype=jnp.bfloat16),
+      dict(dg=config.dot_general_make(2, 2), dtype=jnp.float32),
+      dict(dg=config.dot_general_make(8, 8), dtype=jnp.float32),
       dict(dg=config.dot_general_make(None, 8)),
       dict(dg=config.dot_general_make(8, None)),
       dict(
@@ -780,9 +807,10 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     readonly_dg = dg
     del dg
 
-    lhs = rand_unif(lhs_shape, lhs_maxval, seed, dtype)
-    rhs = rand_unif(rhs_shape, rhs_maxval, seed + 1, dtype)
-    gra = rand_unif(gra_shape, gra_maxval, seed + 2, dtype)
+    # Use integer inputs to avoid the mismatch between fake & real quant results
+    lhs = rand_int(lhs_shape, lhs_maxval, seed).astype(dtype)
+    rhs = rand_int(rhs_shape, rhs_maxval, seed + 1).astype(dtype)
+    gra = rand_int(gra_shape, gra_maxval, seed + 2).astype(dtype)
 
     # Prepare utility functions for test.
     aqt_dg_full = functools.partial(
@@ -1084,8 +1112,19 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           lhs=[1270.0, 10.0, 1270000.0, 10000.0],
           expected_product=1280000.0,
       ),
+      dict(
+          # subchannel:          [1270, 10]  [1270000, 10000]
+          # scale=bound/127:     10          10000
+          # pow2 scale:          16          16384
+          # qvalue=rnd(x/scale): [79, 1]     [78, 1]
+          # product:             80*16    +  79*16384  = 1295616
+          shard_count=2,
+          lhs=[1270.0, 10.0, 1270000.0, 10000.0],
+          expected_product=1295616.0,
+          pw2_scale=True,
+      ),
   ])
-  def test_local_aqt(self, shard_count, lhs, expected_product):
+  def test_local_aqt(self, shard_count, lhs, expected_product, pw2_scale=False):
     # create a config that quantizes both forward and backward passes to int8
     # set the number of shards (local aqt) to 2
     dg = config.fully_quantized(
@@ -1093,11 +1132,15 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         bwd_bits=8,
         use_stochastic_rounding=False,
         drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=shard_count),
+        use_fwd_quant=False,  # To not multiply rhs scale to the left
     )
     dg.fwd.dg_quantizer.lhs.numerics.preserve_max_val = True
     dg.fwd.dg_quantizer.rhs.numerics.preserve_max_val = True
     dg.drhs.dg_quantizer.lhs.numerics.preserve_max_val = True
     dg.drhs.dg_quantizer.rhs.numerics.preserve_max_val = True
+    if pw2_scale:
+      config.set_quantizer_po2_scale(dg.drhs.dg_quantizer.lhs)
+      config.set_quantizer_po2_scale(dg.drhs.dg_quantizer.rhs)
     dg_f = lambda lhs, rhs: dg(
         lhs,
         rhs,
@@ -1107,7 +1150,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     rhs = jnp.array([1.0])
     output, bprop = jax.vjp(dg_f, lhs, rhs)
     _, drhs = bprop(jnp.ones_like(output))
-    assert drhs == expected_product
+    assert drhs == expected_product, f"{drhs=}, {expected_product=}"
 
   def test_per_tensor(self):
     # TODO(lew): bits=8 started failing in VLP colab due x/x != 1.0 sometimes
