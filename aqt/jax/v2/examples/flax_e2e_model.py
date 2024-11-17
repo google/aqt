@@ -184,6 +184,7 @@ def update_model_params_with_grads(state, grads, updated_var):
   updates, new_opt_state = state.tx.update(param_grad, state.opt_state, params)
   new_params = optax.apply_updates(params, updates)
   updated_var.update(params=new_params)
+  updated_var['_overwrite_with_gradient'] = grads['_overwrite_with_gradient']
   return state.replace(
       model=updated_var,
       opt_state=new_opt_state,

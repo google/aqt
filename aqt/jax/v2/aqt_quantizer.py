@@ -53,13 +53,16 @@ class Quantizer:
   # TODO(yichizh): Factor out auxiliary dataclasses into a separate file.
   context: utils.Context
 
+  calibration_config: None | utils.CalibrationConfig = None
+
+
   # we need to speed up this initialization for the backward pass to happen
   # outside of bwd pass.
   def init_calibration(self):
     assert self._calibrator is None, "second call to self.init_calibration()"
     if self.calibration is not None:
       self._calibrator = self.calibration(dtype=self.scale_dtype)
-      self._calibrator.init_calibration()
+      self._calibrator.init_calibration(self.calibration_config)
 
   # TODO(yichizh): Need to add type annotation back to cfg.
   def quant(
