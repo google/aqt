@@ -117,8 +117,80 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
     )
     return new_history
 
-  def init_calibration(self):
+  def init_calibration(self, calibration_stats: utils.DelayedScalingCalibrationStats = None):
     # We need to "touch" one of these variables to make sure this modules
     # variables are initialized properly once. Else, they get "recreated"
     # on each use.
     self.amax_history  # pylint: disable=pointless-statement
+
+@utils.flax_slots_kw_only_dataclass
+class DelayedScalingCalibrationOWG(calibration.Calibration):
+  """Calibration module with logic from Transformer Engine, utilizing Delayed Scaling."""
+
+  amax_history_length: int = 1024
+  amax_history: jax.Array = None
+  bound: jax.Array = None
+
+  def get_bound(
+      self,
+      x: jnp.ndarray,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      context: None | utils.Context = None,
+  ) -> jnp.ndarray:
+    del shared_axes
+    # Right now we just support per_tensor calibration (i.e. one value).
+    # To support per_axis calibration, we would need to be able to change the
+    # shape of the mutable arrays. For example, right now amax_history has
+    # shape (amax_history_length,). But if we want to support per_axis
+    # calibration, we would need the shape of amax_history to be changed to
+    # (amax_history_length, scale_shape), where scale_shape is
+    # jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True).shape
+    #
+    # See setup() for why we can't use nn.compact to solve this as is usually
+    # done Jax/Flax
+
+    # We default to SERVE mode if context is not provided, since we will
+    # be mutating the arrays in place and don't want to do so accidentally
+    quant_mode = context.quant_mode if context else utils.QuantMode.SERVE
+
+    amax_history = self.amax_history
+    prev_bound = self.bound
+    amax_from_history = jnp.max(amax_history, axis=0)
+
+    new_bound = self.compute_bound(amax_from_history, prev_bound)
+    new_history = self.compute_history(x, amax_history)
+
+    if quant_mode in [utils.QuantMode.TRAIN, utils.QuantMode.CALIBRATE]:
+      self.bound = new_bound
+      self.amax_history = new_history
+    return new_bound.reshape((1,) * len(x.shape))
+
+  def get_scale_and_bias(
+      self,
+      x: jnp.ndarray,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      numerics_: numerics.AqtNumerics,
+      context: None | utils.Context = None,
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray]]:
+    dtype = self.dtype if self.dtype is not None else x.dtype
+    bound = self.get_bound(x, shared_axes, context)
+    scale = bound / numerics_.get_quant_bound()
+    scale = calibration.ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], []
+
+  def compute_bound(self, amax, prev_bound):
+    new_bound = jnp.copy(amax)
+    new_bound = jnp.where(amax > 0.0, new_bound, prev_bound)
+    new_bound = jnp.where(jnp.isfinite(amax), new_bound, prev_bound)
+    return new_bound
+
+  def compute_history(self, x, amax_history):
+    amax_update = jnp.max(jnp.abs(x)).astype(amax_history.dtype)
+    new_history = (
+        jnp.roll(amax_history, shift=-1, axis=0).at[0].set(amax_update)
+    )
+    return new_history
+
+  def init_calibration(self, calibration_stats: utils.DelayedScalingCalibrationStats = None):
+    self.amax_history = calibration_stats.amax_history
+    self.bound = calibration_stats.bound
