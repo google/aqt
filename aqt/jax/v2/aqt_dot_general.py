@@ -1101,9 +1101,6 @@ def dg_core_vjp_fwd(
   assert (
       lhs.dtype == rhs.dtype
   ), f'Unmatched lhs and rhs dtype: {lhs.dtype} vs {rhs.dtype}'
-  cfg.fwd.dg_quantizer.init_calibration()
-  cfg.dlhs.dg_quantizer.init_calibration()
-  cfg.drhs.dg_quantizer.init_calibration()
   ret, res = cfg.fwd(
       lhs,
       rhs,
