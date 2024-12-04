@@ -7,10 +7,10 @@ quantization for convolution and matmul.
 
 ### Jax Libraries
 
-- **quantization.quantized_dot**: [LAX.dot](https://github.com/google/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L632) with optionally quantized weights and activations.
-- **quantization.quantized_dynamic_dot_general**: [LAX.dot general](https://github.com/google/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L667) with optionally quantized dynamic inputs.
+- **quantization.quantized_dot**: [LAX.dot](https://github.com/jax-ml/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L632) with optionally quantized weights and activations.
+- **quantization.quantized_dynamic_dot_general**: [LAX.dot general](https://github.com/jax-ml/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L667) with optionally quantized dynamic inputs.
 - **quantization.quantized_sum**: Sums a tensor while quantizing intermediate accumulations.
-- **quantization.dot_general_aqt**: Adds quantization to [LAX.dot_general](https://github.com/google/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L667) with option to use integer dot.
+- **quantization.dot_general_aqt**: Adds quantization to [LAX.dot_general](https://github.com/jax-ml/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L667) with option to use integer dot.
 
 
 ### Flax Libraries

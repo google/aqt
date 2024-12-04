@@ -703,7 +703,7 @@ def quantized_dot(
   """LAX dot with optionally quantized weights and activations.
 
   Wraps LAX's `Dot
-  <https://github.com/google/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L632`_
+  <https://github.com/jax-ml/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L632`_
   operator.
 
   Args:
@@ -732,7 +732,7 @@ def quantized_dot(
     ValueError: Shapes of 'act' and 'w' not compatible with quant_type.
   """
   # This code was initially expanded from
-  # https://github.com/google/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L632
+  # https://github.com/jax-ml/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L632
   # We keep the original return-value semantics of lax.dot, which this wraps. In
   # particular, the type of the return value of quantized_dot is the same as the
   # type of the inputs. That means that if the inputs are bfloat16, then the
@@ -1315,7 +1315,7 @@ def quantized_dynamic_dot_general(
   """LAX dot general with optionally quantized dynamic inputs.
 
   Wraps LAX's `DotGeneral
-  <https://github.com/google/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L667`_
+  <https://github.com/jax-ml/jax/blob/f65a327c764406db45e95048dfe09209d8ef6d37/jax/_src/lax/lax.py#L667`_
   operator.
 
   Args:
