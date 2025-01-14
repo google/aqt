@@ -19,7 +19,7 @@
 
 import copy
 import functools
-from typing import Literal, TypeAlias
+from typing import Literal, Sequence, TypeAlias
 
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_quantizer
@@ -176,6 +176,7 @@ def set_stochastic_rounding(
     vjp_lhs_stochastic_rounding: bool,
     vjp_rhs_stochastic_rounding: bool,
     implementation: str,
+    noise_sharing_axes: Sequence[int] = (),
 ):
   """Configure stochastic rounding implementation."""
   noise_implementations = {
@@ -184,7 +185,14 @@ def set_stochastic_rounding(
   }
   msg = f'{implementation} not supported.'
   assert implementation in noise_implementations.keys(), msg
-  noise_fn = noise_implementations[implementation]
+  if noise_sharing_axes:
+    noise_fn = functools.partial(
+        noise_implementations[implementation],
+        noise_sharing_axes=noise_sharing_axes,
+    )
+  else:
+    # for backward compatibility of the config tests.
+    noise_fn = noise_implementations[implementation]
   assert isinstance(
       cfg.dlhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
