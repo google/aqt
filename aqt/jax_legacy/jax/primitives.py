@@ -97,12 +97,12 @@ def round_and_clip_to_signed_int(x: jax.Array, *, prec: int, dtype: jnp_dtype,
   bound = signed_int_bound(prec=prec, half_shift=half_shift)
   if half_shift:
     bound -= epsilon
-    x = jnp.clip(x, a_min=-bound, a_max=bound).astype(dtype)
+    x = jnp.clip(x, min=-bound, max=bound).astype(dtype)
     x = floor_with_gradient(x) + 0.5
   else:
     # TODO(lew): Use the formula for better gradients. Needs a sweep though.
     # bound = 2**(prec - 1) - 0.5 - epsilon
-    x = jnp.clip(x, a_min=-bound, a_max=bound).astype(dtype)
+    x = jnp.clip(x, min=-bound, max=bound).astype(dtype)
     x = round_with_gradient(x)
   return x
 
@@ -125,8 +125,8 @@ def floor_and_clip_to_unsigned_int(x: jax.Array, *, prec: int,
   """
   assert not half_shift
   x = floor_with_gradient(x)
-  # TODO(lew): should be (a_max=2**prec - epsilon) for a better gradient.
-  x = jnp.clip(x, a_min=0, a_max=2**prec - 1).astype(dtype)
+  # TODO(lew): should be (max=2**prec - epsilon) for a better gradient.
+  x = jnp.clip(x, min=0, max=2**prec - 1).astype(dtype)
   return x
 
 

@@ -662,7 +662,7 @@ def run_eval(*,
       lambda x: x / eval_denominator,  # pylint: disable=cell-var-from-loop
       eval_metrics_sums)
   eval_summary['perplexity'] = jnp.clip(
-      jnp.exp(eval_summary['loss']), a_max=1.0e4)
+      jnp.exp(eval_summary['loss']), max=1.0e4)
   if summary_writer is not None:
     if jax.host_id() == 0:
       for key, val in eval_summary.items():
@@ -1247,7 +1247,7 @@ def run_training(
           summary['update_weight_sparsity'] = update_weight_sparsity
           summary['update_act_sparsity'] = update_act_sparsity
           summary['num_update_sparsity'] = num_update_sparsity
-        summary['perplexity'] = jnp.clip(jnp.exp(summary['loss']), a_max=1.0e4)
+        summary['perplexity'] = jnp.clip(jnp.exp(summary['loss']), max=1.0e4)
         logging.info('train in step: %d, loss: %.4f', step, summary['loss'])
         steps_per_eval = eval_freq if step != 0 else 1
         steps_per_sec = steps_per_eval / (time.time() - t_loop_start)
