@@ -235,20 +235,7 @@ As of today there are several independent AQT implementations in this package:
   AQT implementing universal matmul quantization.
 
 AQTv2 is the recommended library.
-We plan to port remaining features from AQTv1 to AQTv2 and
-delete AQTv1 in early Q1 2024. Below we describe details about that.
-
-## Inference Acceleration
-
-The most important AQTv2 (to be ported from AQTv1) missing features are:
-
- - https://github.com/google/aqt/issues/282
- - https://github.com/google/aqt/issues/280
-
-
-Lack of these features prevents AQTv2 from accelerating inference with small batch.
-The only option today is dynamic quantization where
-each tensor op is quantized independently and quantization scales are found just-in-time.
+We plan to delete AQTv1 in early Q1 2024.
 
 ## Backpropagation Acceleration
 
