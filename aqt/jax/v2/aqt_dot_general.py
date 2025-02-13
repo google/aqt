@@ -34,11 +34,16 @@ from aqt.jax.v2 import utils
 from aqt.jax.v2.numerics import fp8_numerics
 import jax
 from jax import lax
-from jax._src.numpy import lax_numpy
 import jax.numpy as jnp
 import numpy as onp
 from typing_extensions import Self  # for python version < 3.11
 
+try:
+  # jax v0.5.1 or newer
+  from jax._src.numpy import einsum as jax_einsum  # pylint: disable=g-import-not-at-top  # pytype: disable=import-error
+except ImportError:
+  # jax v0.5.0 or older
+  from jax._src.numpy import lax_numpy as jax_einsum  # pylint: disable=g-import-not-at-top
 
 dtypes_allowed_for_int32_accum = [jnp.int4, jnp.int8]
 
@@ -226,11 +231,11 @@ class DotGeneralRes:
 
 def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
   """A copy of jnp.einsum but without the default jit so as to be injectable."""
-  operands, contractions = lax_numpy._default_poly_einsum_handler(  # pylint: disable=protected-access
+  operands, contractions = jax_einsum._default_poly_einsum_handler(  # pylint: disable=protected-access
       eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
   )
   contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
-  return jax.named_call(lax_numpy._einsum, name=eqn)(  # pylint: disable=protected-access
+  return jax.named_call(jax_einsum._einsum, name=eqn)(  # pylint: disable=protected-access
       operands,
       contractions,
       precision=None,
