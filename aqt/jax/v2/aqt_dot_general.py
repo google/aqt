@@ -25,12 +25,15 @@
 
 import abc
 import enum
+import copy
 from typing import Any, Sequence
 
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import transpose
 from aqt.jax.v2 import utils
+from aqt.jax.v2.flax.delayed_scaling_calibration import \
+  DelayedScalingCalibrationOWG
 from aqt.jax.v2.numerics import fp8_numerics
 import jax
 from jax import lax
@@ -352,7 +355,7 @@ class DotGeneralQuantizer(abc.ABC):
     return self.calculate_qvalue(lhs, lhs_qt, rhs, rhs_qt)
 
   @abc.abstractmethod
-  def init_calibration(self):
+  def init_calibration(self, owg_variables: utils.CalibrationConfig = None):
     pass
 
   @abc.abstractmethod
@@ -456,9 +459,9 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
   # (which do cancel each other mathematically).
   skip_mid_scales: bool = True
 
-  def init_calibration(self):
-    self.lhs.init_calibration()
-    self.rhs.init_calibration()
+  def init_calibration(self, calibration_config: utils.CalibrationConfig = None):
+    self.lhs.init_calibration(calibration_config.lhs)
+    self.rhs.init_calibration(calibration_config.rhs)
     if self.lhs_mid_alpha is not None:
       self.lhs_mid.init_calibration()
     if self.rhs_mid_alpha is not None:
@@ -971,15 +974,12 @@ class DotGeneral:
   def make(cls, *args, **kwargs) -> Self:
     return dot_general_make(*args, **kwargs)
 
-  def dg_core(
-      self,
-      lhs: jnp.ndarray,
-      rhs: jnp.ndarray,
-      lhs_qt: None | aqt_tensor.QTensor,
-      rhs_qt: None | aqt_tensor.QTensor,
-      dimension_numbers: lax.DotDimensionNumbers,
-  ):
-    """dot_general function with expanded API."""
+  def dg_core(self, lhs: jnp.ndarray, rhs: jnp.ndarray,
+      lhs_qt: None | aqt_tensor.QTensor, rhs_qt: None | aqt_tensor.QTensor,
+      dimension_numbers: lax.DotDimensionNumbers, owg_variables=None):
+    """dot_general function with expanded API.
+    :param owg_variables:
+    """
     msg = 'AQT is not yet optimized to accept quantized types directly. '
     msg += f'lhs.dtype: {lhs.dtype}, rhs.dtype: {rhs.dtype}'
     assert lhs.dtype in [jnp.bfloat16, jnp.float32, jnp.float16], msg
@@ -995,7 +995,7 @@ class DotGeneral:
           lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self
       )
     else:
-      out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self)  # pytype: disable=wrong-arg-types
+      out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, owg_variables, self)  # pytype: disable=wrong-arg-types
     return out, res
 
   def __call__(
@@ -1011,13 +1011,8 @@ class DotGeneral:
         precision is None
     ), f'Precision {precision} requested together with quantization.'
 
-    out, _ = self.dg_core(
-        lhs=lhs,
-        rhs=rhs,
-        lhs_qt=None,
-        rhs_qt=None,
-        dimension_numbers=dimension_numbers,
-    )
+    out, _ = self.dg_core(lhs=lhs, rhs=rhs, lhs_qt=None, rhs_qt=None,
+                          dimension_numbers=dimension_numbers)
     return out
 
   def assert_config_validity(self: Self):
@@ -1083,9 +1078,10 @@ def _dg_core(
     lhs_qt: None | aqt_tensor.QTensor,
     rhs_qt: None | aqt_tensor.QTensor,
     dimension_numbers: lax.DotDimensionNumbers,
+    owg_variables: None | utils.OWGVariables,
     cfg: DotGeneral,
 ):
-  out, _ = dg_core_vjp_fwd(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg)
+  out, _ = dg_core_vjp_fwd(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, owg_variables, cfg)
   return out
 
 
@@ -1100,15 +1096,16 @@ def dg_core_vjp_fwd(
     lhs_qt: None | aqt_tensor.QTensor,
     rhs_qt: None | aqt_tensor.QTensor,
     dimension_numbers: lax.DotDimensionNumbers,
+    owg_variables: None | utils.OWGVariables,
     cfg: DotGeneral,
 ):
   """custom_vjp fwd pass."""
   assert (
       lhs.dtype == rhs.dtype
   ), f'Unmatched lhs and rhs dtype: {lhs.dtype} vs {rhs.dtype}'
-  cfg.fwd.dg_quantizer.init_calibration()
-  cfg.dlhs.dg_quantizer.init_calibration()
-  cfg.drhs.dg_quantizer.init_calibration()
+  cfg.fwd.dg_quantizer.init_calibration(owg_variables.fwd)
+  cfg.dlhs.dg_quantizer.init_calibration(owg_variables.dlhs)
+  cfg.drhs.dg_quantizer.init_calibration(owg_variables.drhs)
   ret, res = cfg.fwd(
       lhs,
       rhs,
@@ -1120,7 +1117,7 @@ def dg_core_vjp_fwd(
   # We return these values to allow for materialization.
   assert res is not None, 'res cannot be None in fwd pass.'
   qret = (res.lhs.mt.qx, res.rhs.mt.qx)
-  return ((ret, qret), (res, cfg))
+  return ((ret, qret), (res, cfg, owg_variables))
 
 
 def _update_dimension_numbers_for_backward(
@@ -1175,11 +1172,11 @@ def _update_dimension_numbers_for_backward(
 
 def dg_core_vjp_bwd(
     fwd_dimension_numbers: lax.DotDimensionNumbers,
-    res: tuple[None | DotGeneralRes, DotGeneral],
+    res: tuple[None | DotGeneralRes, DotGeneral, None | utils.OWGVariables],
     g,
 ):
   """custom_vjp bwd pass."""
-  dg_res, cfg = res
+  dg_res, cfg, owg_variables = res
   msg = 'dg_res can only be None in 2nd derivative. It is not yet supported.'
   assert dg_res is not None, msg
   g = g[0]  # g[1] is gradient with respect to qret which we are ignoring.
@@ -1216,4 +1213,17 @@ def dg_core_vjp_bwd(
   # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
   # None as grad to it. This is because it is a tuple of Python integers
   # that cannot be traced by Jax.
-  return (dlhs, drhs, None, None, None)
+  return (dlhs, drhs, None, None, update_owg_variables(cfg, owg_variables), None)
+
+def update_owg_variables(cfg: DotGeneral, owg_variables: utils.OWGVariables):
+  owg_variables = copy.deepcopy(owg_variables)
+  for dg_quantizer, calibration_config in zip(
+      [cfg.fwd.dg_quantizer, cfg.dlhs.dg_quantizer, cfg.drhs.dg_quantizer],
+      [owg_variables.fwd, owg_variables.dlhs, owg_variables.drhs]):
+    for quantizer, config in zip([dg_quantizer.lhs, dg_quantizer.rhs], [calibration_config.lhs, calibration_config.rhs]):
+      if isinstance(quantizer._calibrator, DelayedScalingCalibrationOWG):
+        config.bound = quantizer._calibrator.bound
+        config.amax_history = quantizer._calibrator.amax_history
+  return owg_variables
+
+

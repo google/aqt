@@ -153,3 +153,38 @@ class Context:
   key: None | jax.Array = dynamic_field()
   train_step: None | int = dynamic_field()
   quant_mode: QuantMode = static_field(default=QuantMode.TRAIN)
+
+@flax_slots_dataclass
+class DelayedScalingCalibrationStats:
+  bound: None | jax.Array = dynamic_field()
+  amax_history: None | int = dynamic_field()
+
+@flax_slots_dataclass
+class CalibrationConfig:
+  lhs: None | DelayedScalingCalibrationStats = dynamic_field()
+  rhs: None | DelayedScalingCalibrationStats = dynamic_field()
+
+@flax_slots_dataclass
+class OWGVariables:
+  fwd: None | CalibrationConfig = dynamic_field()
+  dlhs: None | CalibrationConfig = dynamic_field()
+  drhs: None | CalibrationConfig = dynamic_field()
+
+@flax_slots_dataclass
+class OWGVariables_c:
+  fwd_lhs_bound: None | jax.Array = dynamic_field()
+  fwd_lhs_amax_history: None | int = dynamic_field()
+  fwd_rhs_bound: None | jax.Array = dynamic_field()
+  fwd_rhs_amax_history: None | int = dynamic_field()
+
+  dlhs_lhs_bound: None | jax.Array = dynamic_field()
+  dlhs_lhs_amax_history: None | int = dynamic_field()
+  dlhs_rhs_bound: None | jax.Array = dynamic_field()
+  dlhs_rhs_amax_history: None | int = dynamic_field()
+
+  drhs_lhs_bound: None | jax.Array = dynamic_field()
+  drhs_lhs_amax_history: None | int = dynamic_field()
+  drhs_rhs_bound: None | jax.Array = dynamic_field()
+  drhs_rhs_amax_history: None | int = dynamic_field()
+
+

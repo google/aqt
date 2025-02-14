@@ -14,20 +14,16 @@
 """dot_general with flax lifted custom_vjp."""
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2 import utils
 import flax.linen as nn
 import jax
 from jax import numpy as jnp
 
 
-def dg_core_flax_lifted(
-    lhs: jnp.ndarray,
-    rhs: jnp.ndarray,
-    lhs_qt: None | aqt_tensor.QTensor,
-    rhs_qt: None | aqt_tensor.QTensor,
-    dimension_numbers: jax.lax.DotDimensionNumbers,
-    mdl: nn.Module,
-    cfg: aqt_dot_general.DotGeneral,
-):
+def dg_core_flax_lifted(lhs: jnp.ndarray, rhs: jnp.ndarray,
+    lhs_qt: None | aqt_tensor.QTensor, rhs_qt: None | aqt_tensor.QTensor,
+    dimension_numbers: jax.lax.DotDimensionNumbers, owg_variables: utils.OWGVariables,
+    mdl: nn.Module, cfg: aqt_dot_general.DotGeneral):
   """dot_general with flax lifted custom_vjp applied on it.
 
   Args:
@@ -41,6 +37,7 @@ def dg_core_flax_lifted(
 
   Returns:
     aqt DotGeneral result. Flax-lifted custom_vjp is applied on it.
+    :param owg_variables:
   """
 
   def _dg_core_flax_lifted(
@@ -50,19 +47,15 @@ def dg_core_flax_lifted(
       lhs_qt: None | aqt_tensor.QTensor,
       rhs_qt: None | aqt_tensor.QTensor,
       dimension_numbers: jax.lax.DotDimensionNumbers,
+      owg_variables: utils.OWGVariables,
       cfg: aqt_dot_general.DotGeneral,
   ):
     """Lifted dg_core."""
     # The order of parameters must match with that of jax version to avoid the
     # backward gradient - primal order mismatch.
     del mdl
-    return cfg.dg_core(
-        lhs=lhs,
-        rhs=rhs,
-        lhs_qt=lhs_qt,
-        rhs_qt=rhs_qt,
-        dimension_numbers=dimension_numbers,
-    )
+    return cfg.dg_core(lhs=lhs, rhs=rhs, lhs_qt=lhs_qt, rhs_qt=rhs_qt,
+                      dimension_numbers=dimension_numbers, owg_variables=owg_variables)
 
   def _dg_core_vjp_fwd_flax_lifted(
       mdl: nn.Module,
@@ -71,6 +64,7 @@ def dg_core_flax_lifted(
       lhs_qt: None | aqt_tensor.QTensor,
       rhs_qt: None | aqt_tensor.QTensor,
       dimension_numbers: jax.lax.DotDimensionNumbers,
+      owg_variables: utils.OWGVariables,
       cfg: aqt_dot_general.DotGeneral,
   ):
     """Lifted custom vjp_fwd."""
@@ -92,7 +86,7 @@ def dg_core_flax_lifted(
 
     params = jax.tree_util.tree_map(stop_grad_for_non_ref_params, mdl.variables)
     out, res = aqt_dot_general.dg_core_vjp_fwd(
-        lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg
+        lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, owg_variables, cfg
     )
     return out, (res, params)
 
@@ -102,6 +96,7 @@ def dg_core_flax_lifted(
           tuple[
               None | aqt_dot_general.DotGeneralRes,
               aqt_dot_general.DotGeneral,
+              None | utils.OWGVariables
           ],
           jax.core.ParamDict,
       ],
@@ -123,5 +118,5 @@ def dg_core_flax_lifted(
       nondiff_argnums=(5,),
   )
   return dg_core_with_custom_vjp(
-      mdl, lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, cfg
+      mdl, lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, owg_variables, cfg
   )
