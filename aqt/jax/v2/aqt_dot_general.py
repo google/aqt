@@ -31,6 +31,8 @@ from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import transpose
 from aqt.jax.v2 import utils
+from aqt.jax.v2.flax.delayed_scaling_calibration import \
+  DelayedScalingCalibrationOWG
 from aqt.jax.v2.numerics import fp8_numerics
 import jax
 from jax import lax
@@ -1213,7 +1215,18 @@ def dg_core_vjp_bwd(
       cfg.drhs,
       True,
   )
+
+  def update_differentiable_config_values(cfg):
+    for dg in [cfg.fwd, cfg.dlhs, cfg.drhs]:
+      for calibrator, calibration_config in ((dg.dg_quantizer.lhs._calibrator, dg.dg_quantizer.lhs.calibration_config), (dg.dg_quantizer.rhs._calibrator, dg.dg_quantizer.rhs.calibration_config)):
+        if isinstance(calibrator, DelayedScalingCalibrationOWG):
+          calibration_config.amax_history = calibrator.amax_history
+          calibration_config.bound = calibrator.bound
+      dg.dg_quantizer.lhs._calibrator = None
+      dg.dg_quantizer.rhs._calibrator = None
+    return cfg
+
   # fwd_dimension_numbers are marked as nondiff_argnums instead of returning
   # None as grad to it. This is because it is a tuple of Python integers
   # that cannot be traced by Jax.
-  return (dlhs, drhs, None, None, None)
+  return (dlhs, drhs, None, None, update_differentiable_config_values(cfg))
