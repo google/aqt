@@ -126,8 +126,8 @@ class MyTest(parameterized.TestCase):
             "cpu": [
                 # Different CPU models are not bit exact and sometimes produce
                 # different losses under the same training setting.
-                3.167573690414428710937500000000,
-                3.167574644088745117187500000000,
+                3.167793273925781250000000000000,
+                3.167181968688964843750000000000,
                 3.167066574096679687500000000000,  # colab
             ],
             "TPU v2": [3.2136783599853515625],
