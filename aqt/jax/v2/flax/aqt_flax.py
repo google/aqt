@@ -610,7 +610,18 @@ class AqtEinsum(nn.Module):
       lhs_in = jnp.float32(lhs_in)
     if rhs_in.dtype == jnp.int4:
       rhs_in = jnp.float32(rhs_in)
-    if lhs_in.dtype != jnp.int4 and rhs_in.dtype != jnp.int4:
+    # Cast float8_e4m3fn to bfloat16 to avoid the failure in
+    # promote_dtype(float8_e4m3fn, x)
+    if lhs_in.dtype == jnp.float8_e4m3fn and rhs_in.dtype != jnp.float8_e4m3fn:
+      lhs_in = jnp.bfloat16(lhs_in)
+    if rhs_in.dtype == jnp.float8_e4m3fn and lhs_in.dtype != jnp.float8_e4m3fn:
+      rhs_in = jnp.bfloat16(rhs_in)
+    if (
+        lhs_in.dtype != jnp.int4
+        and rhs_in.dtype != jnp.int4
+        and lhs_in.dtype != jnp.float8_e4m3fn
+        and rhs_in.dtype != jnp.float8_e4m3fn
+    ):
       lhs_in, rhs_in = nn.dtypes.promote_dtype(lhs_in, rhs_in)
 
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
