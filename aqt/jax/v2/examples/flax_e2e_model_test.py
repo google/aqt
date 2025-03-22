@@ -23,8 +23,10 @@ from aqt.jax.v2 import aqt_tensor
 from aqt.jax.v2 import config
 from aqt.jax.v2 import utils
 from aqt.jax.v2.examples import flax_e2e_model
+from aqt.jax.v2.flax import aqt_flax
 from aqt.jax.v2.flax import aqt_flax_calibration
 from aqt.jax.v2.flax import delayed_scaling_calibration
+from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -958,6 +960,46 @@ class MnistTest(parameterized.TestCase):
     # Compare logits of models before conversion and after conversion.
     logits_after_conversion, _ = forward(model_serving, serve_fn)
     assert (logits_before_conversion == logits_after_conversion).all()
+
+  def test_simple(self):
+    aqt_cfg_dg = config.config_v4()
+    amax_history_length = 32
+    calibration_cls = functools.partial(
+        delayed_scaling_calibration.DelayedScalingCalibration,
+        amax_history_length=amax_history_length,
+    )
+    aqt_cfg_dg.fwd.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg_dg.fwd.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg_dg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg_dg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
+    aqt_cfg_dg.drhs.dg_quantizer.lhs.calibration = calibration_cls
+    aqt_cfg_dg.drhs.dg_quantizer.rhs.calibration = calibration_cls
+
+    class MlpBlock(nn.Module):
+
+      @nn.compact
+      def __call__(self, inputs):
+        dot_general = aqt_flax.AqtDotGeneral(aqt_cfg_dg)
+        x = nn.Dense(dot_general=dot_general, features=1)(inputs)
+        return x
+
+    x = jnp.ones((10, 10))
+    y = jnp.ones((10, 1))
+
+    model = MlpBlock()
+    params = model.init({"params": jax.random.PRNGKey(0)}, x)
+
+    def loss_fn(params):
+      return jnp.mean(
+          jnp.abs(
+              y - model.apply(params, x, rngs={"params": jax.random.PRNGKey(0)})
+          )
+      )
+
+    grad_fn = jax.grad(loss_fn)
+    with jax.checking_leaks():
+      grads = grad_fn(params)
+    print(grads)
 
   @parameterized.parameters(
       (["e4m3"] * 2 + ["e5m2"] * 4,),  # Higher precision fwd, larger range bwd
