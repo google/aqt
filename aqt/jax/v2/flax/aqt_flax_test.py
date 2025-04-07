@@ -34,6 +34,50 @@ import numpy as np
 
 class AqtFlaxTest(parameterized.TestCase):
 
+  @parameterized.parameters(
+      (jnp.bfloat16, jnp.bfloat16, jnp.bfloat16),
+      (jnp.bfloat16, jnp.float32, jnp.float32),
+      (jnp.bfloat16, jnp.int8, jnp.bfloat16),
+      (jnp.bfloat16, jnp.int4, jnp.float32),
+      (jnp.float32, jnp.bfloat16, jnp.float32),
+      (jnp.float32, jnp.float32, jnp.float32),
+      (jnp.float32, jnp.int8, jnp.float32),
+      (jnp.float32, jnp.int4, jnp.float32),
+      (jnp.int8, jnp.bfloat16, jnp.bfloat16),
+      (jnp.int8, jnp.float32, jnp.float32),
+      (jnp.int8, jnp.int8, jnp.float32),
+      (jnp.int8, jnp.int4, jnp.float32),
+      (jnp.int4, jnp.bfloat16, jnp.float32),
+      (jnp.int4, jnp.float32, jnp.float32),
+      (jnp.int4, jnp.int8, jnp.float32),
+      (jnp.int4, jnp.int4, jnp.float32),
+      (jnp.float8_e4m3fn, jnp.float8_e4m3fn, jnp.float8_e4m3fn),
+      (jnp.float8_e4m3fn, jnp.int8, jnp.float8_e4m3fn),
+      (jnp.float8_e4m3fn, jnp.int4, None),
+      (jnp.float8_e4m3fn, jnp.bfloat16, None),
+      (jnp.float8_e4m3fn, jnp.float32, None),
+      (jnp.float8_e5m2, jnp.float8_e5m2, jnp.float8_e5m2),
+      (jnp.float8_e5m2, jnp.int8, jnp.float8_e5m2),
+      (jnp.float8_e5m2, jnp.int4, None),
+      (jnp.float8_e5m2, jnp.bfloat16, None),
+      (jnp.float8_e5m2, jnp.float32, None),
+      (jnp.float8_e5m2, jnp.float8_e4m3fn, None),
+  )
+  def test_aqt_promote_dtype(self, lhs_dtype, rhs_dtype, expected_dtype):
+    lhs_in = jnp.zeros(shape=(1, 1), dtype=lhs_dtype)
+    rhs_in = jnp.zeros(shape=(1, 1), dtype=rhs_dtype)
+    if expected_dtype is not None:
+      lhs_out, rhs_out = aqt_flax.aqt_promote_dtype(lhs_in, rhs_in)
+      self.assertEqual(lhs_out.dtype, expected_dtype)
+      self.assertEqual(rhs_out.dtype, expected_dtype)
+    else:
+      self.assertRaises(
+          jax._src.dtypes.TypePromotionError,
+          aqt_flax.aqt_promote_dtype,
+          lhs_in,
+          rhs_in,
+      )
+
   def test_aqt_einsum(self):
     class Model(nn.Module):
       aqt_cfg: None | Callable[[], config.DotGeneral]
