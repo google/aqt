@@ -548,6 +548,24 @@ def set_scale_and_bias_dtype(cfg: DotGeneral, dtype: jnp.dtype):
   _update_dtype(cfg.drhs.dg_quantizer.rhs)
 
 
+def set_quantizer_po2_scale(quantizer: aqt_quantizer.Quantizer):
+  """Set the po2_scale flag for the given quantizer."""
+  if quantizer.calibration is None:
+    return
+
+  calibration_cls = quantizer.calibration
+  # TODO(lew): Remove partial inspection wherever possible.
+  # Partial inspection is needed because the current implementation of delayed
+  # calibration initialization requires the configuration to be set via
+  # functools.partial.
+  keywords = {}
+  if isinstance(calibration_cls, functools.partial):
+    keywords = calibration_cls.keywords
+    calibration_cls = calibration_cls.func
+  keywords.update(po2_scale=True)
+  quantizer.calibration = functools.partial(calibration_cls, **keywords)
+
+
 ################################################################################
 # Functions below are auxiliary config creators.
 
