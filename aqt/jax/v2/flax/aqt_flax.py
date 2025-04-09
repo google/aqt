@@ -110,18 +110,33 @@ def aqt_promote_dtype(
 
   Returns:
     A tuple of the promoted lhs_in and rhs_in.
+
+  We create a list of dtypes and hand-hold them because promote_dtype fails for
+  these dtypes.
   """
 
-  # TODO: b/322111904 - Handle this in more proper way.
-  # We hand-hold int4 because promote_dtype(int4, x) fails.
-  # (To avoid unintended promotion, 4-bit integers do not support
-  # implicit promotion.)
-  if lhs_in.dtype == jnp.int4:
-    lhs_in = jnp.float32(lhs_in)
-  if rhs_in.dtype == jnp.int4:
-    rhs_in = jnp.float32(rhs_in)
-  if lhs_in.dtype != jnp.int4 and rhs_in.dtype != jnp.int4:
+  manual_promotion_dtypes = [jnp.int4, jnp.float8_e4m3fn, jnp.float8_e5m2]
+  if (
+      lhs_in.dtype in manual_promotion_dtypes
+      and rhs_in.dtype in manual_promotion_dtypes
+      and lhs_in.dtype == rhs_in.dtype
+  ):
+    pass
+  else:
+    if lhs_in.dtype in manual_promotion_dtypes:
+      lhs_in = (
+          jnp.float32(lhs_in)
+          if lhs_in.dtype == jnp.int4
+          else jnp.bfloat16(lhs_in)
+      )
+    if rhs_in.dtype in manual_promotion_dtypes:
+      rhs_in = (
+          jnp.float32(rhs_in)
+          if rhs_in.dtype == jnp.int4
+          else jnp.bfloat16(rhs_in)
+      )
     lhs_in, rhs_in = nn.dtypes.promote_dtype(lhs_in, rhs_in)
+
   return lhs_in, rhs_in
 
 
