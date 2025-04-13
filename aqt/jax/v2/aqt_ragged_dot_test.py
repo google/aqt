@@ -25,6 +25,8 @@ import numpy as np
 from google3.testing.pybase import googletest
 from google3.testing.pybase import parameterized
 
+jax.config.update("jax_threefry_partitionable", False)
+
 
 def sample_groups(m: int, num_groups: int, key: jax.Array) -> jnp.ndarray:
   # Randomly sample proportions of 'm' that will be assigned to each group.

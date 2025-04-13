@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for wmt_mlperf.models."""
-
 from unittest import mock
 
 from absl.testing import absltest
@@ -30,6 +28,8 @@ import flax
 import jax
 import jax.numpy as jnp
 import numpy as onp
+
+jax.config.update('jax_threefry_partitionable', False)
 
 
 class ModelsTest(parameterized.TestCase):

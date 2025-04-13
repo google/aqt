@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for aqt.jax.flax_layers."""
-
 import functools
 import itertools
 from typing import Any, Dict, Mapping
@@ -44,6 +42,8 @@ from jax.nn import initializers
 import jax.numpy as jnp
 import numpy as onp
 
+
+jax.config.update('jax_threefry_partitionable', False)
 
 FLAGS = flags.FLAGS
 
