@@ -839,7 +839,7 @@ def flaxformer_dot_general(
     # into a  variable called 'act_scale'. We extract it from 'act_op', the
     # QuantOps instance that calculated the scale factors for the activation
     # matrix.
-    act_scale = act_op._scale.astype(input_dtype)  # pylint: disable=protected-access
+    act_scale = act_op._scale.astype(input_dtype)  # pylint: disable=protected-access  # pytype: disable=attribute-error
     if act_scale.ndim == 0:
       act_scale = act_scale * jnp.ones(act_scale_shape, act_scale.dtype)
   else:
@@ -857,7 +857,7 @@ def flaxformer_dot_general(
     else:
       # Calculate 'r' from (s^-1) * w
       weight_op = QuantOps.create_weights_ops(w, weight_params=weight_params)
-      weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access
+      weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access  # pytype: disable=attribute-error
 
       if weight_params.expected_scale_shape:
         shape_utils.assert_shapes_equal(
