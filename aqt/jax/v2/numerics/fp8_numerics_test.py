@@ -301,4 +301,5 @@ def plot_sr_error(x_min=1.0, x_max=2.0, sr_count=64 * 1024, x_count=1024):
 
 
 if __name__ == "__main__":
+  jax.config.update("jax_threefry_partitionable", False)
   absltest.main()
