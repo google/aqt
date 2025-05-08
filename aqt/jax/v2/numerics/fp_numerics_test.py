@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 
 jax.config.update("jax_numpy_rank_promotion", "raise")
+jax.config.update("jax_threefry_partitionable", False)
 
 
 def assert_equal(x, expected_x, error_msg="", aux_x=None, mask=None):
