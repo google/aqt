@@ -16,7 +16,7 @@
 
 import dataclasses
 import typing
-from typing import Any, Callable, Iterable, Optional, Type, TypeVar
+from typing import Any, Callable, Iterable, Optional, Sequence, Type, TypeVar
 from aqt.jax_legacy.jax import flax_layers
 from aqt.jax_legacy.jax import get_bounds
 from aqt.jax_legacy.jax import quant_config
@@ -39,7 +39,16 @@ import numpy as onp
 
 T = TypeVar('T')
 
-dataclass = flax_struct.dataclass if not typing.TYPE_CHECKING else dataclasses.dataclass
+dataclass = (flax_struct.dataclass if not typing.TYPE_CHECKING
+             else dataclasses.dataclass)
+
+
+def subvals(seq: Sequence[T], vals: Iterable[tuple[int, T]]) -> tuple[T, ...]:
+  """Substitute values within a list."""
+  lst = list(seq)
+  for i, v in vals:
+    lst[i] = v
+  return tuple(lst)
 
 
 def make_padding_mask(padding_mask_query,
@@ -251,7 +260,8 @@ def exponential(tensor, dtype, exp_hparams: ExpHParams):
     tensor = lax.sub(tensor, onp.exp(exp_hparams.low_bound).astype(dtype))
   # If linear_gradient: use this gradient as linear approximation of
   # exponential.
-  if exp_hparams.linear_gradient is not None and exp_hparams.linear_gradient != 0:
+  if (exp_hparams.linear_gradient is not None
+      and exp_hparams.linear_gradient != 0):
     # Want: max(0, a*x+b) such that a*x+b goes through (0, 1).
     #
     # This comes out to: max(0, a*x+1), for arbitrary a>0.
@@ -321,7 +331,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
   recip_hparams = softmax_hparams.reciprocal_hparams
 
   # Substract max value from dimensions to be normalized.
-  shape = jax.util.subvals(onp.shape(a), zip(norm_dims, (1,) * len(norm_dims)))
+  shape = subvals(onp.shape(a), zip(norm_dims, (1,) * len(norm_dims)))
   dimadd = lambda x: lax.reshape(x, shape)
   # pylint: disable=protected-access
   amax = lax.reduce(a, onp.array(-onp.inf, dtype=a.dtype), lax.max, norm_dims)
