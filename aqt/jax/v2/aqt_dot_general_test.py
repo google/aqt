@@ -60,6 +60,9 @@ def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
       if "fun_jaxpr" in eq.params.keys():
         for rec in jaxpr_to_trityp(eq.params["fun_jaxpr"]):
           yield rec
+      if "call_jaxpr" in eq.params.keys():
+        for rec in jaxpr_to_trityp(eq.params["call_jaxpr"]):
+          yield rec
 
       if eq.primitive.name == "dot_general":
         [lhs, rhs] = eq.invars
