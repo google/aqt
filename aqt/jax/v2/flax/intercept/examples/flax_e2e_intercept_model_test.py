@@ -24,6 +24,10 @@ from aqt.jax.v2.flax.intercept.examples import flax_e2e_intercept_model
 import jax
 import jax.numpy as jnp
 
+# Opt out of the direct linearize implementation.
+# TODO(b/415020964): Remove this config once the bug is fixed.
+jax.config.update("jax_use_direct_linearize", False)
+
 
 class MnistTest(parameterized.TestCase):
 
