@@ -21,6 +21,8 @@ import jax.numpy as jnp
 
 jax.config.update("jax_numpy_rank_promotion", "raise")
 jax.config.update("jax_threefry_partitionable", False)
+f32 = jnp.float32
+bf16 = jnp.bfloat16
 
 
 def assert_equal(x, expected_x, error_msg="", aux_x=None, mask=None):
@@ -72,6 +74,7 @@ def fp_values(cfg: fp_numerics.FpNumericsConfig):
   has_two_nan = cfg.has_two_nan
   has_naninf = cfg.has_naninf
 
+  assert 1 + nexp + nmant <= 16, f"{nexp=}, {nmant=}. Really! Above 16 bits?"
   assert not (has_two_nan and has_naninf)
   bits = 1 + nexp + nmant
 
@@ -264,44 +267,49 @@ class FpTest(parameterized.TestCase):
   #   has_two_nan=False,
   #   has_naninf=False,
   @parameterized.parameters([
-      # FP4
-      dict(nexp=3, minexp=0, nmant=0, has_subnormals=False),
-      dict(nexp=3, minexp=0, nmant=0, has_subnormals=True),
-      # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=False),
-      # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=True),
-      dict(nexp=2, minexp=0, nmant=1, has_subnormals=False),
-      dict(nexp=2, minexp=0, nmant=1, has_subnormals=True),
-      dict(nexp=1, minexp=0, nmant=2, has_subnormals=False),
-      dict(nexp=1, minexp=0, nmant=2, has_subnormals=True),
-      dict(nexp=0, minexp=0, nmant=3, has_subnormals=False),
-      dict(nexp=0, minexp=0, nmant=3, has_subnormals=True),
-      # FP6
-      dict(nexp=5, minexp=0, nmant=0, has_subnormals=True),
-      dict(nexp=5, minexp=0, nmant=0, has_subnormals=False),
-      dict(nexp=4, minexp=0, nmant=1, has_subnormals=True),
-      dict(nexp=4, minexp=0, nmant=1, has_subnormals=False),
-      dict(nexp=3, minexp=0, nmant=2, has_subnormals=True),
-      dict(nexp=3, minexp=0, nmant=2, has_subnormals=False),
-      dict(nexp=2, minexp=0, nmant=3, has_subnormals=True),
-      dict(nexp=2, minexp=0, nmant=3, has_subnormals=False),
-      dict(nexp=1, minexp=0, nmant=4, has_subnormals=True),
-      dict(nexp=1, minexp=0, nmant=4, has_subnormals=False),
-      dict(nexp=0, minexp=0, nmant=5, has_subnormals=True),
-      dict(nexp=0, minexp=0, nmant=5, has_subnormals=False),
-      # FP5
-      dict(nexp=4, minexp=0, nmant=0, has_subnormals=True),
-      dict(nexp=4, minexp=0, nmant=0, has_subnormals=False),
-      dict(nexp=3, minexp=0, nmant=1, has_subnormals=True),
-      dict(nexp=3, minexp=0, nmant=1, has_subnormals=False),
-      dict(nexp=2, minexp=0, nmant=2, has_subnormals=True),
-      dict(nexp=2, minexp=0, nmant=2, has_subnormals=False),
-      dict(nexp=1, minexp=0, nmant=3, has_subnormals=True),
-      dict(nexp=1, minexp=0, nmant=3, has_subnormals=False),
-      dict(nexp=0, minexp=0, nmant=4, has_subnormals=True),
-      dict(nexp=0, minexp=0, nmant=4, has_subnormals=False),
-      # Misc
-      dict(nexp=2, minexp=0, nmant=0, has_subnormals=False),
-      dict(nexp=3, minexp=0, nmant=0, has_subnormals=True, radix=4),
+      d | dict(test_dtype=dtype)  # pylint: disable=g-complex-comprehension
+      for dtype in [bf16, f32]
+      for d in [
+          # Input is BF16
+          # FP4
+          dict(nexp=3, minexp=0, nmant=0, has_subnormals=False),
+          dict(nexp=3, minexp=0, nmant=0, has_subnormals=True),
+          # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=False),
+          # dict(nexp=3, minexp=-2, nmant=0, has_subnormals=True),
+          dict(nexp=2, minexp=0, nmant=1, has_subnormals=False),
+          dict(nexp=2, minexp=0, nmant=1, has_subnormals=True),
+          dict(nexp=1, minexp=0, nmant=2, has_subnormals=False),
+          dict(nexp=1, minexp=0, nmant=2, has_subnormals=True),
+          dict(nexp=0, minexp=0, nmant=3, has_subnormals=False),
+          dict(nexp=0, minexp=0, nmant=3, has_subnormals=True),
+          # FP6
+          dict(nexp=5, minexp=0, nmant=0, has_subnormals=True),
+          dict(nexp=5, minexp=0, nmant=0, has_subnormals=False),
+          dict(nexp=4, minexp=0, nmant=1, has_subnormals=True),
+          dict(nexp=4, minexp=0, nmant=1, has_subnormals=False),
+          dict(nexp=3, minexp=0, nmant=2, has_subnormals=True),
+          dict(nexp=3, minexp=0, nmant=2, has_subnormals=False),
+          dict(nexp=2, minexp=0, nmant=3, has_subnormals=True),
+          dict(nexp=2, minexp=0, nmant=3, has_subnormals=False),
+          dict(nexp=1, minexp=0, nmant=4, has_subnormals=True),
+          dict(nexp=1, minexp=0, nmant=4, has_subnormals=False),
+          dict(nexp=0, minexp=0, nmant=5, has_subnormals=True),
+          dict(nexp=0, minexp=0, nmant=5, has_subnormals=False),
+          # FP5
+          dict(nexp=4, minexp=0, nmant=0, has_subnormals=True),
+          dict(nexp=4, minexp=0, nmant=0, has_subnormals=False),
+          dict(nexp=3, minexp=0, nmant=1, has_subnormals=True),
+          dict(nexp=3, minexp=0, nmant=1, has_subnormals=False),
+          dict(nexp=2, minexp=0, nmant=2, has_subnormals=True),
+          dict(nexp=2, minexp=0, nmant=2, has_subnormals=False),
+          dict(nexp=1, minexp=0, nmant=3, has_subnormals=True),
+          dict(nexp=1, minexp=0, nmant=3, has_subnormals=False),
+          dict(nexp=0, minexp=0, nmant=4, has_subnormals=True),
+          dict(nexp=0, minexp=0, nmant=4, has_subnormals=False),
+          # Misc
+          dict(nexp=2, minexp=0, nmant=0, has_subnormals=False),
+          # dict(nexp=3, minexp=0, nmant=0, has_subnormals=True, radix=4),
+      ]
   ])
   def test_fp_round(
       self,
@@ -312,7 +320,8 @@ class FpTest(parameterized.TestCase):
       radix=2,
       det_x_count=2**7,  # needs to be power of 2, test_noise_axis exact eq
       x_count=128,  # TODO(lew): Test fails for 100, why?
-      sr_sample_count=1000000,
+      sr_sample_count=100000,
+      test_dtype=bf16,
       # TODO(lew): Enable these:
       # x_count=2**12,  # needs to be power of 2
       # sr_sample_count=1000,
@@ -377,7 +386,7 @@ class FpTest(parameterized.TestCase):
     )
     assert data.shape == (x_count, 2 ** (1 + nexp + nmant))
     # TODO(lew): Remove when fp_round supports float32. Also below.
-    data = data.astype(jnp.bfloat16)
+    data = data.astype(test_dtype)
     bucked_interior_mask = jnp.logical_and(
         data != bucket_lower[jnp.newaxis, :],
         data != bucket_upper[jnp.newaxis, :],
@@ -411,7 +420,7 @@ class FpTest(parameterized.TestCase):
           endpoint=True,
           dtype=jnp.float32,
       )
-      data = data.astype(jnp.bfloat16)
+      data = data.astype(test_dtype)
       qdata = fp_numerics.fp_round(
           data,
           cfg=cfg,
@@ -438,12 +447,12 @@ class FpTest(parameterized.TestCase):
         det_x_count,
         endpoint=True,
         dtype=jnp.float32,
-    ).astype(jnp.bfloat16)
+    ).astype(test_dtype)
     # The number of broadcasts should be consistent with the effective noise bit
     # For example, if using 16-bit noise, inputs should be replicated by 2**16.
     bx = jnp.broadcast_to(x[:, jnp.newaxis], (det_x_count, 2**16))
     deterministic_qx = fp_numerics.fp_round(
-        bx.astype(jnp.bfloat16),
+        bx.astype(test_dtype),
         cfg=cfg,
         key=None,
         test_noise_axis=1,
@@ -460,16 +469,16 @@ class FpTest(parameterized.TestCase):
         x_count,
         endpoint=True,
         dtype=jnp.float32,
-    ).astype(jnp.bfloat16)
+    ).astype(test_dtype)
     bx = jnp.broadcast_to(x[:, jnp.newaxis], (x_count, sr_sample_count))
     qx = fp_numerics.fp_round(
-        bx.astype(jnp.bfloat16),
+        bx.astype(test_dtype),
         cfg=cfg,
         key=jax.random.PRNGKey(42),
         stochastic_rounding=True,
     )
 
-    assert qx.dtype == jnp.bfloat16
+    assert qx.dtype == x.dtype
     qx = qx.astype(jnp.float32)
     # qx can hit at most 2 values, larger and smaller bucket center
     qx_smaller = jnp.min(qx, axis=1, keepdims=True)
@@ -552,29 +561,61 @@ class FpTest(parameterized.TestCase):
       dict(cfg=fp_numerics.e1m2, sr=True),
   ])
   def test_fp_round_old_vs_new(
-      self, cfg: fp_numerics.FpNumericsConfig, sr: bool
+      self,
+      cfg: fp_numerics.FpNumericsConfig,
+      sr: bool,
+      # TODO(yichizh): Move the sampling tuple to parameter dictionary and
+      # separete BF16 and F32 tests.
+      f32_input_samples: tuple[int, ...] = (
+          0,
+          1,
+          100,
+          8192 - 1,
+          8192,
+          8192 + 1,
+          8192 + 2,
+          15900,
+      ),
   ):
     print(cfg)
     print(f"stochastic_rounding: {sr}")
-    x = jnp.arange(0, 2**16, step=1, dtype=jnp.uint16)
-    x = jax.lax.bitcast_convert_type(x, jnp.bfloat16)
-    nan_mask = jnp.isnan(x)
-    if sr:
-      for key_num in [0, 12, 42, 17, 96, 101]:
-        key = jax.random.PRNGKey(key_num)
-        out = fp_numerics.fp_round(x, cfg=cfg, key=key, stochastic_rounding=sr)
+    def test_eq(x):
+      nan_mask = jnp.isnan(x)
+      if sr:
+        for key_num in [0, 12, 42, 17, 96, 101]:
+          key = jax.random.PRNGKey(key_num)
+          out = fp_numerics.fp_round(
+              x, cfg=cfg, key=key, stochastic_rounding=sr
+          )
+          out_new = fp_numerics.fp_round_new(
+              x, cfg=cfg, key=key, stochastic_rounding=sr
+          )
+          assert (out[~nan_mask] == out_new[~nan_mask]).all()
+          assert jnp.isnan(out_new[nan_mask]).all()
+      else:
+        out = fp_numerics.fp_round(x, cfg=cfg, key=None, stochastic_rounding=sr)
         out_new = fp_numerics.fp_round_new(
-            x, cfg=cfg, key=key, stochastic_rounding=sr
+            x, cfg=cfg, key=None, stochastic_rounding=sr
         )
         assert (out[~nan_mask] == out_new[~nan_mask]).all()
         assert jnp.isnan(out_new[nan_mask]).all()
-    else:
-      out = fp_numerics.fp_round(x, cfg=cfg, key=None, stochastic_rounding=sr)
-      out_new = fp_numerics.fp_round_new(
-          x, cfg=cfg, key=None, stochastic_rounding=sr
-      )
-      assert (out[~nan_mask] == out_new[~nan_mask]).all()
-      assert jnp.isnan(out_new[nan_mask]).all()
+
+    # BF16 input
+    print("Testing BF16 inputs.")
+    x = jnp.arange(0, 2**16, step=1, dtype=jnp.uint16)
+    x = jax.lax.bitcast_convert_type(x, bf16)
+    test_eq(x)
+    # F32 input (only test partially because of timeout issue)
+    cnt = 0
+    iterations = 2**14  # make vlen 18-bit, less regular to be edge cases
+    vlen = 2**32 / iterations
+    for i in f32_input_samples:
+      assert i < iterations, f"Input fraction {i} out of bounds."
+      print(f"Testing F32 inputs. Fraction {i}")
+      cnt += vlen
+      x = jnp.arange(start=vlen * i, stop=vlen * (i + 1), dtype=jnp.uint32)
+      x = jax.lax.bitcast_convert_type(x, f32)
+      test_eq(x)
 
   def test_e1m2_vs_e0m3(self):
     e1m2 = fp_numerics.FpNumerics(cfg=fp_numerics.e1m2_ocp)

@@ -331,6 +331,7 @@ def radix2_round(
   #                   7654321076543210
   container_man = jnp.finfo(input_dtype).nmant
   bits_dtype = jnp.uint16 if total_bits == 16 else jnp.uint32
+  noise_dtype = jnp.uint16
   assert nmant <= container_man, 'bf16 man bits'
   man_trunc_bits = container_man - nmant  # e2m1 in bf16: 7-1
   # example e2m1 in bf16: man_trunc_mask = 0b0000000000111111  (7-1 1s)
@@ -343,10 +344,15 @@ def radix2_round(
       noise_axis_size = x.shape[test_noise_axis]
       sh = list((1,) * len(x.shape))
       sh[test_noise_axis] = noise_axis_size
-      rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+      rnd_bits = jnp.arange(noise_axis_size, dtype=noise_dtype).reshape(sh)
     else:
-      rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
-    noise = jax.lax.convert_element_type(rnd_bits, bits_dtype) & man_trunc_mask
+      rnd_bits = jax.random.bits(key, x.shape, noise_dtype)
+    noise = jax.lax.convert_element_type(rnd_bits, bits_dtype)
+    if man_trunc_bits > 16:  # need more than 16 bits of noise
+      # Add 1 to the 17-th noise bit to make it more symmetrical.
+      noise = jax.lax.bitwise_or(noise << 1, bits_dtype(1))
+      noise = noise << (man_trunc_bits - 16 - 1)
+    noise = noise & man_trunc_mask
   else:
     # example e2m1 in bf16: noise = 0b0000000000100000  (shift = 7-1 - 1)
     noise = 1 << (man_trunc_bits - 1)  #  represents 0.5 in the container
@@ -359,11 +365,13 @@ def radix2_round(
   if nexp is not None:
     # We use 1 as a minimal representable value. TODO(lew): use cfg.minexp.
     # We will clip to [1, 2^(2**nexp - 1) * (2-1 ^ nmant)] interval.
-    assert input_dtype == jnp.bfloat16
+    # We can lift the following assertion because bf16 and f32 have the same
+    # exponent bias (127).
+    # assert input_dtype == jnp.bfloat16
     # min_exp = jnp.uint16(0b0_10000000_0000000)
     # max_exp = jnp.uint16(0b0_10000111_0000000)
     # bf16_exp_bias = jnp.uint16(0b0_01111111)
-    min_exp = jnp.uint16(0b0_01111111) - (1 if cfg.has_subnormals else 0)
+    min_exp = bits_dtype(0b0_01111111) - (1 if cfg.has_subnormals else 0)
     max_exp = min_exp + 2**nexp - 1
 
     min_repr = min_exp << container_man
@@ -372,10 +380,10 @@ def radix2_round(
     # container_mant_mask is 0b0000_0000_0111_1111
     container_mant_mask = bits_dtype((1 << container_man) - 1)
     # max_mant for e2m1 in bf16: 0b0000_0000_0100_0000
-    max_mant = jnp.uint16(container_mant_mask & ~man_trunc_mask)
+    max_mant = bits_dtype(container_mant_mask & ~man_trunc_mask)
     max_repr = (max_exp << container_man) + max_mant
 
-    sign_mask = jnp.uint16(0b1_00000000_0000000)
+    sign_mask = bits_dtype(0b1 << (total_bits - 1))
     sign = jax.lax.bitwise_and(x, sign_mask)
     abs_x = jax.lax.bitwise_and(x, ~sign_mask)
     # TODO(lew): we can do faster clipping with bit twiddling
@@ -403,9 +411,9 @@ def radix2_round(
           noise_axis_size = x.shape[test_noise_axis]
           sh = list((1,) * len(x.shape))
           sh[test_noise_axis] = noise_axis_size
-          rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+          rnd_bits = jnp.arange(noise_axis_size, dtype=noise_dtype).reshape(sh)
         else:
-          rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+          rnd_bits = jax.random.bits(key, x.shape, noise_dtype)
         rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(jnp.uint32)
         noise = (
             jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
@@ -422,12 +430,11 @@ def radix2_round(
     else:
       # Rounding of values in [-1, 1] interval follows different logic.
       if stochastic_rounding:
-        assert bits_dtype == jnp.uint16
         if test_noise_axis is not None:
           noise_axis_size = x.shape[test_noise_axis]
           sh = list((1,) * len(x.shape))
           sh[test_noise_axis] = noise_axis_size
-          rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+          rnd_bits = jnp.arange(noise_axis_size, dtype=noise_dtype).reshape(sh)
           # Use 16-bit noise for deterministic SR tests.
           # Note: adding left shift operation can adjust the effective noise bit
           # For example rnd_bits = rnd_bits << 8 means using noise with
@@ -439,7 +446,7 @@ def radix2_round(
           # Note: bits_dtype affects the effective noise bit in the
           # "test_noise_axis is not None" branch. Remember to change the shift
           # operation and the number of inputs to the deterministic SR test.
-          rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+          rnd_bits = jax.random.bits(key, x.shape, noise_dtype)
         rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
         # rnd_bits here is 32 bits, with exponent 10000000, first 8 mantissa
         # being the generated "noise" and the rest of mantissa being 0.
@@ -486,11 +493,12 @@ def fp_round_new(
   # Notation: ctner = container
   input_dtype = x.dtype
   msg = f'Unsupported dtype for sthochastic rounding: {input_dtype}.'
-  assert input_dtype == jnp.bfloat16, msg
+  assert input_dtype == jnp.bfloat16 or input_dtype == jnp.float32, msg
   ctner_total_bits = jnp.finfo(input_dtype).bits
   ctner_nmant = jnp.finfo(input_dtype).nmant
   assert nmant <= ctner_nmant, 'bf16 man bits'
-  bits_dtype = jnp.uint16
+  bits_dtype = jnp.uint16 if ctner_total_bits == 16 else jnp.uint32
+  noise_dtype = jnp.uint16
 
   # Masks
   ctner_mant_mask = bits_dtype((1 << ctner_nmant) - 1)  # 0_00000000_1111111
@@ -524,9 +532,14 @@ def fp_round_new(
         noise_axis_size = x_in.shape[test_noise_axis]
         sh = list((1,) * len(x_in.shape))
         sh[test_noise_axis] = noise_axis_size
-        rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+        rnd_bits = jnp.arange(noise_axis_size, dtype=noise_dtype).reshape(sh)
       else:
-        rnd_bits = jax.random.bits(key, x_in.shape, bits_dtype)
+        rnd_bits = jax.random.bits(key, x_in.shape, noise_dtype)
+      rnd_bits = rnd_bits.astype(bits_dtype)
+      if mant_trunc_bits > 16:  # need more than 16 bits of random noise
+        # Add 1 to the 17-th noise bit to make it more symmetrical
+        rnd_bits = jax.lax.bitwise_or(rnd_bits << 1, bits_dtype(1))
+        rnd_bits = rnd_bits << (mant_trunc_bits - 16 - 1)
       noise = jax.lax.bitwise_and(rnd_bits, mant_trunc_mask)
       x_in = x_in + noise
     else:
@@ -545,9 +558,9 @@ def fp_round_new(
           noise_axis_size = x_in.shape[test_noise_axis]
           sh = list((1,) * len(x_in.shape))
           sh[test_noise_axis] = noise_axis_size
-          rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+          rnd_bits = jnp.arange(noise_axis_size, dtype=noise_dtype).reshape(sh)
         else:
-          rnd_bits = jax.random.bits(key, x.shape, bits_dtype)
+          rnd_bits = jax.random.bits(key, x.shape, noise_dtype)
         rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(1).view(jnp.uint32)
         noise = (
             jax.lax.bitcast_convert_type(rnd_bits, jnp.float32)
@@ -563,9 +576,9 @@ def fp_round_new(
           noise_axis_size = x_in.shape[test_noise_axis]
           sh = list((1,) * len(x_in.shape))
           sh[test_noise_axis] = noise_axis_size
-          rnd_bits = jnp.arange(noise_axis_size, dtype=bits_dtype).reshape(sh)
+          rnd_bits = jnp.arange(noise_axis_size, dtype=noise_dtype).reshape(sh)
         else:
-          rnd_bits = jax.random.bits(key, x_in.shape, bits_dtype)
+          rnd_bits = jax.random.bits(key, x_in.shape, noise_dtype)
         rnd_bits = (jnp.uint32(rnd_bits) << 7) | jnp.float32(2).view(jnp.uint32)
         rnd_floats = jax.lax.bitcast_convert_type(rnd_bits, jnp.float32) - (
             3.0 - 2 ** (-16)
