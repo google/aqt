@@ -21,6 +21,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+# Opt out of the direct linearize implementation.
+# TODO(b/415017684): Remove this config once the bug is fixed.
+jax.config.update("jax_use_direct_linearize", False)
+
 
 def averaged_stochastic_rounding(
     numerics,
