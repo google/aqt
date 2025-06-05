@@ -40,9 +40,10 @@ class DotGeneralTest(parameterized.TestCase):
       ],
       quantize_lhs=[True, False],
       quantize_rhs=[True, False],
+      quant_type=[4, 8, "e4m3", "e5m2"],
   )
   def test_quantized_matmul_error(
-      self, mkn_and_blk, quantize_lhs, quantize_rhs
+      self, mkn_and_blk, quantize_lhs, quantize_rhs, quant_type,
   ):
     (m, k, n), mkn_blk = mkn_and_blk
 
@@ -59,9 +60,9 @@ class DotGeneralTest(parameterized.TestCase):
       m_blk, k_blk, n_blk = block_size
 
       if quantize_lhs:
-        lhs = aqt_pl.quant(lhs, n_bits=8, calibration_axes=(1,))
+        lhs = aqt_pl.quant(lhs, n_bits=quant_type, calibration_axes=(1,))
       if quantize_rhs:
-        rhs = aqt_pl.quant(rhs, n_bits=8, calibration_axes=(0,))
+        rhs = aqt_pl.quant(rhs, n_bits=quant_type, calibration_axes=(0,))
 
       def kernel(
           lhs_ref: QTensor,
@@ -115,14 +116,17 @@ class DotGeneralTest(parameterized.TestCase):
 
     difference = jnp.abs(quantized_out - reference_out)
     relative_error = difference / jnp.abs(reference_out)
-    max_relative_error = relative_error.max().item()
 
+    # If none of tensor are quantized, the result should exactly identical
+    # or the error should be very small.
+    max_allowed_relative_error = 1e-6
     if quantize_lhs or quantize_rhs:
-      self.assertLess(max_relative_error, 1e-2)
-    else:
-      # If none of tensor are quantized, the result should exactly identical
-      # or the error should be very small.
-      self.assertLess(max_relative_error, 1e-6)
+      if quant_type == 8:
+        max_allowed_relative_error = 1e-2
+      else:
+        max_allowed_relative_error = 0.1
+
+    self.assertLess(relative_error.max().item(), max_allowed_relative_error)
 
   @parameterized.named_parameters(
       dict(

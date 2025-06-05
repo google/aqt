@@ -15,6 +15,7 @@
 
 from aqt.jax.v2 import aqt_dot_general
 from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2.numerics import fp8_numerics
 import jax
 import jax.numpy as jnp
 
@@ -37,17 +38,19 @@ def load_qtensor(qt: QTensor) -> QTensor:
   return qt
 
 
-def _dtype_to_bits(dtype) -> None | int:
+def _dtype_to_bits(dtype) -> None | int | fp8_numerics.FP8Dtype:
   if dtype in [jnp.bfloat16, jnp.float32]:
     return None
   if dtype == jnp.int8:
     return 8
   elif dtype == jnp.int4:
     return 4
+  if fp8dtype := fp8_numerics._convert_to_fp8dtype(dtype):  # pylint: disable=protected-access
+    return fp8dtype
   else:
     raise ValueError(
         'dtype must be one one of {jnp.bfloat16, jnp.float32, jnp.int8,'
-        ' jnp.int4}'
+        ' jnp.int4, jnp.float8_*}'
     )
 
 

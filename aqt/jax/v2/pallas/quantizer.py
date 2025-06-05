@@ -20,6 +20,7 @@ from typing import Sequence
 
 from aqt.jax.v2 import aqt_quantizer
 from aqt.jax.v2 import aqt_tensor
+from aqt.jax.v2.numerics import fp8_numerics
 
 import jax
 import jax.numpy as jnp
@@ -29,7 +30,7 @@ QTensor = aqt_tensor.QTensor
 
 def quant(
     x: jax.Array,
-    n_bits: int,
+    n_bits: int | fp8_numerics.FP8Dtype,
     calibration_axes: Sequence[int],
 ) -> QTensor:
   """Apply channel-wise quantization to x.

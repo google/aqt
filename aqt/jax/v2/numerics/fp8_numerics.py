@@ -24,6 +24,15 @@ FP8Dtype: TypeAlias = Literal['e4m3', 'e5m2']
 fp8_map = {'e4m3': jnp.float8_e4m3fn, 'e5m2': jnp.float8_e5m2}
 
 
+def _convert_to_fp8dtype(dtype: jax.typing.DTypeLike) -> None | FP8Dtype:
+  if dtype == jnp.float8_e4m3fn:
+    return 'e4m3'
+  if dtype == jnp.float8_e5m2:
+    return 'e5m2'
+  assert dtype not in fp8_map.values()
+  return None
+
+
 def fp_mantissa_round(x, mantissa_bits, key: jax.Array):
   """FP stochastic rounding for a given mantissa."""
   input_dtype = x.dtype
