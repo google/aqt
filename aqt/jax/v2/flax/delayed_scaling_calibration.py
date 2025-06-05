@@ -42,16 +42,14 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
         CALIBRATION_STATS,
         "amax_history",
         # pylint: disable-next=protected-access
-        lambda: jax._src.core.mutable_array(
-            jnp.zeros((self.amax_history_length,))
-        ),
+        lambda: jnp.zeros((self.amax_history_length,)),
     )
 
     self.bound = self.variable(
         CALIBRATION_STATS,
         "bound",
         # pylint: disable-next=protected-access
-        lambda: jax._src.core.mutable_array(jnp.zeros((1,))),
+        lambda: jnp.zeros((1,)),
     )
 
   def get_bound(
@@ -76,19 +74,14 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
     # be mutating the arrays in place and don't want to do so accidentally
     quant_mode = context.quant_mode if context else utils.QuantMode.SERVE
 
-    bound_mutable_arr = self.bound.value
-    amax_history_mutable_arr = self.amax_history.value
+    prev_bound = self.bound.value
+    amax_history = self.amax_history.value
 
-    amax_history = amax_history_mutable_arr[:]
-    prev_bound = bound_mutable_arr[:]
     amax_from_history = jnp.max(amax_history, axis=0)
 
     new_bound = self.compute_bound(amax_from_history, prev_bound)
     new_history = self.compute_history(x, amax_history)
 
-    if quant_mode in [utils.QuantMode.TRAIN, utils.QuantMode.CALIBRATE]:
-      bound_mutable_arr[:] = new_bound[:]
-      amax_history_mutable_arr[:] = new_history[:]
     return new_bound.reshape((1,) * len(x.shape))
 
   def get_scale_and_bias_and_sparsity(
@@ -122,3 +115,65 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
     # variables are initialized properly once. Else, they get "recreated"
     # on each use.
     self.amax_history  # pylint: disable=pointless-statement
+
+
+def ceil_to_po2(scale: jnp.ndarray) -> jnp.ndarray:
+  # With floor the biggest value (we are using jnp.max) is in the range of
+  # clipping and therefore have a correct gradient.
+  scale = 2 ** jnp.floor(jnp.log2(jax.lax.reciprocal(scale)))
+  scale = jax.lax.reciprocal(scale)
+  return scale
+
+
+@utils.flax_slots_kw_only_dataclass
+class AbsMaxCalibration(calibration.Calibration):
+  """Simple max(abs(x)) calibration.
+
+  Attributes:
+    clipping_scale: Set it to something like 0.3, 0.1, 0.03. If clipping_scale <
+      1.0, setting IntSymmetric.clip_gradient=True is likely to be important.
+  """
+
+  clipping_scale: None | float = None
+
+  def get_scale_and_bias_and_sparsity(
+      self,
+      x: jnp.ndarray,
+      shared_axes: None | Sequence[utils.AxisIdx],
+      numerics_: numerics.AqtNumerics,
+      context: None | utils.Context = None,
+  ) -> tuple[list[jnp.ndarray], list[jnp.ndarray], None | jnp.ndarray]:
+    """Calibration.
+
+    Args:
+      x: The input tensor.
+      shared_axes: Axes that share a calibration bound. For AbsMaxCalibration,
+        it should not be None.
+      numerics_: An `AqtNumerics` object containing information regarding
+        quantization. Used to create the scale and bias arrays.
+      context: The quantization context.
+
+    Returns:
+      The scale tensor containing the scale values for each group (can
+      potentially be a subchannel). Its shape will be the same as `x.shape` but
+      with `shared_axes` collapsed to 1. Bias is not supported.
+    """
+    del context
+    msg = (
+        "Perhaps you are using DequantMode.THIS_INPUT (fake_quant) and forgot"
+        " to set them."
+    )
+    assert shared_axes is not None, msg
+    dtype = self.dtype if self.dtype is not None else x.dtype
+
+    # NOTE: If you use a clipping_scale, consider using clip and clip_gradient
+    # in int_numerics.IntSymmetric.
+    abs_max = jnp.max(jnp.abs(x), axis=shared_axes, keepdims=True)
+    # TODO(yichizh): the zero filtering is not needed anymore because inf is
+    # filtered when calculating the reciprocal of scaling factor
+    abs_max = jnp.where(abs_max == 0.0, jnp.ones_like(abs_max), abs_max)
+    bound = abs_max * self.clipping_scale if self.clipping_scale else abs_max
+
+    scale = bound / numerics_.get_quant_bound()
+    scale = ceil_to_po2(scale) if self.po2_scale else scale
+    return [scale.astype(dtype)], [], None
