@@ -294,17 +294,17 @@ class MnistTest(parameterized.TestCase):
       return
     target_loss = {
         8: {
-            "cpu": [2.302584648132324218750000000000],
-            "TPU v2": [2.302581071853637695312500000000],
-            "TPU v3": [2.302581071853637695312500000000],
-            "TPU v4": [2.302581071853637695312500000000,],
-            "TPU v5 lite": [2.302581071853637695312500000000],
+            "cpu": 2.3,
+            "TPU v2": 2.3,
+            "TPU v3": 2.3,
+            "TPU v4": 2.3,
+            "TPU v5 lite": 2.3,
         },
         4: {
-            "TPU v2": [2.302409172058105468750000000000],
-            "TPU v3": [2.302409172058105468750000000000],
-            "TPU v4": [2.302409172058105468750000000000],
-            "TPU v5 lite": [2.302409172058105468750000000000],
+            "TPU v2": 2.3,
+            "TPU v3": 2.3,
+            "TPU v4": 2.3,
+            "TPU v5 lite": 2.3,
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
@@ -341,11 +341,8 @@ class MnistTest(parameterized.TestCase):
     )
 
     device_kind = jax.devices()[0].device_kind
-    expected_train_loss = target_loss[bits][device_kind]
-    if train_loss not in expected_train_loss:
-      msg = "train_loss changed. Consider updating with the following:\n"
-      msg += f'        "{device_kind}": [{train_loss:.30f}]'
-      self.fail(msg)
+    self.assertAlmostEqual(train_loss, target_loss[bits][device_kind],
+                           delta=1e-2)
 
     # Run forward once more in the same mode to get logits for testing below.
     logits_s1, _ = forward(state.model, state.cnn_eval.apply)

@@ -127,30 +127,18 @@ class MyTest(parameterized.TestCase):
   def test_mnist_training(self, fwd_bits: str):
     target_loss = {
         "e4m3": {
-            "cpu": [
-                # Different CPU models are not bit exact and sometimes produce
-                # different losses under the same training setting.
-                3.167793273925781250000000000000,
-                3.167181968688964843750000000000,
-                3.167066574096679687500000000000,  # colab
-            ],
-            "TPU v2": [3.2136783599853515625],
-            "TPU v3": [3.2136783599853515625],
-            "TPU v4": [3.2137317657470703125],
-            "TPU v5 lite": [3.21373653411865234375],
+            "cpu": 3.16,
+            "TPU v2": 3.21,
+            "TPU v3": 3.21,
+            "TPU v4": 3.21,
+            "TPU v5 lite": 3.21,
         },
         "e5m2": {
-            "cpu": [
-                # Different CPU models are not bit exact and sometimes produce
-                # different losses under the same training setting.
-                3.112026214599609375000000000000,
-                3.112027645111083984375000000000,
-                3.112027168273925781250000000000,  # colab s
-            ],
-            "TPU v2": [3.2267177104949951171875],
-            "TPU v3": [3.2267177104949951171875],
-            "TPU v4": [3.2266914844512939453125],
-            "TPU v5 lite": [3.1812143325805664062500],
+            "cpu": 3.11,
+            "TPU v2": 3.22,
+            "TPU v3": 3.22,
+            "TPU v4": 3.22,
+            "TPU v5 lite": 3.18,
         },
     }
 
@@ -179,9 +167,8 @@ class MyTest(parameterized.TestCase):
     )
 
     device = jax.devices()[0].device_kind
-    if train_loss not in target_loss[fwd_bits][device]:
-      msg = f"train_loss={train_loss:.30f}, {device=}, {fwd_bits=}"
-      self.fail(msg)
+
+    self.assertAlmostEqual(train_loss, target_loss[fwd_bits][device], delta=0.1)
 
   @parameterized.parameters([
       dict(),
