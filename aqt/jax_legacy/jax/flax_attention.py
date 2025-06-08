@@ -778,7 +778,6 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
           dtype=dtype)(
               inputs, padding_mask=padding_mask)
       return out.reshape(batch_size, sequence_length, num_heads, head_dim)
-
     # project inputs_q to multi-headed q/k/v
     # dimensions are then [bs, sequence_length, n_heads, n_features_per_head]
     query = multi_batch_dense_aqt(
