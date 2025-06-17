@@ -78,6 +78,12 @@ class AqtPallasTest(parameterized.TestCase):
           (10, 512, 1),
           jnp.bfloat16
       ),
+      (
+          (10, 512, 1024),
+          None,
+          (1, 1, 1),
+          jnp.bfloat16
+      ),
   )
   def test_quant(
       self, tensor_shape, calibration_axes, expected_scale_shape, dtype

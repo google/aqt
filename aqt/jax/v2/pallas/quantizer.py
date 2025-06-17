@@ -31,7 +31,7 @@ QTensor = aqt_tensor.QTensor
 def quant(
     x: jax.Array,
     n_bits: int | fp8_numerics.FP8Dtype,
-    calibration_axes: Sequence[int],
+    calibration_axes: Sequence[int] | None = None,
 ) -> QTensor:
   """Apply channel-wise quantization to x.
 
@@ -40,7 +40,8 @@ def quant(
   Args:
     x: input tensor
     n_bits: the precision for quantization.
-    calibration_axes: the calibration axes.
+    calibration_axes: the calibration axes. If None, calibration is done on the
+      entire tensor.
   Returns:
     A quantized QTensor
   """
@@ -52,7 +53,8 @@ def quant(
   quantizer = aqt_quantizer.quantizer_make(
       n_bits, scale_stop_grad=False, scale_dtype=jnp.float32
   )
-
+  if calibration_axes is None:
+    quantizer.calib_shared_axes = "per_tensor"
   qx, _ = quantizer.quant(x, calibration_axes=calibration_axes)
   qx.dequant_dtype = jnp.float32
   return qx
