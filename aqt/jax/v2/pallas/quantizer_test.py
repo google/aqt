@@ -33,64 +33,92 @@ class AqtPallasTest(parameterized.TestCase):
       (
           (1024, 1024),
           (1,),
+          False,
           (1024, 1),
           jnp.float32
       ),
       (
           (1024, 1024),
           (1,),
+          False,
           (1024, 1),
           jnp.float32
       ),
       (
           (1024, 1024),
           (0,),
+          False,
           (1, 1024),
           jnp.float32
       ),
       (
           (10, 512, 1024),
           (1,),
+          False,
           (10, 1, 1024),
           jnp.float32
       ),
       (
           (10, 512, 1024),
           (2,),
+          False,
           (10, 512, 1),
           jnp.float32
       ),
       (
           (1024, 1024),
           (0,),
+          False,
           (1, 1024),
           jnp.bfloat16
       ),
       (
           (10, 512, 1024),
           (1,),
+          False,
           (10, 1, 1024),
           jnp.bfloat16
       ),
       (
           (10, 512, 1024),
           (2,),
+          False,
           (10, 512, 1),
           jnp.bfloat16
       ),
       (
           (10, 512, 1024),
           None,
+          False,
           (1, 1, 1),
+          jnp.bfloat16
+      ),
+      (
+          (10, 512, 1024),
+          None,
+          True,
+          (1, 1, 1),
+          jnp.bfloat16
+      ),
+      (
+          (10, 512, 1024),
+          (2,),
+          True,
+          (10, 512, 1),
           jnp.bfloat16
       ),
   )
   def test_quant(
-      self, tensor_shape, calibration_axes, expected_scale_shape, dtype
+      self,
+      tensor_shape,
+      calibration_axes,
+      use_dummy_static_bound,
+      expected_scale_shape,
+      dtype,
   ):
     key = jax.random.PRNGKey(0)
     x = jax.random.uniform(key, tensor_shape, minval=-3, maxval=3, dtype=dtype)
-    qx = quantizer.quant(x, 8, calibration_axes)
+    qx = quantizer.quant(x, 8, calibration_axes, use_dummy_static_bound)
 
     self.assertEqual(qx.qvalue.shape, x.shape)
     self.assertEqual(qx.qvalue.dtype, jnp.int8)
