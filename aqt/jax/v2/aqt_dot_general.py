@@ -1134,7 +1134,8 @@ def _update_dimension_numbers_for_backward(
 
   Args:
     fwd_dimension_numbers: Dimension number used during forward pass
-    y_is_lhs: If set, the function calculates dimension numbers for dlhs.
+    y_is_lhs: If set, the function calculates dimension numbers for drhs =
+      dot_general(g, lhs).
     gradient_rank: Rank of the gradient.
     y_rank: Rank of the other side input.
 
