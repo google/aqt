@@ -458,6 +458,9 @@ class AqtDotGeneral(nn.Module):
       )
 
       cfg.apply_custom_vjp_on_jax = False
+      cfg.fwd.dg_quantizer.init_calibration()
+      cfg.dlhs.dg_quantizer.init_calibration()
+      cfg.drhs.dg_quantizer.init_calibration()
       out, (out_lhs_qt, out_rhs_qt) = aqt_flax_dg_core.dg_core_flax_lifted(
           lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self, cfg
       )
