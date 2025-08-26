@@ -16,6 +16,7 @@
 
 import copy
 import functools
+import unittest
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -68,6 +69,8 @@ class MnistTest(parameterized.TestCase):
                 3.123511314392089843750000000000,
                 3.123474121093750000000000000000,
                 3.122316837310791015625000000000,  # colab
+                3.123512029647827148437500000000,  # changed test order
+                3.123473644256591796875000000000,  # changed test order
             ],
             "TPU v2": [3.198328018188476562500000000000],
             "TPU v3": [3.198328018188476562500000000000],
@@ -956,6 +959,8 @@ class MnistTest(parameterized.TestCase):
     logits_after_conversion, _ = forward(model_serving, serve_fn)
     assert (logits_before_conversion == logits_after_conversion).all()
 
+  # NOTE(mattjj): disabled this test because the behavior is unused, now illegal
+  @unittest.skip("unused, returning mutable array refs")
   @parameterized.parameters(
       (["e4m3"] * 2 + ["e5m2"] * 4,),  # Higher precision fwd, larger range bwd
       ([8] * 6,),
