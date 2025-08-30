@@ -775,6 +775,9 @@ class DotGeneralRaw:
             lhs, rhs, dimension_numbers, self.rhs.use_fwd_quant
         )
       assert isinstance(rhs, jnp.ndarray)
+      orig_lhs_shape = lhs.shape
+      orig_rhs_shape = rhs.shape
+      orig_dimension_numbers = dimension_numbers
 
       # TODO(lew): Define cutsom_vjp on tiled_dot_general and replace local_aqt.
       if self.local_aqt is not None:
@@ -820,17 +823,29 @@ class DotGeneralRaw:
 
       # TODO(lew): mt.x above should be clipped for clipping calibrations
       out = _qtensor_dot_general(
-          lhs_qt, rhs_qt, dimension_numbers, self, jnp.promote_types(lhs, rhs)
+          lhs_qt,
+          rhs_qt,
+          dimension_numbers,
+          self,
+          jnp.promote_types(lhs, rhs),
+          orig_lhs_shape,
+          orig_rhs_shape,
+          orig_dimension_numbers,
       )
 
       out = out.dequant()
 
       res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
       if self.local_aqt is not None:
-        (lhs_ca, rhs_ca), _ = dimension_numbers
-        assert len(lhs_ca) == len(rhs_ca)
-        if len(lhs_ca) > 0:
-          out = jnp.sum(out, axis=0)
+        fq = (
+            self.lhs.dequant_mode == DequantMode.THIS_INPUT
+            and self.rhs.dequant_mode == DequantMode.THIS_INPUT
+        )
+        if not fq:  # Fake quant don't require sum over tile count axis
+          (lhs_ca, rhs_ca), _ = dimension_numbers
+          assert len(lhs_ca) == len(rhs_ca)
+          if len(lhs_ca) > 0:
+            out = jnp.sum(out, axis=0)
         # We are not supporting local AQT in fwd pass, so no res needed.
         res = None
       return out, res
@@ -843,6 +858,9 @@ def _qtensor_dot_general(
     cfg: Any,
     # dequant_dtype: DType,
     dequant_dtype: jnp.dtype,
+    orig_lhs_shape: tuple[int, ...],
+    orig_rhs_shape: tuple[int, ...],
+    orig_dimension_numbers: jax.lax.DotDimensionNumbers,
 ) -> aqt_tensor.QTensor:
   """QTensor lax.dot_general replacement."""
 
@@ -860,6 +878,18 @@ def _qtensor_dot_general(
   # Dequantize before the lax dg call if in fake quant mode
   lhs_qin = _maybe_dequant(lhs_qt, cfg.lhs)
   rhs_qin = _maybe_dequant(rhs_qt, cfg.rhs)
+  if (
+      cfg.lhs.dequant_mode == DequantMode.THIS_INPUT
+      and cfg.rhs.dequant_mode == DequantMode.THIS_INPUT
+      and cfg.local_aqt is not None
+  ):
+    # Revert local_aqt reshaping and reuse the original dimension numbers.
+    # The correct order to compute fake quant is:
+    #   reshape (local_aqt), quant, dequant, reshape back.
+    # Dims and original shape are therefore required to pass in qtensor_dg.
+    dimension_numbers = orig_dimension_numbers
+    lhs_qin = lhs_qin.reshape(orig_lhs_shape)
+    rhs_qin = rhs_qin.reshape(orig_rhs_shape)
 
   dtype_ms = (
       f'Found {cfg.dg_accumulator_dtype=}, {lhs_qin.dtype=} and'
