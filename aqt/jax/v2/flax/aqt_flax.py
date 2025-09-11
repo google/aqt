@@ -540,7 +540,9 @@ class AqtDotGeneral(nn.Module):
       dg_eqn = [eqn for eqn in tiled_dg_jaxpr.eqns if 'dot_general' in str(eqn)]
       assert len(dg_eqn) == 1, 'Multiple dg calls are found in tiled dg jaxpr.'
       lhs_invar, rhs_invar = dg_eqn[0].invars
+      assert isinstance(lhs_invar.aval, jax.core.ShapedArray)
       tiled_lhs_shape = lhs_invar.aval.shape
+      assert isinstance(rhs_invar.aval, jax.core.ShapedArray)
       tiled_rhs_shape = rhs_invar.aval.shape
       tiled_dimension_numbers = dg_eqn[0].params['dimension_numbers']
       # Use tiled input shapes and dimension numbers to create aqt_dg that
