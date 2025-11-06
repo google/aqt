@@ -87,7 +87,7 @@ def _conv_general_aqt(
                   (lhs, rhs))
 
 
-@_conv_general_aqt.defjvp
+@_conv_general_aqt.defjvp  # pytype: disable=wrong-arg-types
 def _conv_general_aqt_jvp(
     lhs_quantizer: aqt_tensor.TensorQuantizer,  #
     rhs_quantizer: aqt_tensor.TensorQuantizer,
