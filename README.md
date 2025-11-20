@@ -1,4 +1,8 @@
+<!-- disableFinding(LINE_OVER_80) -->
+<!-- disableFinding(WHITESPACE_LINES) -->
 # AQT : Accurate Quantized Training
+
+*AQT is reaching end-of-life. github.com/google/qwix is replacing AQT.*
 
 AQT is a software library designed for easy tensor operation quantization in JAX.
 
