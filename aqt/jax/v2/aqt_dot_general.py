@@ -901,11 +901,11 @@ def _qtensor_dot_general(
   if jax.local_devices()[0].platform == 'cpu':
     # needed bet lax.dot_general(int4, int4) is illegal on cpu.
     # TODO(aqt): Remove this platform check once
-    # https://github.com/google/jax/issues/19682 is fixed.
+    # https://github.com/jax-ml/jax/issues/19682 is fixed.
     # TODO(yichizh): It's better to assert False here with the following msg
     # msg = (
     #     'lax.dot_general(int4, int4) is illegal on cpu:'
-    #     ' https://github.com/google/jax/issues/19682. The simple workaround'
+    #     ' https://github.com/jax-ml/jax/issues/19682. The simple workaround'
     #     ' is to upcast to int8, but in that case please directly set the'
     #     ' numerics bits to int8. Please contact the AQT team if you believe'
     #     ' the workaround is needed.'
@@ -922,7 +922,7 @@ def _qtensor_dot_general(
       precision=lax.Precision.DEFAULT,
   )
   # TODO(lew): Do we have a correct precision above?
-  #   Relevant: https://github.com/google/jax/issues/14022
+  #   Relevant: https://github.com/jax-ml/jax/issues/14022
   out = aqt_tensor.QTensor(
       qvalue=out,
       scale=[],
