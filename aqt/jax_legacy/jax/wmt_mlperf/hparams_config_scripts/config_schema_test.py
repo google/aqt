@@ -246,7 +246,7 @@ class BaseConfigTest(parameterized.TestCase):
                 'prec': None,
                 'half_shift': None,
             },
-        },
+        }
     }
 
     expected_top_level_schema = {
