@@ -83,7 +83,7 @@ def dg_core_flax_lifted(
     # through stop_gradient, so we need to filter those out from this logic.
     def stop_grad_for_non_ref_params(param):
       if isinstance(
-          jax.core.get_aval(param),
+          jax.typeof(param),
           # pylint: disable-next=protected-access
           jax._src.state.types.AbstractRef,
       ):
