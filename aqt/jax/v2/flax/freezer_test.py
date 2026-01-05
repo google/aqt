@@ -30,6 +30,19 @@ class _CustomStructure:
   member_list: Sequence[jnp.ndarray]
   member_dict: Mapping[str, jnp.ndarray]
 
+  # Directly comparing members of the type `jnp.ndarray` can throw an error:
+  # "The truth value of an array with more than one element is ambiguous."
+  # So we bring back an explicit implementation of __eq__ like it was prior to
+  # Python 3.13 in order work around this possibility.
+  def __eq__(self, other):
+    if self is other:
+      return True
+    if other.__class__ is self.__class__:
+      lhs = (self.member, self.member_list, self.member_dict)
+      rhs = (other.member, other.member_list, other.member_dict)
+      return lhs == rhs
+    return NotImplemented
+
 
 class TestModel(nn.Module):
   freezer_mode: freezer.FreezerMode
