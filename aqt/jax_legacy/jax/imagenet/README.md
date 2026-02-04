@@ -110,7 +110,7 @@ in the command line _before executing the tfds python code block_ to specify a d
 
 After the processing ends, copy the `tensorflow_datasets` directory (where the processed data are stored) to the cloud storage bucket. It can then be used across different VMs.
 ```
-$ gsutil cp -r /path/to/tensorflow_datasets gs://GCS_BUCKET_NAME/datasets
+$ gcloud storage cp --recursive /path/to/tensorflow_datasets gs://GCS_BUCKET_NAME/datasets
 ```
 
 
@@ -166,17 +166,16 @@ auth.authenticate_user()
 #@markdown Enter cloud storage bucket name:
 bucket_name = 'your_cloud_storage_bucket_name' #@param {type:"string"}
 # list file in the bucket as a test
-!gsutil ls gs://{bucket_name}/
+!gcloud storage ls gs://{bucket_name}/
 #@markdown Enter log directory name in the cloud storage bucket:
 log_dir = 'directory_in_bucket_storing_TB_data' #@param {type:"string"}
 
 # copy tensorboard data to the temporary storage on colab
 !mkdir /content/tb_dir
-!gsutil rsync -r gs://{bucket_name}/{log_dir} /content/tb_dir
+!gcloud storage rsync --recursive gs://{bucket_name}/{log_dir} /content/tb_dir
 
 # load tensorboard
 %load_ext tensorboard
 %tensorboard --logdir /content/tb_dir
 ```
-
 
