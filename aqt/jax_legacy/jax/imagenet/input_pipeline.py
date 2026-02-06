@@ -195,12 +195,12 @@ def load_split(batch_size,
     A `tf.data.Dataset`.
   """
   if train:
-    split_size = TRAIN_IMAGES // jax.host_count()
-    start = jax.host_id() * split_size
+    split_size = TRAIN_IMAGES // jax.process_count()
+    start = jax.process_index() * split_size
     split = 'train[{}:{}]'.format(start, start + split_size)
   else:
-    split_size = EVAL_IMAGES // jax.host_count()
-    start = jax.host_id() * split_size
+    split_size = EVAL_IMAGES // jax.process_count()
+    start = jax.process_index() * split_size
     split = 'validation[{}:{}]'.format(start, start + split_size)
 
   def decode_example(example):

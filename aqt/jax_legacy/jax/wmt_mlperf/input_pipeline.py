@@ -177,7 +177,7 @@ def train_sentencepiece(dataset,
   SentencePieceTrainer.Train(argstr)
   # Only write to CNS if host id is 0 to prevent race conditions during
   # multihost training, otherwise wait until host 0 has written the file.
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     # Use an intermediate filename that is renamed to the target name to address
     # create and fill delays.  Using finalization (CNS) as a indicator is not
     # portable.
@@ -649,4 +649,10 @@ def get_wmt_datasets(
       for eval_dataset_name, eval_data in eval_data_dict.items()
   }
 
-  return train_batches, eval_batches_dict, train_eval_batches, predict_batches_dict, sp_tokenizer
+  return (
+      train_batches,
+      eval_batches_dict,
+      train_eval_batches,
+      predict_batches_dict,
+      sp_tokenizer,
+  )

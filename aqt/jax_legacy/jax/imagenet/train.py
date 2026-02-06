@@ -221,7 +221,7 @@ def restore_checkpoint(state):
 
 
 def save_checkpoint(state):
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     # get train state from the first replica
     state = jax.device_get(jax.tree.map(lambda x: x[0], state))
     step = int(state.step)
@@ -283,7 +283,7 @@ def main(argv):
   # make sure tf does not allocate gpu memory
   tf.config.experimental.set_visible_devices([], 'GPU')
 
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     summary_writer = tensorboard.SummaryWriter(FLAGS.model_dir)
 
   image_size = 224
@@ -291,7 +291,7 @@ def main(argv):
   batch_size = FLAGS.batch_size
   if batch_size % jax.device_count() > 0:
     raise ValueError('Batch size must be divisible by the number of devices')
-  local_batch_size = batch_size // jax.host_count()
+  local_batch_size = batch_size // jax.process_count()
   device_batch_size = batch_size // jax.device_count()
 
   platform = jax.local_devices()[0].platform
@@ -349,7 +349,7 @@ def main(argv):
   num_steps = steps_per_epoch * num_epochs
 
   # Estimate compute / memory costs
-  if jax.host_id() == 0 and FLAGS.estimate_compute_and_memory_cost:
+  if jax.process_index() == 0 and FLAGS.estimate_compute_and_memory_cost:
     estimate_compute_and_memory_cost(
         image_size=image_size, model_dir=FLAGS.model_dir, hparams=hparams)
     logging.info('Writing training HLO and estimating compute/memory costs.')
@@ -446,7 +446,10 @@ def main(argv):
   t_loop_start = time.time()
   last_log_step = 0
   for step, batch in zip(range(step_offset, num_steps), train_iter):
-    if hparams.early_stop_steps >= 0 and step > hparams.early_stop_steps * steps_per_epoch:
+    if (
+        hparams.early_stop_steps >= 0
+        and step > hparams.early_stop_steps * steps_per_epoch
+    ):
       break
     update_bounds = train_utils.should_update_bounds(
         hparams.activation_bound_update_freq,
@@ -487,7 +490,7 @@ def main(argv):
 
       # Write to TensorBoard
       state_dict_summary_all = common_utils.get_metrics(state_dict_summary_all)
-      if jax.host_id() == 0:
+      if jax.process_index() == 0:
         for key, vals in epoch_metrics.items():
           tag = 'train_%s' % key
           for i, val in enumerate(vals):
@@ -513,14 +516,17 @@ def main(argv):
       summary = jax.tree.map(lambda x: x.mean(), eval_metrics)
       logging.info('eval epoch: %d, loss: %.4f, accuracy: %.2f', epoch,
                    summary['loss'], summary['accuracy'] * 100)
-      if jax.host_id() == 0:
+      if jax.process_index() == 0:
         for key, val in eval_metrics.items():
           tag = 'eval_%s' % key
           summary_writer.scalar(tag, val.mean(), step)
         summary_writer.flush()
     if (step + 1) % steps_per_checkpoint == 0 or step + 1 == num_steps:
       # Only save the report when step > activation_bound_start_step
-      if jax.host_id() == 0 and step > hparams.activation_bound_start_step:
+      if (
+          jax.process_index() == 0
+          and step > hparams.activation_bound_start_step
+      ):
         prepare_and_save_report(
             hparams, eval_freq=steps_per_epoch, num_train_steps=step + 1)
       state = imagenet_train_utils.sync_batch_stats(state)

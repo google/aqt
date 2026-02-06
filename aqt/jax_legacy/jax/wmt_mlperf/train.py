@@ -664,7 +664,7 @@ def run_eval(*,
   eval_summary['perplexity'] = jnp.clip(
       jnp.exp(eval_summary['loss']), max=1.0e4)
   if summary_writer is not None:
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       for key, val in eval_summary.items():
         summary_writer.scalar(key, val, step)
       summary_writer.flush()
@@ -950,8 +950,8 @@ class Datasets:
             n_devices=n_devices,
             dataset_name=FLAGS.dataset_name,
             eval_dataset_list=eval_dataset_list,
-            shard_idx=jax.host_id(),
-            shard_count=jax.host_count(),
+            shard_idx=jax.process_index(),
+            shard_count=jax.process_count(),
             data_dir=FLAGS.data_dir,
             vocab_path=vocab_path,
             batch_size=batch_size,
@@ -1107,7 +1107,7 @@ def run_training(
   eval_summary_writer = None
   additional_eval_summary_writers = {}
   train_eval_summary_writer = None
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     model_dir = FLAGS.model_dir
     train_summary_writer = tensorboard.SummaryWriter(model_dir + '/train')
     eval_summary_writer = tensorboard.SummaryWriter(model_dir + '/eval')
@@ -1181,7 +1181,7 @@ def run_training(
   wrote_beam_hlo = False
 
   # Save the HLO and estimate compute / memory costs
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     logging.info('Writing training HLO and estimating compute/memory costs.')
     state = training_state.flax_state
     optimizer = training_state.optimizer
@@ -1219,7 +1219,7 @@ def run_training(
 
     # Save a Checkpoint
     if step % FLAGS.checkpoint_freq == 0 and step > 0:
-      if jax.host_id() == 0 and FLAGS.save_checkpoints:
+      if jax.process_index() == 0 and FLAGS.save_checkpoints:
         training_state.save_checkpoint(model_dir=FLAGS.model_dir, step=step)
 
 
@@ -1253,7 +1253,7 @@ def run_training(
         steps_per_sec = steps_per_eval / (time.time() - t_loop_start)
         t_loop_start = time.time()
 
-        if jax.host_id() == 0:
+        if jax.process_index() == 0:
           assert train_summary_writer is not None, ('train_summary_writer was '
                                                     'not initialized on host 0')
           train_summary_writer.scalar('steps per second', steps_per_sec, step)
@@ -1294,8 +1294,10 @@ def run_training(
 
         # Save a checkpoint corresponding to when loss on the eval set is
         # minimized.
-        if jax.host_id() == 0 and (eval_dataset_name == FLAGS.eval_dataset_name
-                                   and FLAGS.save_minimum_loss_checkpoint):
+        if jax.process_index() == 0 and (
+            eval_dataset_name == FLAGS.eval_dataset_name
+            and FLAGS.save_minimum_loss_checkpoint
+        ):
           save_best_checkpoint(
               model_dir=FLAGS.model_dir,
               training_state=training_state,
@@ -1322,7 +1324,7 @@ def run_training(
 
       # Translation and BLEU Score.
       t_inference_start = time.time()
-      should_write_beam_hlo = jax.host_id() == 0 and (not wrote_beam_hlo)
+      should_write_beam_hlo = jax.process_index() == 0 and (not wrote_beam_hlo)
       sources, references, predictions = run_inference(
           ds=datasets.predict_ds_dict[FLAGS.eval_dataset_name],
           hparams=hparams,
@@ -1352,7 +1354,7 @@ def run_training(
       exemplars = ''
       for n in np.random.choice(np.arange(len(predictions)), 8):
         exemplars += f'{sources[n]}\n\n{references[n]}\n\n{predictions[n]}\n\n'
-      if jax.host_id() == 0:
+      if jax.process_index() == 0:
         assert eval_summary_writer is not None, ('eval_summary_writer was not '
                                                  'initialized on host 0')
         eval_summary_writer.scalar('bleu', bleu_score, step)
