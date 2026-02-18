@@ -42,7 +42,7 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
         CALIBRATION_STATS,
         "amax_history",
         # pylint: disable-next=protected-access
-        lambda: jax._src.core.mutable_array(
+        lambda: jax._src.core.new_ref(
             jnp.zeros((self.amax_history_length,))
         ),
     )
@@ -51,7 +51,7 @@ class DelayedScalingCalibration(calibration.Calibration, nn.Module):
         CALIBRATION_STATS,
         "bound",
         # pylint: disable-next=protected-access
-        lambda: jax._src.core.mutable_array(jnp.zeros((1,))),
+        lambda: jax._src.core.new_ref(jnp.zeros((1,))),
     )
 
   def get_bound(
