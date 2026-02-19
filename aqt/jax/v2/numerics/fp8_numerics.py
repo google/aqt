@@ -136,7 +136,10 @@ class Fp8Numerics(numerics.AqtNumerics):
 def round_to_nearest_even(x: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
   x = x.astype(dtype)
   # TODO(lew): Is this rounding utilizing subnormals range fully?
-  # bitcast_convert to uint8 to avoid allow_excess_precision set in XLA
-  x = jax.lax.bitcast_convert_type(x, jnp.uint8)
-  x = jax.lax.bitcast_convert_type(x, dtype)
+
+  # An optimization barrier is inserted here to prevent the jit compiler from
+  # optimizing away the fp32 -> fp8 -> fp32 conversion when the
+  # xla_allow_excess_precision flag is true (default).
+  x = jax.lax.optimization_barrier(x)
+
   return x

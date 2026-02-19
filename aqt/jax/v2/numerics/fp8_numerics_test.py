@@ -214,6 +214,33 @@ class MyTest(parameterized.TestCase):
         mean_in_std_err_units < 5
     ), f"mean_in_std_err_units: {mean_in_std_err_units}"
 
+  @parameterized.parameters([
+      dict(dtype=jnp.float8_e4m3fn),
+      dict(dtype=jnp.float8_e5m2),
+  ])
+  def test_fp8_realization_with_jit(self, dtype):
+    """Test that the fp8 quantization is not simplified away by jit.
+
+    This test checks that the fp8 quantization is performed as expected, in the
+    presence of jit compilation. When xla_allow_excess_precision flag is true
+    (default), the jit compiler can optimize away the fp32 -> fp8 -> fp32 path
+    if implemented naively.
+
+    Args:
+      dtype: The fp8 dtype to test (e.g., jnp.float8_e4m3fn, jnp.float8_e5m2).
+    """
+    target_value = {
+        jnp.float8_e4m3fn: [112.0, 112.0],
+        jnp.float8_e5m2: [112.0, 112.0],
+    }
+    value = jnp.array([113.0, 114.0], dtype=jnp.float32)
+
+    def qdq(x):
+      return fp8_numerics.round_to_nearest_even(x, dtype).astype(jnp.float32)
+
+    result = jax.jit(qdq)(value)
+    np.testing.assert_array_equal(result, target_value[dtype])
+
 
 def illustrate_bf16():
   def bit1(fro, to):
