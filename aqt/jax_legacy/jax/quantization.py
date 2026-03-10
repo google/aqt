@@ -806,7 +806,7 @@ def flaxformer_dot_general(
     prefer_int8_to_int32_dot: bool = True,
     quant_w: Optional[QuantW] = None,
 ) -> jnp.ndarray:
-  """Flaxformer dot general with optionally quantized weights and activations."""
+  """Flaxformer dot general with optionally quantized weights and activations."""  # pylint: disable=g-docstring-first-line-too-long
   input_dtype = act.dtype
   is_weight_quantized = False
   is_act_quantized = False
@@ -1029,7 +1029,7 @@ def quantized_dot_general(
       if weight_params.axis is None:
         out_channel_shape = ()
       else:
-        axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)
+        axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)  # pytype: disable=wrong-arg-types
         out_channel_shape = tuple(
             [w.shape[i] for i in range(w.ndim) if i not in axes]
         )
