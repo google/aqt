@@ -52,7 +52,7 @@ COMMAND="
         cd aqt/aqt/jax_legacy/jax/imagenet &&
         python3 train.py --model_dir $LOCAL_WORK_DIR --hparams_config_dict $CONFIG_DICT --report_dir $REPORT_DIR --batch_size 8192 --resnet508b_ckpt_path $RESNET508B_CKPT --config_idx 0 2>&1 | tee -a $TRAINING_LOG &&
         cp /home/$USERNAME/$TRAINING_LOG $LOCAL_WORK_DIR &&
-        gsutil rsync -r -d $LOCAL_WORK_DIR $GCS_WORK_DIR
+        gcloud storage rsync --recursive --delete-unmatched-destination-objects $LOCAL_WORK_DIR $GCS_WORK_DIR
 "
 
 # create VM
