@@ -292,6 +292,8 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
     # intermediate values. Note this differs from the log-domain
     # implementation of softmax used above.
     quant_hparams = softmax_hparams.quant_hparams
+    if quant_hparams is None:
+      raise ValueError('quant_hparams must be provided for quantized softmax.')
     fp_quant_config = QuantOps.FloatQuant(
         is_scaled=False, fp_spec=quant_hparams.prec)
     quant_ops = QuantOps.create_symmetric_fp(
@@ -346,7 +348,8 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
   asumexp = dimadd(
       lax.reduce(approx_exp, onp.array(0, dtype=a.dtype), lax.add,
                  norm_dims))
-
+  if exp_hparams is None:
+    raise ValueError('exp_hparams must be provided for softmax.')
   if exp_hparams.sum_high_bound is not None and exp_hparams.sum_high_bound != 0:
     sum_low_bound = 1.
     if (exp_hparams.low_bound != 0) and exp_hparams.clip_and_subtract:
