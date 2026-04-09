@@ -820,7 +820,11 @@ class DotGeneralRaw:
 
       # TODO(lew): mt.x above should be clipped for clipping calibrations
       out = _qtensor_dot_general(
-          lhs_qt, rhs_qt, dimension_numbers, self, jnp.promote_types(lhs, rhs)
+          lhs_qt,
+          rhs_qt,
+          dimension_numbers,
+          self,
+          jnp.promote_types(lhs.dtype, rhs.dtype),
       )
 
       out = out.dequant()

@@ -123,7 +123,7 @@ However if there is any other use, we will drop that assumption."""
         scale=[],
         scale_t=None,
         bias=[],
-        dequant_dtype=jnp.promote_types(lhs, rhs),
+        dequant_dtype=jnp.promote_types(lhs.dtype, rhs.dtype),
     )
     assert out.scale is not None  # pytype help
     out.scale.extend(lhs_qt.scale)
