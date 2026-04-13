@@ -228,11 +228,11 @@ class DotGeneralRes:
 
 def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
   """A copy of jnp.einsum but without the default jit so as to be injectable."""
-  operands, contractions = jax_einsum._default_poly_einsum_handler(  # pylint: disable=protected-access
+  operands, contractions = jax_einsum._default_poly_einsum_handler(  # pylint: disable=protected-access  # pytype: disable=module-attr
       eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
   )
-  contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
-  return jax.named_call(jax_einsum._einsum, name=eqn)(  # pylint: disable=protected-access
+  contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)  # pytype: disable=attribute-error
+  return jax.named_call(jax_einsum._einsum, name=eqn)(  # pylint: disable=protected-access  # pytype: disable=module-attr
       operands,
       contractions,
       precision=None,
