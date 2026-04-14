@@ -521,7 +521,9 @@ class AqtDotGeneral(nn.Module):
       dimension_numbers,
       precision,
       preferred_element_type=None,
+      out_type=None,
   ):
+    del out_type
     tiling_cfg = self.tiling_cfg
     if tiling_cfg is None and self.tiling_fn is not None:
       tiling_cfg = self.tiling_fn(lhs, rhs, dimension_numbers)
