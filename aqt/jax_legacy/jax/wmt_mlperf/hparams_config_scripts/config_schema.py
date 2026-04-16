@@ -174,7 +174,9 @@ def get_attention_config(
   config = ml_collections.ConfigDict()
   config_schema_utils.set_default_reference(
       config, parent_config, ["dense_kqv", "dense_out"], parent_field="dense")
-
+  config_schema_utils.set_default_reference(
+      config, parent_config, ["query_act_sparsity", "kv_act_sparsity"],
+      parent_field="sparsity")
   config.attn_acts = ml_collections.ConfigDict({})
 
   config_schema_utils.set_default_reference(config, parent_config,
