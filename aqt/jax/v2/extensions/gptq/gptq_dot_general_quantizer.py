@@ -287,8 +287,8 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
             raise ValueError(f"Unknown calibration mode: {mode}")
         return calibration_axes
 
-      lhs_calib = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)
-      rhs_calib = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)
+      lhs_calib = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)  # pyrefly: ignore[bad-argument-type]
+      rhs_calib = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)  # pyrefly: ignore[bad-argument-type]
     lhs_quantization_info = (lhs, lhs_calib)
     rhs_quantization_info = (rhs, rhs_calib)
 
@@ -333,7 +333,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
         perc_damp=self.perc_damp,
         act_order=self.act_order,
     )
-    hinv, perm = hinv_collector(lhs, lhs_ca, quant_mode)
+    hinv, perm = hinv_collector(lhs, lhs_ca, quant_mode)  # pyrefly: ignore[bad-argument-type]
 
     # Cholesky decomposition.
     blocksize = _get_divisible_blocksize(hinv.shape[0], sharded_gptc.BLOCKSIZE)
@@ -345,7 +345,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
     rhs_dtype = rhs.dtype
 
     rhs, rhs_feature_grouped_shape = _reshape_kernel_for_gptq(
-        rhs, rhs_ca, self.sharding_axes, self.act_order, perm, blocksize
+        rhs, rhs_ca, self.sharding_axes, self.act_order, perm, blocksize  # pyrefly: ignore[bad-argument-type]
     )
     hinv = hinv.reshape((-1, blocksize, hinv.shape[-1]))
 
@@ -369,10 +369,10 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
     # Recover original rhs shape.
     rhs = _recover_kernel_from_gptq_result(
         rhs,
-        rhs_ca,
+        rhs_ca,  # pyrefly: ignore[bad-argument-type]
         self.sharding_axes,
         self.act_order,
-        perm,
+        perm,  # pyrefly: ignore[bad-argument-type]
         rhs_dtype,
         rhs_feature_grouped_shape,
     )

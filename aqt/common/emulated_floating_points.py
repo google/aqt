@@ -204,7 +204,7 @@ def _round_stochastic(t, mask_bits):
       tf.random.uniform(
           t_shape,
           minval=0,
-          maxval=upper,
+          maxval=upper,  # pyrefly: ignore[unbound-name]
           dtype=tf.dtypes.int32,
           seed=0,
       ), int_dtype)
@@ -382,7 +382,7 @@ def handle_mantissa(t, mantissa_bits, min_exp, rounding_mode):
   elif t.dtype is tf.float32:
     mask_bits = 23 - allowed_mantissa_bits
 
-  return rounding(t, mask_bits, rounding_mode)
+  return rounding(t, mask_bits, rounding_mode)  # pyrefly: ignore[unbound-name]
 
 
 def static_handle_exponent(t, min_exp, max_exp, mantissa_bits):
@@ -431,7 +431,7 @@ def emulated_fp(t, fp_metadata):
   assert isinstance(fp_metadata, FPMetadata)
   assert t.dtype in [tf.bfloat16, tf.float32]
 
-  with tf.name_scope('emulated_fp'):
+  with tf.name_scope('emulated_fp'):  # pyrefly: ignore[bad-instantiation]
     v = handle_mantissa(
         t,
         mantissa_bits=fp_metadata.mantissa_bits,
@@ -475,7 +475,7 @@ def emulated_e8mn(t, fp_metadata):
   assert fp_metadata.mantissa_bits <= 6 and fp_metadata.mantissa_bits >= 0
   assert t.dtype in [tf.bfloat16, tf.float32]
 
-  with tf.name_scope('emulated_e8mn'):
+  with tf.name_scope('emulated_e8mn'):  # pyrefly: ignore[bad-instantiation]
     return xla.reduce_precision(t, fp_metadata.exponent_bits,
                                 fp_metadata.mantissa_bits)
 

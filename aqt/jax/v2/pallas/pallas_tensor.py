@@ -51,8 +51,8 @@ class TransposedTensor(Generic[T]):
   @property
   @_called_within_pallas_kernel
   def untransposed(self):
-    return transpose(
-        self.transposed_tensor[...], list(np.argsort(self.permute_axes))
+    return transpose(  # pyrefly: ignore[not-callable]
+        self.transposed_tensor[...], list(np.argsort(self.permute_axes))  # pyrefly: ignore[unsupported-operation]
     )
 
 
@@ -80,17 +80,17 @@ def transpose_tensor_for_memory_saving(
 
   permute_axes = list(range(s.ndim))
   permute_axes[-1], permute_axes[-2] = permute_axes[-2], permute_axes[-1]
-  transposed_tensor = transpose(s, permute_axes)
+  transposed_tensor = transpose(s, permute_axes)  # pyrefly: ignore[not-callable]
 
   transposed_block_shape = tuple(
-      block_spec.block_shape[i] for i in permute_axes
+      block_spec.block_shape[i] for i in permute_axes  # pyrefly: ignore[unsupported-operation]
   )
 
   def transposed_index_map(
       *args,
       permute_axes=tuple(permute_axes),
   ):
-    index = list(block_spec.index_map(*args))
+    index = list(block_spec.index_map(*args))  # pyrefly: ignore[not-callable]
     return tuple(index[i] for i in permute_axes)
 
   # if there are None in block_shape, it means that those axes are
@@ -106,9 +106,9 @@ def transpose_tensor_for_memory_saving(
   ]
 
   transposed_tensor = TransposedTensor(
-      transposed_tensor=transposed_tensor, permute_axes=permute_axes
+      transposed_tensor=transposed_tensor, permute_axes=permute_axes  # pyrefly: ignore[unexpected-keyword]
   )
-  transposed_block_spec = transposed_tensor.replace(
+  transposed_block_spec = transposed_tensor.replace(  # pyrefly: ignore[missing-attribute]
       transposed_tensor=pl.BlockSpec(
           block_shape=transposed_block_shape,
           index_map=transposed_index_map,
@@ -133,7 +133,7 @@ def make_qtensor_blockspec(
   assert qtensor.scale_t is None
 
   def _make_scale_block_spec(scale: jax.Array, block_spec: pl.BlockSpec):
-    scale_blk_shape = list(block_spec.block_shape)
+    scale_blk_shape = list(block_spec.block_shape)  # pyrefly: ignore[bad-argument-type]
 
     # Find calibration axes, and change scale_block_shape accordingly.
     calibration_axes = [axes for axes, s in enumerate(scale.shape) if s == 1]
@@ -146,7 +146,7 @@ def make_qtensor_blockspec(
         *args,
         calibration_axes=calibration_axes,
     ):
-      index = list(block_spec.index_map(*args))
+      index = list(block_spec.index_map(*args))  # pyrefly: ignore[not-callable]
       for i in calibration_axes:
         index[i] = 0
       return tuple(index)
@@ -157,9 +157,9 @@ def make_qtensor_blockspec(
     )
 
   return QTensor(
-      qvalue=block_spec,
-      scale=[_make_scale_block_spec(s, block_spec) for s in qtensor.scale],
-      scale_t=None,
-      bias=[],
-      dequant_dtype=qtensor.dequant_dtype,
+      qvalue=block_spec,  # pyrefly: ignore[unexpected-keyword]
+      scale=[_make_scale_block_spec(s, block_spec) for s in qtensor.scale],  # pyrefly: ignore[not-iterable, unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[],  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=qtensor.dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )

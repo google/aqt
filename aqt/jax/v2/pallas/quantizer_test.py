@@ -120,11 +120,11 @@ class AqtPallasTest(parameterized.TestCase):
     x = jax.random.uniform(key, tensor_shape, minval=-3, maxval=3, dtype=dtype)
     qx = quantizer.quant(x, 8, calibration_axes, use_dummy_static_bound)
 
-    self.assertEqual(qx.qvalue.shape, x.shape)
-    self.assertEqual(qx.qvalue.dtype, jnp.int8)
-    self.assertEqual(qx.scale[0].shape, expected_scale_shape)
+    self.assertEqual(qx.qvalue.shape, x.shape)  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(qx.qvalue.dtype, jnp.int8)  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(qx.scale[0].shape, expected_scale_shape)  # pyrefly: ignore[unsupported-operation]
     # scale factor should be float32 regardless of the dtype of x.
-    self.assertEqual(qx.scale[0].dtype, jnp.float32)
+    self.assertEqual(qx.scale[0].dtype, jnp.float32)  # pyrefly: ignore[unsupported-operation]
 
 
 if __name__ == "__main__":

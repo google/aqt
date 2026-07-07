@@ -291,7 +291,7 @@ class TensorQuantizer(nn.Module):
     if self.config is None:
       raise ValueError('config is None')
     for config in self.config.tensor_configs:
-      if is_config_active(config, self._last_update.value) and isinstance(
+      if is_config_active(config, self._last_update.value) and isinstance(  # pyrefly: ignore[bad-argument-type]
           config.quant_config, aqt_config.IntQuantConfig
       ):
         clip_bound = aqt_common.get_clip_bound(config.quant_config)
@@ -330,7 +330,7 @@ class TensorQuantizer(nn.Module):
     """update(), but with active `config`."""
 
     should_update_scale = self._should_update_scale(config, event_count)
-    self._last_update.value = event_count
+    self._last_update.value = event_count  # pyrefly: ignore[bad-argument-type]
 
     self._stats.update(sample, weight)
 
@@ -351,9 +351,9 @@ class TensorQuantizer(nn.Module):
       scale, _ = self._get_quant_scale(train=True)
       sample = scale * sample
       new_var = self._to_quant(sample, train=True).astype(
-          self.quantized_variable.value.dtype
+          self.quantized_variable.value.dtype  # pyrefly: ignore[missing-attribute]
       )
-      self.quantized_variable.value = new_var
+      self.quantized_variable.value = new_var  # pyrefly: ignore[bad-argument-type]
 
   def _should_update_scale(
       self, config: aqt_config.AqtTensorConfig, event_count: jnp.ndarray  #
@@ -368,7 +368,7 @@ class TensorQuantizer(nn.Module):
     # The first time a config is active, even if we freeze scale, we should
     # update the scale.
     was_previously_inactive = not is_config_active(
-        config, self._last_update.value
+        config, self._last_update.value  # pyrefly: ignore[bad-argument-type]
     )
 
     # We rely on jnp.int32.min being an illegal event count value, so that
@@ -396,7 +396,7 @@ class TensorQuantizer(nn.Module):
       shift_before = jnp.array(0.0)
       shift_after = jnp.array(0.0)
 
-      config_active = is_config_active(config, self._last_update.value)
+      config_active = is_config_active(config, self._last_update.value)  # pyrefly: ignore[bad-argument-type]
       config_active = not check_active or config_active
 
       if isinstance(config.quant_config, aqt_config.FloatConfig):
@@ -475,7 +475,7 @@ class TensorQuantizer(nn.Module):
       for config in self.config.tensor_configs:
         if isinstance(config.quant_config, aqt_config.FloatConfig):
           continue
-        config_active = is_config_active(config, self._last_update.value)
+        config_active = is_config_active(config, self._last_update.value)  # pyrefly: ignore[bad-argument-type]
         should_quantize |= config_active
 
     scale = jnp.where(

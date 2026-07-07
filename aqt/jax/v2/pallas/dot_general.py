@@ -91,28 +91,28 @@ def dot_general(
   # only one of operands is quantized.
   is_both_quantized = isinstance(lhs, QTensor) and isinstance(rhs, QTensor)
   if isinstance(lhs, QTensor) and not is_both_quantized:
-    promoted_dtype = jnp.promote_types(lhs.dequant_dtype, rhs)
-    lhs.qvalue = lhs.qvalue.astype(promoted_dtype)
+    promoted_dtype = jnp.promote_types(lhs.dequant_dtype, rhs)  # pyrefly: ignore[bad-argument-type]
+    lhs.qvalue = lhs.qvalue.astype(promoted_dtype)  # pyrefly: ignore[missing-attribute]
   if isinstance(rhs, QTensor) and not is_both_quantized:
-    promoted_dtype = jnp.promote_types(rhs.dequant_dtype, lhs)
-    rhs.qvalue = rhs.qvalue.astype(promoted_dtype)
+    promoted_dtype = jnp.promote_types(rhs.dequant_dtype, lhs)  # pyrefly: ignore[bad-argument-type]
+    rhs.qvalue = rhs.qvalue.astype(promoted_dtype)  # pyrefly: ignore[missing-attribute]
 
   if isinstance(lhs, jax.Array):
     lhs = QTensor(
-        qvalue=lhs, scale=[], scale_t=None, bias=[], dequant_dtype=lhs.dtype
+        qvalue=lhs, scale=[], scale_t=None, bias=[], dequant_dtype=lhs.dtype  # pyrefly: ignore[unexpected-keyword]
     )
   if isinstance(rhs, jax.Array):
     rhs = QTensor(
-        qvalue=rhs, scale=[], scale_t=None, bias=[], dequant_dtype=rhs.dtype
+        qvalue=rhs, scale=[], scale_t=None, bias=[], dequant_dtype=rhs.dtype  # pyrefly: ignore[unexpected-keyword]
     )
 
   if preferred_element_type is None:
     preferred_element_type = jnp.promote_types(
-        lhs.dequant_dtype, rhs.dequant_dtype
+        lhs.dequant_dtype, rhs.dequant_dtype  # pyrefly: ignore[bad-argument-type]
     )
 
-  lhs_bits = _dtype_to_bits(lhs.qvalue.dtype)
-  rhs_bits = _dtype_to_bits(rhs.qvalue.dtype)
+  lhs_bits = _dtype_to_bits(lhs.qvalue.dtype)  # pyrefly: ignore[missing-attribute]
+  rhs_bits = _dtype_to_bits(rhs.qvalue.dtype)  # pyrefly: ignore[missing-attribute]
   cfg = aqt_dot_general.dot_general_raw_make(
       lhs_bits=lhs_bits, rhs_bits=rhs_bits
   )

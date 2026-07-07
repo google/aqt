@@ -158,14 +158,14 @@ def compute_bleu(reference_corpus,
   smooth = 1.0
   for i in range(0, max_order):
     if possible_matches_by_order[i] > 0:
-      precisions[i] = matches_by_order[i] / possible_matches_by_order[i]
+      precisions[i] = matches_by_order[i] / possible_matches_by_order[i]  # pyrefly: ignore[unsupported-operation]
       if matches_by_order[i] > 0:
-        precisions[i] = matches_by_order[i] / possible_matches_by_order[i]
+        precisions[i] = matches_by_order[i] / possible_matches_by_order[i]  # pyrefly: ignore[unsupported-operation]
       else:
         smooth *= 2
-        precisions[i] = 1.0 / (smooth * possible_matches_by_order[i])
+        precisions[i] = 1.0 / (smooth * possible_matches_by_order[i])  # pyrefly: ignore[unsupported-operation]
     else:
-      precisions[i] = 0.0
+      precisions[i] = 0.0  # pyrefly: ignore[unsupported-operation]
 
   if max(precisions) > 0:
     p_log_sum = sum(math.log(p) for p in precisions if p)

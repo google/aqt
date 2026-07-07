@@ -60,7 +60,7 @@ def quant(
   if calibration_axes is None:
     quantizer.calib_shared_axes = "per_tensor"
   if use_dummy_static_bound:
-    quantizer.calibration = functools.partial(
+    quantizer.calibration = functools.partial(  # pyrefly: ignore[bad-assignment]
         calibration.ConstantCalibration, bound=1.0
     )
   qx, _ = quantizer.quant(x, calibration_axes=calibration_axes)

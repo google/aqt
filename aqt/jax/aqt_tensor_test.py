@@ -39,12 +39,12 @@ class StatsTest(aqt_stats_test_base.StatsTest):
     self.override_ema_update_count = None
 
   def update(self, sample, weight):
-    _, self._stats_state = self._stats.apply(
+    _, self._stats_state = self._stats.apply(  # pyrefly: ignore[missing-attribute]
         self._stats_state,
         f32(sample),
         f32(weight),
         override_ema_update_count=self.override_ema_update_count,
-        method=self._stats.update,
+        method=self._stats.update,  # pyrefly: ignore[missing-attribute]
         mutable=["aqt"])
 
   def get_sum_of_ones(self):

@@ -144,7 +144,7 @@ def train_step(model, state, batch, hparams, update_bounds, quantize_weights,
     # state should be restored.
     new_state = new_state.replace(
         opt_state=jax.tree.map(
-            functools.partial(jnp.where, is_fin),
+            functools.partial(jnp.where, is_fin),  # pyrefly: ignore[unbound-name]
             new_state.opt_state,
             state.opt_state),
         params=jax.tree.map(

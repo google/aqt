@@ -84,9 +84,9 @@ def write_hparams_to_file_with_host_id_check(hparams,
     # no-op if it already exists.
 
 
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)  # pyrefly: ignore[bad-argument-type]
     save_dataclass_to_disk(hparams,
-                           os.path.join(output_dir, 'hparams_config.json'))
+                           os.path.join(output_dir, 'hparams_config.json'))  # pyrefly: ignore[no-matching-overload]
 
 
 def load_dataclass_from_dict(dataclass_name: Type[T],
@@ -137,9 +137,9 @@ def _convert_lists_to_tuples(node: T) -> T:
   """
 
   if isinstance(node, dict):
-    return {key: _convert_lists_to_tuples(value) for key, value in node.items()}
+    return {key: _convert_lists_to_tuples(value) for key, value in node.items()}  # pyrefly: ignore[bad-return]
   elif isinstance(node, (list, tuple)):
-    return tuple([_convert_lists_to_tuples(value) for value in node])
+    return tuple([_convert_lists_to_tuples(value) for value in node])  # pyrefly: ignore[bad-return]
   else:
     return node
 
@@ -180,7 +180,7 @@ def load_hparams_from_config_dict(hparams_classname: Type[T],
   """
 
   hparams = load_dataclass_from_config_dict(hparams_classname, config_dict)
-  hparams.model_hparams = load_dataclass_from_dict(model_classname,
+  hparams.model_hparams = load_dataclass_from_dict(model_classname,  # pyrefly: ignore[missing-attribute]
                                                    hparams.model_hparams)
   return hparams
 

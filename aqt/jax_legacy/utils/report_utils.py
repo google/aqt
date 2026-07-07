@@ -395,7 +395,7 @@ def compute_agg_metrics_from_events(
     all_metrics_smoothed = get_agg_metrics_at_step(
         all_events=all_events,
         step=early_stop_step,
-        smoothing_kernel_fn=smoothing_kernel_func)
+        smoothing_kernel_fn=smoothing_kernel_func)  # pyrefly: ignore[unbound-name]
   else:
     all_metrics_smoothed = None
 
@@ -475,7 +475,7 @@ def create_end_of_training_report(
           'provided.')
 
     early_stop_events = tfevent_utils.get_parsed_tfevents(
-        os.path.join(model_dir, early_stop_ds_dir), tags_to_include)
+        os.path.join(model_dir, early_stop_ds_dir), tags_to_include)  # pyrefly: ignore[bad-argument-type]
     early_stop_component = early_stop_ds_dir
     all_events[early_stop_component] = early_stop_events
 
@@ -483,14 +483,14 @@ def create_end_of_training_report(
       for ds_dir in other_ds_dirs:
         if ds_dir is not None:
           all_events[ds_dir] = tfevent_utils.get_parsed_tfevents(
-              os.path.join(model_dir, ds_dir), tags_to_include)
+              os.path.join(model_dir, ds_dir), tags_to_include)  # pyrefly: ignore[bad-argument-type]
   else:
     # If no subdirs provided, will assume that there are no subcomponents.
     # For consistency with the case when we do have components, we store the
     # events under the dummy component 'all'.
     early_stop_component = 'all'
     all_events[early_stop_component] = tfevent_utils.get_parsed_tfevents(
-        model_dir, tags_to_include)
+        model_dir, tags_to_include)  # pyrefly: ignore[bad-argument-type]
 
   all_agg_metrics_unsmoothed, all_agg_metrics_smoothed, early_stop_step, first_nan_step = compute_agg_metrics_from_events(
       all_events=all_events,

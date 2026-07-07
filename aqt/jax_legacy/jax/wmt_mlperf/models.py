@@ -40,7 +40,7 @@ def hardware_bernoulli(rng_key, p=np.float32(0.5), shape=None):
 
 
 def set_hardware_bernoulli():
-  jax.random.bernoulli = hardware_bernoulli
+  jax.random.bernoulli = hardware_bernoulli  # pyrefly: ignore[bad-assignment]
 
 
 def shift_right(x, axis=1):
@@ -485,9 +485,9 @@ class Encoder(nn.Module):
         block_template: Encoder1DBlock.HParams,
         layer_norm: aqt_flax_layers.LayerNormAqt.HParams, num_layers: int) -> T:
       return cls(
-          embedding=embedding,
-          layer_norm=layer_norm,
-          encoder_1d_blocks=tuple(
+          embedding=embedding,  # pyrefly: ignore[unexpected-keyword]
+          layer_norm=layer_norm,  # pyrefly: ignore[unexpected-keyword]
+          encoder_1d_blocks=tuple(  # pyrefly: ignore[unexpected-keyword]
               copy.deepcopy(block_template) for _ in range(num_layers)))
 
   vocab_size: int
@@ -632,11 +632,11 @@ class Decoder(nn.Module):
         layer_norm: aqt_flax_layers.LayerNormAqt.HParams,
         logits: Optional[aqt_flax_layers.DenseAqt.HParams] = None) -> T:
       return cls(
-          embedding=embedding,
-          layer_norm=layer_norm,
-          encoder_decoder_1d_blocks=tuple(
+          embedding=embedding,  # pyrefly: ignore[unexpected-keyword]
+          layer_norm=layer_norm,  # pyrefly: ignore[unexpected-keyword]
+          encoder_decoder_1d_blocks=tuple(  # pyrefly: ignore[unexpected-keyword]
               copy.deepcopy(block_template) for _ in range(num_layers)),
-          logits=logits)
+          logits=logits)  # pyrefly: ignore[unexpected-keyword]
 
   output_vocab_size: int
   hparams: HParams
@@ -853,7 +853,7 @@ class Transformer(nn.Module):
         assert self.output_vocab_size == self.vocab_size, (
             "can't share embedding with different vocab sizes.")
       self.shared_embedding = aqt_flax_layers.EmbedAqt(  # pylint: disable=missing-from-attributes
-          num_embeddings=self.vocab_size,
+          num_embeddings=self.vocab_size,  # pyrefly: ignore[bad-argument-type]
           features=self.hparams.emb_dim,
           hparams=self.hparams.encoder.embedding,
           dtype=dtype,
@@ -867,7 +867,7 @@ class Transformer(nn.Module):
 
     self.encoder = Encoder(  # pylint: disable=missing-from-attributes
         hparams=self.hparams.encoder,
-        vocab_size=self.vocab_size,
+        vocab_size=self.vocab_size,  # pyrefly: ignore[bad-argument-type]
         shared_embedding=self.shared_embedding,
         use_bfloat16=self.use_bfloat16,
         emb_dim=self.hparams.emb_dim,
@@ -883,7 +883,7 @@ class Transformer(nn.Module):
 
     self.decoder = Decoder(  # pylint: disable=missing-from-attributes
         hparams=self.hparams.decoder,
-        output_vocab_size=self.output_vocab_size,
+        output_vocab_size=self.output_vocab_size,  # pyrefly: ignore[bad-argument-type]
         shared_embedding=self.shared_embedding,
         logits_via_embedding=self.hparams.logits_via_embedding,
         use_bfloat16=self.use_bfloat16,

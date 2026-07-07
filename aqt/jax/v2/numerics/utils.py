@@ -26,23 +26,23 @@ def get_numerics(
   if bits is None:
     effective_numerics = no_numerics.NoNumerics()
   elif bits in fp8_numerics.fp8_map.keys():
-    exponent_bits, mantissa_bits = int(bits[1]), int(bits[3])
+    exponent_bits, mantissa_bits = int(bits[1]), int(bits[3])  # pyrefly: ignore[bad-index]
     effective_numerics = fp8_numerics.Fp8Numerics(
-        exponent_bits=exponent_bits,
-        mantissa_bits=mantissa_bits,
-        dtype=fp8_numerics.fp8_map[bits],
+        exponent_bits=exponent_bits,  # pyrefly: ignore[unexpected-keyword]
+        mantissa_bits=mantissa_bits,  # pyrefly: ignore[unexpected-keyword]
+        dtype=fp8_numerics.fp8_map[bits],  # pyrefly: ignore[bad-index, unexpected-keyword]
     )
   else:
     pz = False if bits == 1 else True
-    dtype = utils.infer_dtype_from_bits(bits) if pz else None
+    dtype = utils.infer_dtype_from_bits(bits) if pz else None  # pyrefly: ignore[bad-argument-type]
     effective_numerics = int_numerics.IntSymmetric(
-        bits=bits,
-        preserve_zero=pz,
-        preserve_max_val=preserve_max_val,
-        clip=True,
-        round=True,
-        noise_fn=None,
-        clip_gradient=False,  # Can be disabled when using abs-max scaling.
-        dtype=dtype,
+        bits=bits,  # pyrefly: ignore[unexpected-keyword]
+        preserve_zero=pz,  # pyrefly: ignore[unexpected-keyword]
+        preserve_max_val=preserve_max_val,  # pyrefly: ignore[unexpected-keyword]
+        clip=True,  # pyrefly: ignore[unexpected-keyword]
+        round=True,  # pyrefly: ignore[unexpected-keyword]
+        noise_fn=None,  # pyrefly: ignore[unexpected-keyword]
+        clip_gradient=False,  # Can be disabled when using abs-max scaling.  # pyrefly: ignore[unexpected-keyword]
+        dtype=dtype,  # pyrefly: ignore[unexpected-keyword]
     )
   return effective_numerics

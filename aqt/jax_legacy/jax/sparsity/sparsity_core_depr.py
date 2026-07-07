@@ -180,7 +180,7 @@ def sr_ste_fwd(
       apply_mask, lambda: jnp.multiply(updated_mask, inputs), lambda: inputs
   )
   # pylint:enable=g-long-lambda
-  return (
+  return (  # pyrefly: ignore[bad-return]
       updated_inputs,
       updated_mask,  # pytype: disable=bad-return-type  # jax-ndarray
       jnp.array(SparseHParams.sparse_ste_weight),
@@ -240,8 +240,8 @@ class Sparsity(nn.Module):
       return inputs
 
     if self.sparsity_hparams.type == 'STRUCTURED_NM':
-      n_sparsity = self.sparsity_hparams.prune_rate[0]
-      m_sparsity = self.sparsity_hparams.prune_rate[1]
+      n_sparsity = self.sparsity_hparams.prune_rate[0]  # pyrefly: ignore[bad-index]
+      m_sparsity = self.sparsity_hparams.prune_rate[1]  # pyrefly: ignore[bad-index]
       if self.sparsity_hparams.structure_decay:
         if num_update_sparsity == 1:
           n_sparsity = n_sparsity - 1
@@ -326,7 +326,8 @@ def get_sparsity_mask(
     assert isinstance(
         prune_rate, Tuple
     ), 'prune rate must be tuple for structured sparsity.'
-    assert prune_rate[0] <= prune_rate[1], (
+    assert prune_rate[0] <= prune_rate[1], (  # pyrefly: ignore[bad-index]
+        # pyrefly: ignore[bad-index]
         'prune_rate[0] must be lower than prune_rate[1] for N:M'
         f' ({prune_rate[0]}:{prune_rate[1]}) sparsity.'
     )

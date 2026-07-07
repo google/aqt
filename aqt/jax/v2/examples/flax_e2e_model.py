@@ -97,8 +97,8 @@ class CNN(nn.Module):
         ),
     )
 
-    aqt_dg = self.get_flax_cls(self.aqt_cfg_dg, tiling_cfg=tiling_cfg)
-    aqt_conv = self.get_flax_cls(self.aqt_cfg_conv)
+    aqt_dg = self.get_flax_cls(self.aqt_cfg_dg, tiling_cfg=tiling_cfg)  # pyrefly: ignore[bad-argument-type]
+    aqt_conv = self.get_flax_cls(self.aqt_cfg_conv)  # pyrefly: ignore[bad-argument-type]
 
     use_running_avg = not self.bn_use_stats
     x = nn.Conv(
@@ -121,7 +121,7 @@ class CNN(nn.Module):
     # activation's channelwise config should be set to 'per_tensor'.
     aqt_cfg_rhs_activation = copy.deepcopy(self.aqt_cfg_dg)
     if self.aqt_cfg_dg is not None:
-      aqt_cfg_rhs_activation.fwd.dg_quantizer.swap_lhs_and_rhs()
+      aqt_cfg_rhs_activation.fwd.dg_quantizer.swap_lhs_and_rhs()  # pyrefly: ignore[missing-attribute]
 
     identity = jnp.identity(10, dtype=x.dtype)
     einsum = aqt_flax.AqtEinsum(
@@ -376,7 +376,7 @@ def serving_conversion(
       use_legacy_freezer=legacy_for_serve,
   )
 
-  return cnn_serve.apply, model_serving
+  return cnn_serve.apply, model_serving  # pyrefly: ignore[bad-return]
 
 
 def _merge_pytrees(from_model, to_model):
@@ -531,7 +531,7 @@ def serve_fn_hlo(state):
   serve_fn, model_serving = serving_conversion(state)
   # The following XLA graph is only needed for debugging purpose
   hlo = (
-      jax.jit(serve_fn)
+      jax.jit(serve_fn)  # pyrefly: ignore[missing-attribute]
       .lower(
           model_serving,
           sample_image,

@@ -271,7 +271,7 @@ def get_config(n_layers: int, use_auto_acts: bool,
           for _ in range(n_layers)
       ]
   }
-  config_schema_utils.set_default_reference(model_hparams.encoder, base_config,
+  config_schema_utils.set_default_reference(model_hparams.encoder, base_config,  # pyrefly: ignore[bad-argument-type]
                                             "embedding")
   model_hparams.decoder = {
       "encoder_decoder_1d_blocks": [
@@ -279,10 +279,10 @@ def get_config(n_layers: int, use_auto_acts: bool,
           for _ in range(n_layers)
       ]
   }
-  config_schema_utils.set_default_reference(model_hparams.decoder, base_config,
+  config_schema_utils.set_default_reference(model_hparams.decoder, base_config,  # pyrefly: ignore[bad-argument-type]
                                             "embedding")
 
   config_schema_utils.set_default_reference(
-      model_hparams.decoder, base_config, "logits", parent_field="dense")
+      model_hparams.decoder, base_config, "logits", parent_field="dense")  # pyrefly: ignore[bad-argument-type]
   base_config.lock()
   return base_config

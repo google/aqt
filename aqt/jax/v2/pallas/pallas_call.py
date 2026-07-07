@@ -44,7 +44,7 @@ def _transpose_tensor_for_memory_saving(
     arg: Any, block_spec: BlockSpec
 ) -> ArgAndBlockSpec:
   """Transposes tensor for memory optimization."""
-  arg, block_spec = pallas_tensor.transpose_tensor_for_memory_saving(
+  arg, block_spec = pallas_tensor.transpose_tensor_for_memory_saving(  # pyrefly: ignore[bad-assignment]
       arg, block_spec
   )
   return ArgAndBlockSpec(arg, block_spec)

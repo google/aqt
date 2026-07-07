@@ -31,7 +31,7 @@ def _set_static_range_calib_options(aqt_cfg: aqt_config.DotGeneral) -> None:
       aqt_flax_calibration.MeanOfAbsMaxCalibration, quant_collection='qc'
   )
   aqt_config.set_fwd_calibration(aqt_cfg, sr_calibration_cls)
-  aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = 'per_tensor'
+  aqt_cfg.fwd.dg_quantizer.lhs.calib_shared_axes = 'per_tensor'  # pyrefly: ignore[missing-attribute]
 
 
 def run(train_ds: dict[str, jax.Array], test_ds: dict[str, jax.Array]) -> None:

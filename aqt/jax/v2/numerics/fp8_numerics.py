@@ -69,7 +69,7 @@ class Fp8Numerics(numerics.AqtNumerics):
   """Numerics for fp8."""
 
   # Storage type.
-  dtype: Literal[jnp.float8_e4m3fn, jnp.float8_e5m2, jnp.bfloat16]
+  dtype: Literal[jnp.float8_e4m3fn, jnp.float8_e5m2, jnp.bfloat16]  # pyrefly: ignore[invalid-literal]
 
   # Requested rounding precision.
   exponent_bits: int = 4

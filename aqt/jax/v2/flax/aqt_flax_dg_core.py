@@ -108,8 +108,8 @@ def dg_core_flax_lifted(
       g,
   ):
     """Lifted custom vjp_bwd."""
-    res, params = res
-    tangents = aqt_dot_general.dg_core_vjp_bwd(fwd_dimension_numbers, res, g)
+    res, params = res  # pyrefly: ignore[bad-assignment]
+    tangents = aqt_dot_general.dg_core_vjp_bwd(fwd_dimension_numbers, res, g)  # pyrefly: ignore[bad-argument-type]
 
     return params, *tangents
 

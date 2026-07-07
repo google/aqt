@@ -175,7 +175,7 @@ def intercept_methods_replace_dot_general(
     Returns:
       The result of original function, with dot general scope.
     """
-    layer_path = '/'.join(context.module.scope.path)
+    layer_path = '/'.join(context.module.scope.path)  # pyrefly: ignore[missing-attribute]
     if layer_path not in dot_general_cache:
       if not context.module._initialization_allowed:  # pylint: disable=protected-access
         raise ValueError(

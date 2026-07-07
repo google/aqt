@@ -69,22 +69,22 @@ class PallasTensorTest(parameterized.TestCase):
       index_and_expected_index,
   ):
     qt = QTensor(
-        qvalue=jnp.ones(qvalue_shape, dtype=jnp.int8),
-        scale=[jnp.ones(scale_shape, dtype=jnp.float32)],
-        scale_t=None,
-        bias=[],
-        dequant_dtype=jnp.float32,
+        qvalue=jnp.ones(qvalue_shape, dtype=jnp.int8),  # pyrefly: ignore[unexpected-keyword]
+        scale=[jnp.ones(scale_shape, dtype=jnp.float32)],  # pyrefly: ignore[unexpected-keyword]
+        scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+        bias=[],  # pyrefly: ignore[unexpected-keyword]
+        dequant_dtype=jnp.float32,  # pyrefly: ignore[unexpected-keyword]
     )
     block_spec = pl.BlockSpec(block_shape, lambda *args: args)
     qt_block_spec = pallas_tensor.make_qtensor_blockspec(qt, block_spec)
 
     self.assertEqual(qt_block_spec.qvalue, block_spec)
     self.assertEqual(
-        qt_block_spec.scale[0].block_shape, expected_scale_block_shape
+        qt_block_spec.scale[0].block_shape, expected_scale_block_shape  # pyrefly: ignore[unsupported-operation]
     )
 
     index, expected_index = index_and_expected_index
-    self.assertEqual(qt_block_spec.scale[0].index_map(*index), expected_index)
+    self.assertEqual(qt_block_spec.scale[0].index_map(*index), expected_index)  # pyrefly: ignore[unsupported-operation]
 
   @parameterized.named_parameters(
       dict(
@@ -146,7 +146,7 @@ class PallasTensorTest(parameterized.TestCase):
           expected_block_shape,
       )
     else:
-      self.assertTrue((transposed_t == t).all())
+      self.assertTrue((transposed_t == t).all())  # pyrefly: ignore[missing-attribute]
       self.assertEqual(transposed_block_spec, block_spec)
 
 

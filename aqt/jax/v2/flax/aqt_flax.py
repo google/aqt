@@ -77,7 +77,7 @@ def _freezer_qtensor_init_wrapper(
   def _get_singleton_axes(x: jnp.ndarray) -> list[utils.AxisIdx]:
     return [axis for axis, dim in enumerate(x.shape) if dim == 1]
 
-  qt.qvalue = axis_metadata_wrapper(qt.qvalue, tile_map, [])
+  qt.qvalue = axis_metadata_wrapper(qt.qvalue, tile_map, [])  # pyrefly: ignore[bad-argument-type]
   qt.scale = jax.tree.map(
       lambda x: axis_metadata_wrapper(
           x, tile_map, scale_non_shard_axis_contracting
@@ -194,14 +194,14 @@ class Freezer(nn.Module):
       return None
     elif self.quant_mode == QuantMode.SERVE:
       return aqt_tensor.QTensor(
-          qvalue=self.qvalue.value,
-          scale=None,
-          scale_t=[self.scale_t.value],
-          bias=[],
+          qvalue=self.qvalue.value,  # pyrefly: ignore[unexpected-keyword]
+          scale=None,  # pyrefly: ignore[unexpected-keyword]
+          scale_t=[self.scale_t.value],  # pyrefly: ignore[unexpected-keyword]
+          bias=[],  # pyrefly: ignore[unexpected-keyword]
           # TODO(lew): Ideal solution: To find out this dequant_dtype one should
           # use the dtype of inputs of the quant function. We should store it as
           # a dtype of small-sized scale tensor.
-          dequant_dtype=self.scale_t.value.dtype,
+          dequant_dtype=self.scale_t.value.dtype,  # pyrefly: ignore[unexpected-keyword]
       )
     else:
       assert False, 'Unknown quant mode.'
@@ -221,7 +221,7 @@ class Freezer(nn.Module):
     elif self.quant_mode == QuantMode.CALIBRATE:
       pass
     elif self.quant_mode == QuantMode.CONVERT:
-      self.qvalue.value = inputs.qvalue
+      self.qvalue.value = inputs.qvalue  # pyrefly: ignore[bad-argument-type]
       assert inputs.scale_t is not None and len(inputs.scale_t) == 1
       self.scale_t.value = inputs.scale_t[0]
     elif self.quant_mode == QuantMode.SERVE:
@@ -241,7 +241,7 @@ def _maybe_recover_scale_from_scale_t(
 ) -> aqt_tensor.QTensor:
   """Recovers scale from scale_t if necessary."""
   if qt is None or qt.scale is not None or qt.scale_t is None:
-    return qt
+    return qt  # pyrefly: ignore[bad-return]
 
   transpose_fn = transpose.lhs_recover_scale_from_scale_t
   if is_rhs:
@@ -637,14 +637,14 @@ class AqtEinsum(nn.Module):
     # will be overwritten by get_tensor()
     # TODO(lew): We can pass QTensor to lax_numpy._einsum if we add some
     # specific methods to QTensor.
-    lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g
-    rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g
+    lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g  # pyrefly: ignore[missing-attribute]
+    rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g  # pyrefly: ignore[missing-attribute]
 
     # Set the types of dummy input to the same as original input, to prevent it
     # from being rejected by assertions in aqt_dot_general.py, line 522-526 and
     # 414.
 
-    lhs_in, rhs_in = aqt_promote_dtype(lhs_in, rhs_in)
+    lhs_in, rhs_in = aqt_promote_dtype(lhs_in, rhs_in)  # pyrefly: ignore[bad-argument-type]
 
     # yes_swap = whether einsum swaps [lhs,rhs] when passing them to dot_general
     einsum = functools.partial(aqt_dot_general.einsum, eqn=eqn)
@@ -715,14 +715,14 @@ class AqtEinsum(nn.Module):
         lhs_axis_metadata_wrapper=lhs_axis_metadata_wrapper,
         lhs_scale_init=lhs_scale_init,
         lhs_var_name=lhs_var_name,
-        lhs_qtensor=lhs_qtensor,
+        lhs_qtensor=lhs_qtensor,  # pyrefly: ignore[bad-argument-type]
         rhs_quant_mode=rhs_quant_mode,
         rhs_apply_quant_mode=not rhs_is_qt,  # Freezer not used if rhs is qt
         rhs_init=rhs_init,
         rhs_axis_metadata_wrapper=rhs_axis_metadata_wrapper,
         rhs_scale_init=rhs_scale_init,
         rhs_var_name=rhs_var_name,
-        rhs_qtensor=rhs_qtensor,
+        rhs_qtensor=rhs_qtensor,  # pyrefly: ignore[bad-argument-type]
         quant_collection=quant_collection,
         tiling_cfg=tiling_config,
         use_legacy_freezer=self.use_legacy_freezer,

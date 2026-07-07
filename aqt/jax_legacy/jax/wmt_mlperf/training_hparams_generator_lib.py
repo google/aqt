@@ -186,9 +186,9 @@ class BaseConfig:
   @classmethod
   def create_from_flags(cls: Type[T]) -> T:
     return cls(
-        size=FLAGS.base_config_size,
-        prec=parse_base_config_prec(FLAGS.base_config_prec),
-        quant_target=FLAGS.base_config_quant_target)
+        size=FLAGS.base_config_size,  # pyrefly: ignore[unexpected-keyword]
+        prec=parse_base_config_prec(FLAGS.base_config_prec),  # pyrefly: ignore[unexpected-keyword]
+        quant_target=FLAGS.base_config_quant_target)  # pyrefly: ignore[unexpected-keyword]
 
 
 class ConfigGenerator(enum.Enum):
@@ -241,11 +241,11 @@ def parse_base_config_prec(prec: Optional[str]) -> QuantOps.PrecT:
     if not match_value:
       raise ValueError(f'Failed to parse precision {prec}.') from valueerror
     return QuantOps.FloatQuant(
-        is_scaled=match_value.group(1) == 'true',
-        fp_spec=QuantOps.FloatQuant.FloatPrec(
-            exp_min=int(match_value.group(2)),
-            exp_max=int(match_value.group(3)),
-            sig_bits=int(match_value.group(4))))
+        is_scaled=match_value.group(1) == 'true',  # pyrefly: ignore[unexpected-keyword]
+        fp_spec=QuantOps.FloatQuant.FloatPrec(  # pyrefly: ignore[unexpected-keyword]
+            exp_min=int(match_value.group(2)),  # pyrefly: ignore[unexpected-keyword]
+            exp_max=int(match_value.group(3)),  # pyrefly: ignore[unexpected-keyword]
+            sig_bits=int(match_value.group(4))))  # pyrefly: ignore[unexpected-keyword]
 
 
 FLAGS = flags.FLAGS
@@ -346,98 +346,98 @@ def create_base_transformer_hparams(
       configuration of an encoder-decoder transformer.
   """
   embedding = aqt_flax_layers.EmbedAqt.HParams(
-      weight_prec=embedding_weight_prec,
-      weight_half_shift=half_shift,
-      quant_act=QuantOps.ActHParams(
-          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=logits_inputs_prec,
-          half_shift=half_shift,
-          bounds=logits_inputs_hyper),
-      quant_type=quant_type)
+      weight_prec=embedding_weight_prec,  # pyrefly: ignore[unexpected-keyword]
+      weight_half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+      quant_act=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[unexpected-keyword]
+          prec=logits_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=logits_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      quant_type=quant_type)  # pyrefly: ignore[unexpected-keyword]
   # TODO(malmaud): Add flags to control weight_quant_granularity here and below.
   attention_kqv_dense = aqt_flax_layers.DenseAqt.HParams(
-      weight_prec=attention_weight_prec,
-      weight_half_shift=half_shift,
-      quant_act=QuantOps.ActHParams(
-          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=attention_kqv_inputs_prec,
-          half_shift=half_shift,
-          bounds=attention_kqv_inputs_hyper),
-      quant_type=quant_type,
-      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)
+      weight_prec=attention_weight_prec,  # pyrefly: ignore[unexpected-keyword]
+      weight_half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+      quant_act=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[unexpected-keyword]
+          prec=attention_kqv_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=attention_kqv_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      quant_type=quant_type,  # pyrefly: ignore[unexpected-keyword]
+      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)  # pyrefly: ignore[unexpected-keyword]
   attention_out_dense = aqt_flax_layers.DenseAqt.HParams(
-      weight_prec=attention_weight_prec,
-      weight_half_shift=half_shift,
-      quant_act=QuantOps.ActHParams(
-          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=attention_out_inputs_prec,
-          half_shift=half_shift,
-          bounds=attention_out_inputs_hyper),
-      quant_type=quant_type,
-      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)
+      weight_prec=attention_weight_prec,  # pyrefly: ignore[unexpected-keyword]
+      weight_half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+      quant_act=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[unexpected-keyword]
+          prec=attention_out_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=attention_out_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      quant_type=quant_type,  # pyrefly: ignore[unexpected-keyword]
+      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)  # pyrefly: ignore[unexpected-keyword]
 
   # TODO(b/169178846): We are quantizing attention_act_probs with unsigned
   # fixed bounds equal to [0.0, 1.0] to match the range of softmax, since
   # attn_act_probs is Softmax(Q*K) .
   attention_act_probs_inputs_hyper = 1.0
   dot_product_attention = aqt_flax_attention.DotProductAttnHParams(
-      attn_act_q=QuantOps.ActHParams(
-          QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=attention_act_q_inputs_prec,
-          half_shift=half_shift,
-          bounds=attention_act_q_inputs_hyper),
-      attn_act_k=QuantOps.ActHParams(
-          QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=attention_act_k_inputs_prec,
-          half_shift=half_shift,
-          bounds=attention_act_k_inputs_hyper),
-      attn_act_probs=QuantOps.ActHParams(
-          QuantOps.ActHParams.InputDistribution.POSITIVE,
-          prec=attention_act_probs_inputs_prec,
-          half_shift=half_shift,
-          bounds=attention_act_probs_inputs_hyper),
-      attn_act_v=QuantOps.ActHParams(
-          QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=attention_act_v_inputs_prec,
-          half_shift=half_shift,
-          bounds=attention_act_v_inputs_hyper),
-      quant_type=quant_type,
-      softmax=None)
+      attn_act_q=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[bad-argument-count]
+          prec=attention_act_q_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=attention_act_q_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      attn_act_k=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[bad-argument-count]
+          prec=attention_act_k_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=attention_act_k_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      attn_act_probs=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          QuantOps.ActHParams.InputDistribution.POSITIVE,  # pyrefly: ignore[bad-argument-count]
+          prec=attention_act_probs_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=attention_act_probs_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      attn_act_v=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[bad-argument-count]
+          prec=attention_act_v_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=attention_act_v_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      quant_type=quant_type,  # pyrefly: ignore[unexpected-keyword]
+      softmax=None)  # pyrefly: ignore[unexpected-keyword]
   # TODO(malmaud): Move these other create_from* methods to this file.
 
   attention = aqt_flax_attention.MultiHeadDotProductAttentionAqt.HParams(
-      dense_kqv=attention_kqv_dense,
-      dense_out=attention_out_dense,
-      attn_acts=dot_product_attention)
+      dense_kqv=attention_kqv_dense,  # pyrefly: ignore[unexpected-keyword]
+      dense_out=attention_out_dense,  # pyrefly: ignore[unexpected-keyword]
+      attn_acts=dot_product_attention)  # pyrefly: ignore[unexpected-keyword]
   dense_1 = aqt_flax_layers.DenseAqt.HParams(
-      weight_prec=mlp_weight_prec,
-      weight_half_shift=half_shift,
-      quant_act=QuantOps.ActHParams(
-          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-          prec=mlp_signed_inputs_prec,
-          half_shift=half_shift,
-          bounds=mlp_signed_inputs_hyper),
-      quant_type=quant_type,
-      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)
+      weight_prec=mlp_weight_prec,  # pyrefly: ignore[unexpected-keyword]
+      weight_half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+      quant_act=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[unexpected-keyword]
+          prec=mlp_signed_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=mlp_signed_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      quant_type=quant_type,  # pyrefly: ignore[unexpected-keyword]
+      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)  # pyrefly: ignore[unexpected-keyword]
   dense_2 = aqt_flax_layers.DenseAqt.HParams(
-      weight_prec=mlp_weight_prec,
-      weight_half_shift=half_shift,
-      quant_act=QuantOps.ActHParams(
-          input_distribution=QuantOps.ActHParams.InputDistribution.POSITIVE,
-          prec=mlp_pos_inputs_prec,
-          half_shift=half_shift,
-          bounds=mlp_pos_inputs_hyper),
-      quant_type=quant_type,
-      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)
-  layer_norm = aqt_flax_layers.LayerNormAqt.HParams(quant_hparams=None)
-  mlp_block = models.MlpBlock.HParams(dense_1=dense_1, dense_2=dense_2)
+      weight_prec=mlp_weight_prec,  # pyrefly: ignore[unexpected-keyword]
+      weight_half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+      quant_act=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+          input_distribution=QuantOps.ActHParams.InputDistribution.POSITIVE,  # pyrefly: ignore[unexpected-keyword]
+          prec=mlp_pos_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+          half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+          bounds=mlp_pos_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+      quant_type=quant_type,  # pyrefly: ignore[unexpected-keyword]
+      weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)  # pyrefly: ignore[unexpected-keyword]
+  layer_norm = aqt_flax_layers.LayerNormAqt.HParams(quant_hparams=None)  # pyrefly: ignore[unexpected-keyword]
+  mlp_block = models.MlpBlock.HParams(dense_1=dense_1, dense_2=dense_2)  # pyrefly: ignore[unexpected-keyword]
   encoder_block = models.Encoder1DBlock.HParams(
-      mlp_block, attention, layer_norm=layer_norm)
+      mlp_block, attention, layer_norm=layer_norm)  # pyrefly: ignore[bad-argument-count, unexpected-keyword]
   decoder_block = models.EncoderDecoder1DBlock.HParams(
-      mlp_block,
-      self_attention=attention,
-      enc_dec_attention=attention,
-      layer_norm=layer_norm)
+      mlp_block,  # pyrefly: ignore[bad-argument-count]
+      self_attention=attention,  # pyrefly: ignore[unexpected-keyword]
+      enc_dec_attention=attention,  # pyrefly: ignore[unexpected-keyword]
+      layer_norm=layer_norm)  # pyrefly: ignore[unexpected-keyword]
   encoder = models.Encoder.HParams.create_from_block_template(
       embedding=embedding,
       block_template=encoder_block,
@@ -447,15 +447,15 @@ def create_base_transformer_hparams(
     logits_hparams = None
   else:
     logits_hparams = aqt_flax_layers.DenseAqt.HParams(
-        weight_prec=embedding_weight_prec,
-        weight_half_shift=half_shift,
-        quant_act=QuantOps.ActHParams(
-            input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,
-            prec=logits_inputs_prec,
-            half_shift=half_shift,
-            bounds=logits_inputs_hyper),
-        quant_type=quant_type,
-        weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)
+        weight_prec=embedding_weight_prec,  # pyrefly: ignore[unexpected-keyword]
+        weight_half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+        quant_act=QuantOps.ActHParams(  # pyrefly: ignore[unexpected-keyword]
+            input_distribution=QuantOps.ActHParams.InputDistribution.SYMMETRIC,  # pyrefly: ignore[unexpected-keyword]
+            prec=logits_inputs_prec,  # pyrefly: ignore[unexpected-keyword]
+            half_shift=half_shift,  # pyrefly: ignore[unexpected-keyword]
+            bounds=logits_inputs_hyper),  # pyrefly: ignore[unexpected-keyword]
+        quant_type=quant_type,  # pyrefly: ignore[unexpected-keyword]
+        weight_quant_granularity=quant_config.QuantGranularity.PER_CHANNEL)  # pyrefly: ignore[unexpected-keyword]
   decoder = models.Decoder.HParams.create_from_block_template(
       embedding=embedding,
       block_template=decoder_block,
@@ -463,14 +463,14 @@ def create_base_transformer_hparams(
       logits=logits_hparams,
       layer_norm=layer_norm)
   return models.Transformer.HParams(
-      encoder=encoder,
-      decoder=decoder,
-      emb_dim=emb_dim,
-      num_heads=num_heads,
-      qkv_dim=qkv_dim,
-      mlp_dim=mlp_dim,
-      share_embeddings=True,
-      logits_via_embedding=logits_via_embeddings,
+      encoder=encoder,  # pyrefly: ignore[unexpected-keyword]
+      decoder=decoder,  # pyrefly: ignore[unexpected-keyword]
+      emb_dim=emb_dim,  # pyrefly: ignore[unexpected-keyword]
+      num_heads=num_heads,  # pyrefly: ignore[unexpected-keyword]
+      qkv_dim=qkv_dim,  # pyrefly: ignore[unexpected-keyword]
+      mlp_dim=mlp_dim,  # pyrefly: ignore[unexpected-keyword]
+      share_embeddings=True,  # pyrefly: ignore[unexpected-keyword]
+      logits_via_embedding=logits_via_embeddings,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -590,12 +590,12 @@ def create_training_hparams_from_base_config(
     raise ValueError(f'Unknown quantization target {base_config.quant_target}')
 
   learning_rate_scheduler_hparams = training_hparams.LearningRateSchedulerHParams(
-      factors='constant * linear_warmup * rsqrt_decay',
-      base_learning_rate=0.0625,
-      warmup_steps=1000,
-      decay_factor=0.5,
-      steps_per_decay=20000,
-      steps_per_cycle=100000)
+      factors='constant * linear_warmup * rsqrt_decay',  # pyrefly: ignore[unexpected-keyword]
+      base_learning_rate=0.0625,  # pyrefly: ignore[unexpected-keyword]
+      warmup_steps=1000,  # pyrefly: ignore[unexpected-keyword]
+      decay_factor=0.5,  # pyrefly: ignore[unexpected-keyword]
+      steps_per_decay=20000,  # pyrefly: ignore[unexpected-keyword]
+      steps_per_cycle=100000)  # pyrefly: ignore[unexpected-keyword]
   batch_size = 256
   num_train_steps = 200000
   weight_decay = 0.0
@@ -648,25 +648,25 @@ def create_training_hparams_from_base_config(
   )
 
   metadata = os_hparams_utils.HParamsMetadata(
-      description='', last_updated_time=time.time())
+      description='', last_updated_time=time.time())  # pyrefly: ignore[unexpected-keyword]
 
   return training_hparams.TrainingHParams(
-      metadata=metadata,
-      model_hparams=model_hparams,
-      learning_rate_schedule=learning_rate_scheduler_hparams,
-      weight_decay=weight_decay,
-      per_host_batch_size=batch_size,
-      num_train_steps=num_train_steps,
-      beta1=beta1,
-      beta2=beta2,
-      eps=eps,
-      random_seed=random_seed,
-      hardware_rng=hardware_rng,
-      activation_bound_update_freq=activation_bound_update_freq,
-      activation_bound_start_step=activation_bound_start_step,
-      weight_outlier_regularization=weight_outlier_regularization,
-      weight_outlier_regularization_regex=weight_outlier_regularization_regex,
-      prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,
+      metadata=metadata,  # pyrefly: ignore[unexpected-keyword]
+      model_hparams=model_hparams,  # pyrefly: ignore[unexpected-keyword]
+      learning_rate_schedule=learning_rate_scheduler_hparams,  # pyrefly: ignore[unexpected-keyword]
+      weight_decay=weight_decay,  # pyrefly: ignore[unexpected-keyword]
+      per_host_batch_size=batch_size,  # pyrefly: ignore[unexpected-keyword]
+      num_train_steps=num_train_steps,  # pyrefly: ignore[unexpected-keyword]
+      beta1=beta1,  # pyrefly: ignore[unexpected-keyword]
+      beta2=beta2,  # pyrefly: ignore[unexpected-keyword]
+      eps=eps,  # pyrefly: ignore[unexpected-keyword]
+      random_seed=random_seed,  # pyrefly: ignore[unexpected-keyword]
+      hardware_rng=hardware_rng,  # pyrefly: ignore[unexpected-keyword]
+      activation_bound_update_freq=activation_bound_update_freq,  # pyrefly: ignore[unexpected-keyword]
+      activation_bound_start_step=activation_bound_start_step,  # pyrefly: ignore[unexpected-keyword]
+      weight_outlier_regularization=weight_outlier_regularization,  # pyrefly: ignore[unexpected-keyword]
+      weight_outlier_regularization_regex=weight_outlier_regularization_regex,  # pyrefly: ignore[unexpected-keyword]
+      prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,  # pyrefly: ignore[unexpected-keyword]
   )
 
 

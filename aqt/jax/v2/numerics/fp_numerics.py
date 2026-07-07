@@ -36,252 +36,252 @@ class FpNumericsConfig:
 ## FP6
 ##########
 e5m0_ocp = FpNumericsConfig(
-    nexp=5,
-    minexp=0,
-    nmant=0,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=5,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=0,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e4m1_ocp = FpNumericsConfig(
-    nexp=4,
-    minexp=0,
-    nmant=1,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=4,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=1,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e3m2_ocp = FpNumericsConfig(
-    nexp=3,
-    minexp=0,
-    nmant=2,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=3,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=2,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e2m3_ocp = FpNumericsConfig(
-    nexp=2,
-    minexp=0,
-    nmant=3,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=2,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=3,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e1m4_ocp = FpNumericsConfig(
-    nexp=1,
-    minexp=0,
-    nmant=4,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=1,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=4,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e0m5_ocp = FpNumericsConfig(
-    nexp=0,
-    minexp=0,
-    nmant=5,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=0,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=5,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 ##########
 ## FP5
 ##########
 e4m0_ocp = FpNumericsConfig(
-    nexp=4,
-    minexp=0,
-    nmant=0,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=4,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=0,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e3m1_ocp = FpNumericsConfig(
-    nexp=3,
-    minexp=0,
-    nmant=1,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=3,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=1,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e2m2_ocp = FpNumericsConfig(
-    nexp=2,
-    minexp=0,
-    nmant=2,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=2,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=2,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e1m3_ocp = FpNumericsConfig(
-    nexp=1,
-    minexp=0,
-    nmant=3,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=1,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=3,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e0m4_ocp = FpNumericsConfig(
-    nexp=0,
-    minexp=0,
-    nmant=4,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=0,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=4,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 ##########
 ## FP4
 ##########
 e3m0 = FpNumericsConfig(
-    nexp=3,
-    minexp=0,
-    nmant=0,
-    has_subnormals=False,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=3,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=0,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=False,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e3m0_ocp = FpNumericsConfig(
-    nexp=3,
-    minexp=0,
-    nmant=0,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=3,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=0,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e2m1 = FpNumericsConfig(
-    nexp=2,
-    minexp=0,
-    nmant=1,
-    has_subnormals=False,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=2,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=1,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=False,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e2m1_ocp = FpNumericsConfig(
-    nexp=2,
-    minexp=0,
-    nmant=1,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=2,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=1,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e1m2 = FpNumericsConfig(
-    nexp=1,
-    minexp=0,
-    nmant=2,
-    has_subnormals=False,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=1,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=2,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=False,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e1m2_ocp = FpNumericsConfig(
-    nexp=1,
-    minexp=0,
-    nmant=2,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=1,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=2,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e0m3 = FpNumericsConfig(
-    nexp=0,
-    minexp=0,
-    nmant=3,
-    has_subnormals=False,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=0,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=3,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=False,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 e0m3_ocp = FpNumericsConfig(
-    nexp=0,
-    minexp=0,
-    nmant=3,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=0,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=3,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 ##########
 ## Misc
 ##########
 e1m0 = FpNumericsConfig(
-    nexp=1,
-    minexp=0,
-    nmant=0,
-    has_subnormals=False,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=2,
+    nexp=1,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=0,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=False,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 float8_e4m3fn = FpNumericsConfig(
-    nexp=4,
-    minexp=-6,
-    nmant=3,
-    has_subnormals=True,
-    has_two_nan=True,
-    has_naninf=False,
-    radix=2,
+    nexp=4,  # pyrefly: ignore[unexpected-keyword]
+    minexp=-6,  # pyrefly: ignore[unexpected-keyword]
+    nmant=3,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=True,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 float8_e5m2 = FpNumericsConfig(
-    nexp=5,
-    minexp=-14,
-    nmant=2,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=True,
-    radix=2,
+    nexp=5,  # pyrefly: ignore[unexpected-keyword]
+    minexp=-14,  # pyrefly: ignore[unexpected-keyword]
+    nmant=2,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=True,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 float16 = FpNumericsConfig(
-    nexp=5,
-    minexp=-14,
-    nmant=10,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=True,
-    radix=2,
+    nexp=5,  # pyrefly: ignore[unexpected-keyword]
+    minexp=-14,  # pyrefly: ignore[unexpected-keyword]
+    nmant=10,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=True,  # pyrefly: ignore[unexpected-keyword]
+    radix=2,  # pyrefly: ignore[unexpected-keyword]
 )
 
 RADIX4 = FpNumericsConfig(
-    nexp=3,
-    minexp=0,
-    nmant=0,
-    has_subnormals=True,
-    has_two_nan=False,
-    has_naninf=False,
-    radix=4,
+    nexp=3,  # pyrefly: ignore[unexpected-keyword]
+    minexp=0,  # pyrefly: ignore[unexpected-keyword]
+    nmant=0,  # pyrefly: ignore[unexpected-keyword]
+    has_subnormals=True,  # pyrefly: ignore[unexpected-keyword]
+    has_two_nan=False,  # pyrefly: ignore[unexpected-keyword]
+    has_naninf=False,  # pyrefly: ignore[unexpected-keyword]
+    radix=4,  # pyrefly: ignore[unexpected-keyword]
 )
 
 

@@ -354,7 +354,7 @@ class AqtScheduleConfig(_BaseConfig):
     for i, config in enumerate(self.tensor_configs):
       current_begin = config.begin_at_event
 
-      if previous_end != current_begin and current_begin > 0:
+      if previous_end != current_begin and current_begin > 0:  # pyrefly: ignore[unsupported-operation]
         filled_configs.append(create_float_config(previous_end, current_begin))
 
       filled_configs.append(config)

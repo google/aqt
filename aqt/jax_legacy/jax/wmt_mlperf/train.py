@@ -163,7 +163,7 @@ def create_model(key, input_shape, target_shape,
   model = models.Transformer(
       **transformer_kwargs,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=FLAGS.collect_acts_stats),
+          update_bounds=False, collect_acts_stats=FLAGS.collect_acts_stats),  # pyrefly: ignore[unexpected-keyword]
       hparams=hparams,
       use_bfloat16=False,
       train=False,
@@ -233,7 +233,7 @@ def compute_weighted_cross_entropy(logits,
     Tuple of scalar loss and batch normalizing factor.
   """
   targets = targets.reshape((-1))
-  weights = weights.reshape((-1))
+  weights = weights.reshape((-1))  # pyrefly: ignore[missing-attribute]
   if logits.ndim != targets.ndim + 1:
     raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
                      (str(logits.shape), str(targets.shape)))
@@ -270,7 +270,7 @@ def compute_weighted_accuracy(logits, targets, weights=None):
     Tuple of scalar loss and batch normalizing factor.
   """
   targets = targets.reshape((-1))
-  weights = weights.reshape((-1))
+  weights = weights.reshape((-1))  # pyrefly: ignore[missing-attribute]
   if logits.ndim != targets.ndim + 1:
     raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
                      (str(logits.shape), str(targets.shape)))
@@ -334,7 +334,7 @@ def train_step(optimizer,
   # It's very important to handle PRNG splitting inside the top pmap, rather
   # than handling it outside in the training loop - doing the latter can add
   # bad stalls to the input data transfer.
-  dropout_rng, new_dropout_rng = random.split(dropout_rng)
+  dropout_rng, new_dropout_rng = random.split(dropout_rng)  # pyrefly: ignore[bad-argument-type]
 
   def loss_fn(params):
     """loss function used for training."""
@@ -449,7 +449,7 @@ def get_jax_computation_of_model(transformer_kwargs: Mapping[str, Any],
   model = models.Transformer(
       **transformer_kwargs,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False),
+          update_bounds=False, collect_acts_stats=False),  # pyrefly: ignore[unexpected-keyword]
       train=False,
       hparams=hparams.model_hparams,
       use_bfloat16=False,
@@ -648,7 +648,7 @@ def run_eval(*,
   """Compute evaluation metrics for a given dataset."""
   eval_metrics = []
   eval_iter = iter(ds)
-  dynamic_context = get_dynamic_context(hparams, step, train=False)
+  dynamic_context = get_dynamic_context(hparams, step, train=False)  # pyrefly: ignore[bad-argument-type]
   for _, eval_batch in zip(range(num_steps), eval_iter):
     eval_batch = jax.tree.map(lambda x: x._numpy(), eval_batch)  # pylint: disable=protected-access
     eval_batch = common_utils.shard(eval_batch)
@@ -695,7 +695,7 @@ def initialize_cache(batch_size: int, transformer_kwargs: Dict[str, Any],
       should_decode=True,
       train=False,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False),
+          update_bounds=False, collect_acts_stats=False),  # pyrefly: ignore[unexpected-keyword]
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       use_bfloat16=False).init(
@@ -819,10 +819,10 @@ class TrainingState:
     # inside the main pmap'd training update for performance.
     dropout_rngs = random.split(rng, jax.local_device_count())
     return cls(
-        optimizer=optimizer,
-        flax_state=init_state,
-        dropout_rngs=dropout_rngs,
-        transformer_kwargs=transformer_kwargs)
+        optimizer=optimizer,  # pyrefly: ignore[unexpected-keyword]
+        flax_state=init_state,  # pyrefly: ignore[unexpected-keyword]
+        dropout_rngs=dropout_rngs,  # pyrefly: ignore[unexpected-keyword]
+        transformer_kwargs=transformer_kwargs)  # pyrefly: ignore[unexpected-keyword]
 
   def save_checkpoint(self,
                       *,
@@ -887,11 +887,11 @@ def get_dynamic_context(hparams: training_hparams.TrainingHParams, step: int,
       collect_acts_stats=collect_acts_stats,
       prefer_int8_to_int32_dot=hparams.prefer_int8_to_int32_dot)
   if not train:
-    dynamic_context = dataclasses.replace(dynamic_context, update_bounds=False)
-    dynamic_context = dataclasses.replace(dynamic_context, apply_sparsity=True)
-    dynamic_context = dataclasses.replace(
+    dynamic_context = dataclasses.replace(dynamic_context, update_bounds=False)  # pyrefly: ignore[bad-specialization]
+    dynamic_context = dataclasses.replace(dynamic_context, apply_sparsity=True)  # pyrefly: ignore[bad-specialization]
+    dynamic_context = dataclasses.replace(  # pyrefly: ignore[bad-specialization]
         dynamic_context, update_act_sparsity=True)
-    dynamic_context = dataclasses.replace(
+    dynamic_context = dataclasses.replace(  # pyrefly: ignore[bad-specialization]
         dynamic_context, update_weight_sparsity=False)
   return jax_utils.replicate(dynamic_context)
 
@@ -961,11 +961,11 @@ class Datasets:
         )
     )
     return cls(
-        train_ds=train_ds,
-        eval_ds_dict=eval_ds_dict,
-        train_eval_ds=train_eval_ds,
-        predict_ds_dict=predict_ds_dict,
-        encoder=encoder)
+        train_ds=train_ds,  # pyrefly: ignore[unexpected-keyword]
+        eval_ds_dict=eval_ds_dict,  # pyrefly: ignore[unexpected-keyword]
+        train_eval_ds=train_eval_ds,  # pyrefly: ignore[unexpected-keyword]
+        predict_ds_dict=predict_ds_dict,  # pyrefly: ignore[unexpected-keyword]
+        encoder=encoder)  # pyrefly: ignore[unexpected-keyword]
 
 
 
@@ -989,7 +989,7 @@ def main(argv):
   # Number of local devices for this host.
   n_devices = jax.local_device_count()
 
-  if hparams.per_host_batch_size % n_devices:
+  if hparams.per_host_batch_size % n_devices:  # pyrefly: ignore[unbound-name]
     raise ValueError(
         f'Batch size must be divisible by the number of devices. Got batch '
         f'size {hparams.per_host_batch_size} for {n_devices}.')
@@ -1065,7 +1065,7 @@ def get_state_dict_keys_from_flags():
 
 
 def eval_ds_name_to_summary_dir(eval_dataset_name: str) -> str:
-  return 'eval_' + str('--'.join(os.path.abspath(eval_dataset_name).parts))
+  return 'eval_' + str('--'.join(os.path.abspath(eval_dataset_name).parts))  # pyrefly: ignore[missing-attribute]
 
 
 def does_checkpoint_exist(model_dir: str) -> bool:

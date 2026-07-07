@@ -49,7 +49,7 @@ def main(_):
   hparams = hparams_utils.load_hparams_from_config_dict(
       hparams_config.TrainingHParams, models.ResNet.HParams, config)
 
-  data_dict = dataclasses.asdict(hparams)
+  data_dict = dataclasses.asdict(hparams)  # pyrefly: ignore[bad-argument-type]
 
   if FLAGS.output_dir is not None:
     output_path = os.path.join(FLAGS.output_dir, 'hparams_config.json')

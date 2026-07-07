@@ -494,8 +494,8 @@ def main(argv):
         for key, vals in epoch_metrics.items():
           tag = 'train_%s' % key
           for i, val in enumerate(vals):
-            summary_writer.scalar(tag, val, step - len(vals) + i + 1)
-        summary_writer.scalar('steps per second', steps_per_sec, step)
+            summary_writer.scalar(tag, val, step - len(vals) + i + 1)  # pyrefly: ignore[unbound-name]
+        summary_writer.scalar('steps per second', steps_per_sec, step)  # pyrefly: ignore[unbound-name]
 
         if FLAGS.write_summary:
           summary_utils.write_state_dict_summaries_to_tb(
@@ -519,7 +519,7 @@ def main(argv):
       if jax.process_index() == 0:
         for key, val in eval_metrics.items():
           tag = 'eval_%s' % key
-          summary_writer.scalar(tag, val.mean(), step)
+          summary_writer.scalar(tag, val.mean(), step)  # pyrefly: ignore[unbound-name]
         summary_writer.flush()
     if (step + 1) % steps_per_checkpoint == 0 or step + 1 == num_steps:
       # Only save the report when step > activation_bound_start_step

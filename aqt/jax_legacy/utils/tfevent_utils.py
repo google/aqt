@@ -51,9 +51,9 @@ def _sort_and_deduplicate_entries(event_series: EventSeries) -> EventSeries:
     lists in EventSeries dataclass instance.
   """
   # Sort lists first by step, then by wall time
-  sort_indices = onp.lexsort((event_series.wall_times, event_series.steps))
+  sort_indices = onp.lexsort((event_series.wall_times, event_series.steps))  # pyrefly: ignore[bad-argument-type]
   event_series.steps = event_series.steps[sort_indices]
-  event_series.wall_times = event_series.wall_times[sort_indices]
+  event_series.wall_times = event_series.wall_times[sort_indices]  # pyrefly: ignore[unsupported-operation]
   event_series.values = event_series.values[sort_indices]
   cur_step = None
   cur_value = None
@@ -65,23 +65,23 @@ def _sort_and_deduplicate_entries(event_series: EventSeries) -> EventSeries:
   for i in range(len(event_series.steps)):
     if event_series.steps[i] != cur_step:
       if cur_value is not None:
-        res_event_series.steps = onp.append(res_event_series.steps, cur_step)
+        res_event_series.steps = onp.append(res_event_series.steps, cur_step)  # pyrefly: ignore[no-matching-overload]
         res_event_series.values = onp.append(res_event_series.values, cur_value)
-        res_event_series.wall_times = onp.append(res_event_series.wall_times,
-                                                 cur_wall_time)
+        res_event_series.wall_times = onp.append(res_event_series.wall_times,  # pyrefly: ignore[no-matching-overload]
+                                                 cur_wall_time)  # pyrefly: ignore[unbound-name]
     cur_step = event_series.steps[i]
     cur_value = event_series.values[i]
     cur_wall_time = event_series.wall_times[i]
   if cur_value is not None:
-    res_event_series.steps = onp.append(res_event_series.steps, cur_step)
+    res_event_series.steps = onp.append(res_event_series.steps, cur_step)  # pyrefly: ignore[no-matching-overload]
     res_event_series.values = onp.append(res_event_series.values, cur_value)
-    res_event_series.wall_times = onp.append(res_event_series.wall_times,
-                                             cur_wall_time)
+    res_event_series.wall_times = onp.append(res_event_series.wall_times,  # pyrefly: ignore[no-matching-overload]
+                                             cur_wall_time)  # pyrefly: ignore[unbound-name]
 
   def _is_sorted(arr: onp.ndarray) -> bool:
-    return onp.all(onp.diff(arr) >= 0)
+    return onp.all(onp.diff(arr) >= 0)  # pyrefly: ignore[bad-return]
 
-  if not _is_sorted(res_event_series.wall_times):
+  if not _is_sorted(res_event_series.wall_times):  # pyrefly: ignore[bad-argument-type]
     raise ValueError(
         'Resulting EventSeries list after sorting by (step, wall_time)'
         ' has unsorted wall_times, likely caused by error in '
@@ -150,22 +150,22 @@ def get_parsed_tfevents(dir_path: str,
           # Some tag names have spaces.
           tag_str = str(value.tag).replace(' ', '_')
           if tag_str not in event_series_dict:
-            event_series_dict[tag_str] = EventSeries(
+            event_series_dict[tag_str] = EventSeries(  # pyrefly: ignore[unsupported-operation]
                 name=tag_str,
                 steps=onp.array([], dtype=int),
                 values=onp.array([]),
                 wall_times=onp.array([]))
-          event_series_dict[tag_str].steps = onp.append(
+          event_series_dict[tag_str].steps = onp.append(  # pyrefly: ignore[missing-attribute]
               event_series_dict[tag_str].steps, event.step)
-          event_series_dict[tag_str].values = onp.append(
+          event_series_dict[tag_str].values = onp.append(  # pyrefly: ignore[missing-attribute]
               event_series_dict[tag_str].values,
               float(tf.make_ndarray(value.tensor)))
-          event_series_dict[tag_str].wall_times = onp.append(
+          event_series_dict[tag_str].wall_times = onp.append(  # pyrefly: ignore[missing-attribute]
               event_series_dict[tag_str].wall_times, event.wall_time)
 
   for tag_str in event_series_dict:
     # Sort and deduplicate entries with the same step, keeping one with latest
     # wall_time
-    event_series_dict[tag_str] = _sort_and_deduplicate_entries(
-        event_series_dict[tag_str])
-  return event_series_dict
+    event_series_dict[tag_str] = _sort_and_deduplicate_entries(  # pyrefly: ignore[unsupported-operation]
+        event_series_dict[tag_str])  # pyrefly: ignore[bad-argument-type]
+  return event_series_dict  # pyrefly: ignore[bad-return]

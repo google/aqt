@@ -66,8 +66,8 @@ class AqtPallasTest(parameterized.TestCase):
       ]
 
       def dequant_kernel(qx: QTensor, out_ref):
-        qx.qvalue = qx.qvalue[...]
-        qx.scale[0] = qx.scale[0][...]
+        qx.qvalue = qx.qvalue[...]  # pyrefly: ignore[unsupported-operation]
+        qx.scale[0] = qx.scale[0][...]  # pyrefly: ignore[unsupported-operation]
         out_ref[...] = qx.dequant()
 
       dequant_out = aqt_pl.pallas_call(
@@ -120,8 +120,8 @@ class AqtPallasTest(parameterized.TestCase):
       ]
 
       def dequant_kernel(s, qx: QTensor, out_ref):
-        qx.qvalue = qx.qvalue[...]
-        qx.scale[0] = qx.scale[0][...]
+        qx.qvalue = qx.qvalue[...]  # pyrefly: ignore[unsupported-operation]
+        qx.scale[0] = qx.scale[0][...]  # pyrefly: ignore[unsupported-operation]
         out_ref[...] = s[0] * qx.dequant()
 
       dequant_out = aqt_pl.pallas_call(

@@ -54,12 +54,12 @@ def update_cfg_with_gptq(aqt_cfg: aqt_dot_general.DotGeneral) -> None:
   lhs_mid = aqt_quantizer.quantizer_make(lhs_bits, initialize_calibration=False)
   rhs_mid = aqt_quantizer.quantizer_make(rhs_bits, initialize_calibration=False)
   gptq_dg_quantizer = gptq_dot_general_quantizer.GptqDotGeneralQuantizer(
-      lhs=lhs,
-      rhs=rhs,
-      lhs_mid=lhs_mid,
-      rhs_mid=rhs_mid,
-      sharding_axes=None,
-      quant_collection='gptq',
+      lhs=lhs,  # pyrefly: ignore[unexpected-keyword]
+      rhs=rhs,  # pyrefly: ignore[unexpected-keyword]
+      lhs_mid=lhs_mid,  # pyrefly: ignore[unexpected-keyword]
+      rhs_mid=rhs_mid,  # pyrefly: ignore[unexpected-keyword]
+      sharding_axes=None,  # pyrefly: ignore[unexpected-keyword]
+      quant_collection='gptq',  # pyrefly: ignore[unexpected-keyword]
   )
 
   aqt_cfg.fwd.dg_quantizer = gptq_dg_quantizer

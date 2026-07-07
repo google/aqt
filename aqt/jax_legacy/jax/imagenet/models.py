@@ -249,7 +249,7 @@ def create_resnet(hparams, dtype, train, **kwargs):
       dtype=dtype,
       hparams=hparams,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, quantize_weights=True),
+          update_bounds=False, quantize_weights=True),  # pyrefly: ignore[unexpected-keyword]
       num_filters=64,
       train=train,
       **kwargs)
