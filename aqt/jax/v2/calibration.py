@@ -87,7 +87,7 @@ class ConstantCalibration(Calibration):
     bound = self.bound
     if jnp.isscalar(bound):
       bound_shape = list(x.shape)
-      for ax in shared_axes:
+      for ax in shared_axes:  # pyrefly: ignore[not-iterable]
         bound_shape[ax] = 1
       bound = jnp.ones(bound_shape, dtype=x.dtype) * bound
     scale = bound / numerics_.get_quant_bound()
@@ -242,7 +242,7 @@ class SnrBasedAutoCalibration(Calibration):
     # clip scale per subchannel group, so it shape will be the same as
     # `x.shape` but with `shared_axes` collapsed to 1.
     clip_shape = list(x.shape)
-    for i in shared_axes:
+    for i in shared_axes:  # pyrefly: ignore[not-iterable]
       clip_shape[i] = 1
 
     # Default clipping scale of 1.0 (max value). One per subchannel group.
@@ -270,9 +270,9 @@ class SnrBasedAutoCalibration(Calibration):
               clip_scale,
               x,
               abs_max,
-              shared_axes,
+              shared_axes,  # pyrefly: ignore[bad-argument-type]
               numerics_,
-              context,
+              context,  # pyrefly: ignore[bad-argument-type]
           )
       )
 
@@ -377,11 +377,11 @@ class SnrBasedAutoCalibration(Calibration):
     scale = scale.astype(self.dtype if self.dtype is not None else x.dtype)
 
     qt = aqt_tensor.QTensor(
-        qvalue=None,
-        scale=[scale],
-        scale_t=None,
-        bias=[],
-        dequant_dtype=x.dtype,
+        qvalue=None,  # pyrefly: ignore[unexpected-keyword]
+        scale=[scale],  # pyrefly: ignore[unexpected-keyword]
+        scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+        bias=[],  # pyrefly: ignore[unexpected-keyword]
+        dequant_dtype=x.dtype,  # pyrefly: ignore[unexpected-keyword]
     )
     qt = qt.quant(x)
 

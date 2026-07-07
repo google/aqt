@@ -151,8 +151,8 @@ def max_abs_weights(x: jax.Array,
                     *,
                     axis: Optional[Iterable[int]] = None) -> BoundsT:
   """Computes the maximum of the absolute value of weights along the axis."""
-  abs_max_x = jnp.max(jnp.abs(x), axis=axis, keepdims=True)
-  return abs_max_x
+  abs_max_x = jnp.max(jnp.abs(x), axis=axis, keepdims=True)  # pyrefly: ignore[bad-argument-type]
+  return abs_max_x  # pyrefly: ignore[bad-return]
 
 
 def unsigned_int_bound(prec: int) -> float:

@@ -146,31 +146,31 @@ class StatsTag(nn.Module):
       max_per_ch.value = jnp.max(
           jnp.where(mask, x, -math.inf), axis=reduction_axis)
       mean_per_ch_keepdims = stats.masked_mean(
-          x, mask=mask, axis=reduction_axis, paxis_name=None, keepdims=True)
+          x, mask=mask, axis=reduction_axis, paxis_name=None, keepdims=True)  # pyrefly: ignore[bad-argument-type]
       mean_per_ch.value = mean_per_ch_keepdims.squeeze(axis=reduction_axis)
       stddev_per_ch.value = jnp.sqrt(
           stats.masked_mean(
               (x - mean_per_ch_keepdims)**2,
               mask=mask,
-              axis=reduction_axis,
+              axis=reduction_axis,  # pyrefly: ignore[bad-argument-type]
               paxis_name=None,
               keepdims=False))
       absdev_per_ch.value = stats.masked_mean(
           jnp.abs(x - mean_per_ch_keepdims),
           mask=mask,
-          axis=reduction_axis,
+          axis=reduction_axis,  # pyrefly: ignore[bad-argument-type]
           paxis_name=None,
           keepdims=False)
       stddev_per_ch_uncentered.value = jnp.sqrt(
           stats.masked_mean(
               jnp.square(x),
               mask=mask,
-              axis=reduction_axis,
+              axis=reduction_axis,  # pyrefly: ignore[bad-argument-type]
               paxis_name=None,
               keepdims=False))
       absdev_per_ch_uncentered.value = stats.masked_mean(
           jnp.abs(x),
           mask=mask,
-          axis=reduction_axis,
+          axis=reduction_axis,  # pyrefly: ignore[bad-argument-type]
           paxis_name=None,
           keepdims=False)

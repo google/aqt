@@ -55,7 +55,7 @@ import jax.numpy as jnp
 # SKIP can be used as an argument to some set_xyz functions.
 # It signals that set_xyz should make no changes to that option.
 SKIP = 'skip'
-SkipT: TypeAlias = Literal[SKIP]
+SkipT: TypeAlias = Literal[SKIP]  # pyrefly: ignore[not-a-type]
 
 
 def _split_key(key: None | jax.Array, num_splits: int):
@@ -75,10 +75,10 @@ def set_context(
   def set_dg_raw_context(cfg_raw: DotGeneralRaw, key: None | jax.Array):
     key1, key2 = _split_key(key, num_splits=2)
     lhs_context = utils.Context(
-        key=key1, train_step=train_step, quant_mode=lhs_quant_mode
+        key=key1, train_step=train_step, quant_mode=lhs_quant_mode  # pyrefly: ignore[unexpected-keyword]
     )
     rhs_context = utils.Context(
-        key=key2, train_step=train_step, quant_mode=rhs_quant_mode
+        key=key2, train_step=train_step, quant_mode=rhs_quant_mode  # pyrefly: ignore[unexpected-keyword]
     )
     cfg_raw.dg_quantizer.set_context(lhs_context, rhs_context)
 
@@ -146,9 +146,9 @@ def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
   # Remove this setter and enable int2 in utils.infer_dtype_from_bits()
   # when XLA supports general int2 casting.
   assert isinstance(
-      cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric
+      cfg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric  # pyrefly: ignore[missing-attribute]
   )
-  assert cfg.fwd.dg_quantizer.rhs.numerics.bits == 2
+  assert cfg.fwd.dg_quantizer.rhs.numerics.bits == 2  # pyrefly: ignore[missing-attribute]
   # Disable pytype check since jnp.int2 is only dynamically to jax
   # when ml_dtypes package has it.
   cfg.fwd.dg_quantizer.rhs.numerics.dtype = jnp.int2  # pytype: disable=module-attr
@@ -214,7 +214,7 @@ def set_stochastic_rounding(
       if isinstance(quantizer.numerics, fp8_numerics.Fp8Numerics):
         quantizer.numerics.stochastic_rounding = is_sr
       else:
-        quantizer.numerics.noise_fn = noise_fn if is_sr else None
+        quantizer.numerics.noise_fn = noise_fn if is_sr else None  # pyrefly: ignore[missing-attribute]
 
     _set_noise_fn(dg_quantizer.lhs, is_lhs_sr)
     _set_noise_fn(dg_quantizer.rhs, is_rhs_sr)
@@ -243,12 +243,12 @@ def set_constant_calibration(
       cfg.drhs.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer
   )
 
-  cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
-  cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls
-  cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
-  cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
-  cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
-  cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls
+  cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls  # pyrefly: ignore[bad-assignment]
+  cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls  # pyrefly: ignore[bad-assignment]
+  cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls  # pyrefly: ignore[bad-assignment]
+  cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls  # pyrefly: ignore[bad-assignment]
+  cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls  # pyrefly: ignore[bad-assignment]
+  cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls  # pyrefly: ignore[bad-assignment]
 
 
 def set_local_aqt(
@@ -272,12 +272,12 @@ def set_use_fwd_quant(
 ):
   """Enable resusing of fwd pass quantization for backprop."""
   msg = 'use_fwd_quant is incompatible with use_mid_quant right now.'
-  assert cfg.fwd.dg_quantizer.lhs_mid_alpha is None, msg
-  assert cfg.fwd.dg_quantizer.rhs_mid_alpha is None, msg
-  assert cfg.dlhs.dg_quantizer.lhs_mid_alpha is None, msg
-  assert cfg.dlhs.dg_quantizer.rhs_mid_alpha is None, msg
-  assert cfg.drhs.dg_quantizer.lhs_mid_alpha is None, msg
-  assert cfg.drhs.dg_quantizer.rhs_mid_alpha is None, msg
+  assert cfg.fwd.dg_quantizer.lhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
+  assert cfg.fwd.dg_quantizer.rhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
+  assert cfg.dlhs.dg_quantizer.lhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
+  assert cfg.dlhs.dg_quantizer.rhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
+  assert cfg.drhs.dg_quantizer.lhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
+  assert cfg.drhs.dg_quantizer.rhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
   if dlhs_use_fwd_quant != SKIP:
     cfg.dlhs.rhs.use_fwd_quant = dlhs_use_fwd_quant
   if drhs_use_fwd_quant != SKIP:
@@ -361,7 +361,7 @@ def set_int_numerics_preserve_zero(cfg: DotGeneral, preserve_zero: bool):
 
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
     dg_quantizer = dot_general_raw.dg_quantizer
-    for q_numerics in [dg_quantizer.lhs.numerics, dg_quantizer.rhs.numerics]:
+    for q_numerics in [dg_quantizer.lhs.numerics, dg_quantizer.rhs.numerics]:  # pyrefly: ignore[missing-attribute]
       if isinstance(q_numerics, int_numerics.IntSymmetric):
         q_numerics.preserve_zero = preserve_zero
         updated_dtype = (
@@ -396,7 +396,7 @@ def set_auto_calib_scale(
   )
 
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
-    quantizer = dot_general_raw.dg_quantizer.rhs
+    quantizer = dot_general_raw.dg_quantizer.rhs  # pyrefly: ignore[missing-attribute]
     # TODO(lew): Remove partial inspection wherever possible.
     # Partial inspection is needed because the current implementation of delayed
     # calibration initialization requires the configuration to be set via
@@ -432,7 +432,7 @@ def set_absmax_calib_scale(cfg: DotGeneral, scale: float):
 
   for dot_general_raw in [cfg.fwd, cfg.dlhs, cfg.drhs]:
     dg_quantizer = dot_general_raw.dg_quantizer
-    for quantizer in [dg_quantizer.lhs, dg_quantizer.rhs]:
+    for quantizer in [dg_quantizer.lhs, dg_quantizer.rhs]:  # pyrefly: ignore[missing-attribute]
       calibration_cls = quantizer.calibration
       if calibration_cls is None:
         continue
@@ -478,9 +478,9 @@ def set_bits(
       numerics_utils.get_numerics(fwd_rhs_bit),
   )
   if fwd_lhs_bit is not None:
-    cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls
+    cfg.fwd.dg_quantizer.lhs.calibration = calibration_cls  # pyrefly: ignore[missing-attribute]
   if fwd_rhs_bit is not None:
-    cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls
+    cfg.fwd.dg_quantizer.rhs.calibration = calibration_cls  # pyrefly: ignore[missing-attribute]
 
   set_numerics(
       cfg.dlhs,
@@ -488,9 +488,9 @@ def set_bits(
       numerics_utils.get_numerics(dlhs_rhs_bit),
   )
   if dlhs_lhs_bit is not None:
-    cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls
+    cfg.dlhs.dg_quantizer.lhs.calibration = calibration_cls  # pyrefly: ignore[missing-attribute]
   if dlhs_rhs_bit is not None:
-    cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls
+    cfg.dlhs.dg_quantizer.rhs.calibration = calibration_cls  # pyrefly: ignore[missing-attribute]
 
   set_numerics(
       cfg.drhs,
@@ -498,9 +498,9 @@ def set_bits(
       numerics_utils.get_numerics(drhs_rhs_bit),
   )
   if drhs_lhs_bit is not None:
-    cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls
+    cfg.drhs.dg_quantizer.lhs.calibration = calibration_cls  # pyrefly: ignore[missing-attribute]
   if drhs_rhs_bit is not None:
-    cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls
+    cfg.drhs.dg_quantizer.rhs.calibration = calibration_cls  # pyrefly: ignore[missing-attribute]
 
   # use_fwd_quant is by default set to False if fwd pass is quantized.
   # This is to make the configuration logically correct,
@@ -538,7 +538,7 @@ def set_scale_and_bias_dtype(cfg: DotGeneral, dtype: jnp.dtype):
       keywords = calibration_cls.keywords
       calibration_cls = calibration_cls.func
     keywords.update(dtype=dtype)
-    quantizer.calibration = functools.partial(calibration_cls, **keywords)
+    quantizer.calibration = functools.partial(calibration_cls, **keywords)  # pyrefly: ignore[bad-assignment]
 
   _update_dtype(cfg.fwd.dg_quantizer.lhs)
   _update_dtype(cfg.fwd.dg_quantizer.rhs)
@@ -557,40 +557,40 @@ def default_unquantized_config() -> DotGeneral:
 
   def tensor_cfg() -> Tensor:
     cfg = Tensor(
-        use_fwd_quant=False,
-        dequant_mode=DequantMode.OUTPUT,
-        calibration_mode=CalibrationMode.CONTRACTING_AXIS,
+        use_fwd_quant=False,  # pyrefly: ignore[unexpected-keyword]
+        dequant_mode=DequantMode.OUTPUT,  # pyrefly: ignore[unexpected-keyword]
+        calibration_mode=CalibrationMode.CONTRACTING_AXIS,  # pyrefly: ignore[unexpected-keyword]
     )
     return cfg
 
   def quantizer() -> aqt_quantizer.Quantizer:
     return aqt_quantizer.Quantizer(
-        numerics=no_numerics.NoNumerics(),
-        calib_shared_axes=None,
-        scale_stop_grad=True,
-        calibration=None,
-        context=utils.Context(key=None, train_step=None),
+        numerics=no_numerics.NoNumerics(),  # pyrefly: ignore[unexpected-keyword]
+        calib_shared_axes=None,  # pyrefly: ignore[unexpected-keyword]
+        scale_stop_grad=True,  # pyrefly: ignore[unexpected-keyword]
+        calibration=None,  # pyrefly: ignore[unexpected-keyword]
+        context=utils.Context(key=None, train_step=None),  # pyrefly: ignore[unexpected-keyword]
     )
 
   def dg_raw_cfg(jax_scope_name: str) -> DotGeneralRaw:
     return DotGeneralRaw(
-        lhs=tensor_cfg(),
-        rhs=tensor_cfg(),
-        dg_quantizer=aqt_dot_general.DefaultDotGeneralQuantizer(
-            lhs=quantizer(),
-            rhs=quantizer(),
-            lhs_mid=quantizer(),
-            rhs_mid=quantizer(),
+        lhs=tensor_cfg(),  # pyrefly: ignore[unexpected-keyword]
+        rhs=tensor_cfg(),  # pyrefly: ignore[unexpected-keyword]
+        dg_quantizer=aqt_dot_general.DefaultDotGeneralQuantizer(  # pyrefly: ignore[unexpected-keyword]
+            lhs=quantizer(),  # pyrefly: ignore[unexpected-keyword]
+            rhs=quantizer(),  # pyrefly: ignore[unexpected-keyword]
+            lhs_mid=quantizer(),  # pyrefly: ignore[unexpected-keyword]
+            rhs_mid=quantizer(),  # pyrefly: ignore[unexpected-keyword]
         ),
-        dg_accumulator_dtype=None,
-        local_aqt=None,
-        jax_scope_name=jax_scope_name,
+        dg_accumulator_dtype=None,  # pyrefly: ignore[unexpected-keyword]
+        local_aqt=None,  # pyrefly: ignore[unexpected-keyword]
+        jax_scope_name=jax_scope_name,  # pyrefly: ignore[unexpected-keyword]
     )
 
   dg_cfg = DotGeneral(
-      fwd=dg_raw_cfg('aqt_fwd'),
-      dlhs=dg_raw_cfg('aqt_dlhs'),
-      drhs=dg_raw_cfg('aqt_drhs'),
+      fwd=dg_raw_cfg('aqt_fwd'),  # pyrefly: ignore[unexpected-keyword]
+      dlhs=dg_raw_cfg('aqt_dlhs'),  # pyrefly: ignore[unexpected-keyword]
+      drhs=dg_raw_cfg('aqt_drhs'),  # pyrefly: ignore[unexpected-keyword]
   )
   return dg_cfg
 
@@ -693,7 +693,7 @@ def config_v3(
       jax_scope_name='aqt_drhs',
       initialize_calibration=False,
   )
-  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
+  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)  # pyrefly: ignore[unexpected-keyword]
 
   cfg.dlhs.rhs.use_fwd_quant = False
   cfg.drhs.rhs.use_fwd_quant = False
@@ -808,7 +808,7 @@ def config_fwd_fp8(fwd_bits: fp8_numerics.FP8Dtype = 'e4m3') -> DotGeneral:
   return cfg
 
 
-def set_fwd_calibration(cfg: DotGeneral, calibration_factory) -> DotGeneral:
+def set_fwd_calibration(cfg: DotGeneral, calibration_factory) -> DotGeneral:  # pyrefly: ignore[bad-return]
   """Updates aqt_cfg for static range calibration."""
   assert isinstance(
       cfg.fwd.dg_quantizer, aqt_dot_general.DefaultDotGeneralQuantizer

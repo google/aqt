@@ -58,7 +58,7 @@ class Quantizer:
   def init_calibration(self):
     assert self._calibrator is None, "second call to self.init_calibration()"
     if self.calibration is not None:
-      self._calibrator = self.calibration(dtype=self.scale_dtype)
+      self._calibrator = self.calibration(dtype=self.scale_dtype)  # pyrefly: ignore[unexpected-keyword]
       self._calibrator.init_calibration()
 
   # TODO(yichizh): Need to add type annotation back to cfg.
@@ -105,17 +105,17 @@ class Quantizer:
       # Tile `x` and change calibration axes according to the tiling.
       x = tiling_state.apply(x)
       _, calibration_axes = tiling_state.to_tiled_axes_transposed(
-          calibration_axes
+          calibration_axes  # pyrefly: ignore[bad-argument-type]
       )
 
     if isinstance(self.numerics, no_numerics.NoNumerics):
       qt = aqt_tensor.QTensor(
-          qvalue=x,
-          scale=[],
-          scale_t=None,
-          bias=[],
-          dequant_dtype=x.dtype,
-          tiling_state=tiling_state,
+          qvalue=x,  # pyrefly: ignore[unexpected-keyword]
+          scale=[],  # pyrefly: ignore[unexpected-keyword]
+          scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+          bias=[],  # pyrefly: ignore[unexpected-keyword]
+          dequant_dtype=x.dtype,  # pyrefly: ignore[unexpected-keyword]
+          tiling_state=tiling_state,  # pyrefly: ignore[unexpected-keyword]
       )
       return qt
 
@@ -146,13 +146,13 @@ class Quantizer:
       scale = jax.lax.stop_gradient(scale)
 
     qt = aqt_tensor.QTensor(
-        qvalue=None,
-        sparsity_mask=sparsity_mask,
-        scale=scale,
-        scale_t=None,
-        bias=bias,
-        dequant_dtype=dequant_dtype,
-        tiling_state=tiling_state,
+        qvalue=None,  # pyrefly: ignore[unexpected-keyword]
+        sparsity_mask=sparsity_mask,  # pyrefly: ignore[unexpected-keyword]
+        scale=scale,  # pyrefly: ignore[unexpected-keyword]
+        scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+        bias=bias,  # pyrefly: ignore[unexpected-keyword]
+        dequant_dtype=dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
+        tiling_state=tiling_state,  # pyrefly: ignore[unexpected-keyword]
     )
     return qt
 
@@ -192,12 +192,12 @@ def quantizer_make(
     calibration_cls = calibration.AbsMaxCalibration
 
   quantizer = Quantizer(
-      numerics=effective_numerics,
-      calib_shared_axes=None,
-      scale_stop_grad=scale_stop_grad,
-      scale_dtype=scale_dtype,
-      calibration=calibration_cls,
-      context=utils.Context(key=None, train_step=None),
+      numerics=effective_numerics,  # pyrefly: ignore[unexpected-keyword]
+      calib_shared_axes=None,  # pyrefly: ignore[unexpected-keyword]
+      scale_stop_grad=scale_stop_grad,  # pyrefly: ignore[unexpected-keyword]
+      scale_dtype=scale_dtype,  # pyrefly: ignore[unexpected-keyword]
+      calibration=calibration_cls,  # pyrefly: ignore[unexpected-keyword]
+      context=utils.Context(key=None, train_step=None),  # pyrefly: ignore[unexpected-keyword]
   )
   # TODO(lew): We should try to move to to class constructor or post-init.
   # We currently need to call because bwd pass is too late for initialization.

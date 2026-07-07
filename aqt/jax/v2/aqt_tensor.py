@@ -106,7 +106,7 @@ class QTensor:
       return
 
     if self.is_full():
-      assert self.qvalue.shape == tuple(self.tiling_state.tiled_shape), (
+      assert self.qvalue.shape == tuple(self.tiling_state.tiled_shape), (  # pyrefly: ignore[missing-attribute]
           'The shape of the qvalue should be the same as the tiled shape of'
           f' the tiling state. However, {self.qvalue.shape=} and'  # pytype: disable=attribute-error
           f' {self.tiling_state.tiled_shape=}'
@@ -209,14 +209,14 @@ class QTensor:
     assert self.is_full(), _MSG_NO_QVALUE
     self._validate_tiling_state()
 
-    qvalue = self.qvalue[idx]
-    scale = [s[idx] for s in self.scale]
-    return QTensor(
-        qvalue=qvalue,
-        scale=scale,
-        scale_t=self.scale_t,
-        bias=self.bias,
-        dequant_dtype=self.dequant_dtype,
+    qvalue = self.qvalue[idx]  # pyrefly: ignore[unsupported-operation]
+    scale = [s[idx] for s in self.scale]  # pyrefly: ignore[not-iterable]
+    return QTensor(  # pyrefly: ignore[bad-return]
+        qvalue=qvalue,  # pyrefly: ignore[unexpected-keyword]
+        scale=scale,  # pyrefly: ignore[unexpected-keyword]
+        scale_t=self.scale_t,  # pyrefly: ignore[unexpected-keyword]
+        bias=self.bias,  # pyrefly: ignore[unexpected-keyword]
+        dequant_dtype=self.dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
     )
 
   @property
@@ -247,11 +247,11 @@ def zeros(
     dequant_dtype: jnp.dtype = jnp.bfloat16,
 ) -> QTensor:
   return QTensor(
-      qvalue=jnp.zeros(shape, dtype=container_dtype),
-      scale=[],
-      scale_t=None,
-      bias=[],
-      dequant_dtype=dequant_dtype,
+      qvalue=jnp.zeros(shape, dtype=container_dtype),  # pyrefly: ignore[unexpected-keyword]
+      scale=[],  # pyrefly: ignore[unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[],  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -272,11 +272,11 @@ def zeros_with_scale(
   # TODO(lew): hardcode dequant_dtype to bf16. This requires updating
   # other libraries to not break their functionality.
   return QTensor(
-      qvalue=jnp.zeros(shape, dtype=container_dtype),
-      scale=[jnp.ones(scale_shape, dtype=scale_dtype)],
-      scale_t=None,
-      bias=[],
-      dequant_dtype=dequant_dtype,
+      qvalue=jnp.zeros(shape, dtype=container_dtype),  # pyrefly: ignore[unexpected-keyword]
+      scale=[jnp.ones(scale_shape, dtype=scale_dtype)],  # pyrefly: ignore[unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[],  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -304,11 +304,11 @@ def partition_spec(
     # JAX errors upon receiving partition specs for non-existent tensors.
     bias_partition = []
   return QTensor(
-      qvalue=jax.sharding.PartitionSpec(*partitions),
-      scale=[jax.sharding.PartitionSpec(*scale_partitions)],
-      scale_t=None,
-      bias=bias_partition,
-      dequant_dtype=dtype,
+      qvalue=jax.sharding.PartitionSpec(*partitions),  # pyrefly: ignore[unexpected-keyword]
+      scale=[jax.sharding.PartitionSpec(*scale_partitions)],  # pyrefly: ignore[unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=bias_partition,  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=dtype,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -345,11 +345,11 @@ def dynamic_slice(
     return jax.lax.dynamic_slice(scale, scale_start_indices, scale_slice_sizes)
 
   return QTensor(
-      qvalue=jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),
-      scale=[get_sliced_scales(s) for s in operand.scale],
-      scale_t=None,
-      bias=[],
-      dequant_dtype=operand.dequant_dtype,
+      qvalue=jax.lax.dynamic_slice(operand.qvalue, start_indices, slice_sizes),  # pyrefly: ignore[bad-argument-type, unexpected-keyword]
+      scale=[get_sliced_scales(s) for s in operand.scale],  # pyrefly: ignore[not-iterable, unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[],  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=operand.dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -364,21 +364,21 @@ def dynamic_update_slice(
   op_dd = operand.dequant_dtype
   up_dd = update.dequant_dtype
   assert op_dd == up_dd, f'Dequant dtype mismatch: {op_dd} != {up_dd}'
-  ndim = operand.qvalue.ndim
-  assert update.qvalue.ndim == ndim
-  for scale, update_scale in zip(operand.scale, update.scale):
+  ndim = operand.qvalue.ndim  # pyrefly: ignore[missing-attribute]
+  assert update.qvalue.ndim == ndim  # pyrefly: ignore[missing-attribute]
+  for scale, update_scale in zip(operand.scale, update.scale):  # pyrefly: ignore[bad-argument-type]
     assert scale.ndim == ndim
     assert update_scale.ndim == ndim
     for axis in range(ndim):
       if scale.shape[axis] == 1:
-        calibration_axis_shape = operand.qvalue.shape[axis]
-        update_calibration_axis_shape = update.qvalue.shape[axis]
+        calibration_axis_shape = operand.qvalue.shape[axis]  # pyrefly: ignore[missing-attribute]
+        update_calibration_axis_shape = update.qvalue.shape[axis]  # pyrefly: ignore[missing-attribute]
         msg = (
             'Only updating an entire slice along the calibration axis is'
             f' valid. The calibration axis shape is {calibration_axis_shape}'
             f' but the update slice shape is {update_calibration_axis_shape}.'
         )
-        assert update.qvalue.shape[axis] == operand.qvalue.shape[axis], msg
+        assert update.qvalue.shape[axis] == operand.qvalue.shape[axis], msg  # pyrefly: ignore[missing-attribute]
         msg = 'Update scale and scale should be calibrated along the same axis.'
         assert update_scale.shape[axis] == 1, msg
       else:
@@ -386,19 +386,19 @@ def dynamic_update_slice(
         pass
 
   qvalues = jax.lax.dynamic_update_slice(
-      operand.qvalue, update.qvalue, start_indices
+      operand.qvalue, update.qvalue, start_indices  # pyrefly: ignore[bad-argument-type]
   )
   scales = [
       jax.lax.dynamic_update_slice(scale, update_scale, start_indices)
-      for scale, update_scale in zip(operand.scale, update.scale)
+      for scale, update_scale in zip(operand.scale, update.scale)  # pyrefly: ignore[bad-argument-type]
   ]
 
   return QTensor(
-      qvalue=qvalues,
-      scale=scales,
-      scale_t=None,
-      bias=[],
-      dequant_dtype=operand.dequant_dtype,
+      qvalue=qvalues,  # pyrefly: ignore[unexpected-keyword]
+      scale=scales,  # pyrefly: ignore[unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[],  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=operand.dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -408,15 +408,15 @@ def update_frame(operand: QTensor, frame: int, update: QTensor) -> QTensor:
   assert operand.dequant_dtype == update.dequant_dtype, 'Dequant dtype mismatch'
 
   return QTensor(
-      qvalue=operand.qvalue.at[frame].set(update.qvalue),
-      scale=[
+      qvalue=operand.qvalue.at[frame].set(update.qvalue),  # pyrefly: ignore[missing-attribute, unexpected-keyword]
+      scale=[  # pyrefly: ignore[unexpected-keyword]
           target_scale.at[frame].set(update_scale)
-          for target_scale, update_scale in zip(operand.scale, update.scale)
+          for target_scale, update_scale in zip(operand.scale, update.scale)  # pyrefly: ignore[bad-argument-type]
       ],
-      scale_t=None,
-      bias=[
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[  # pyrefly: ignore[unexpected-keyword]
           target_bias.at[frame].set(update_bias)
           for target_bias, update_bias in zip(operand.bias, update.bias)
       ],
-      dequant_dtype=operand.dequant_dtype,
+      dequant_dtype=operand.dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )

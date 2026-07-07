@@ -206,7 +206,7 @@ class DenseAqt(nn.Module):
       kernel = jnp.asarray(kernel, self.dtype)
 
       kernel = Sparsity(
-          sparsity_hparams=hparams.weight_sparsity, name='weight_sparsity')(
+          sparsity_hparams=hparams.weight_sparsity, name='weight_sparsity')(  # pyrefly: ignore[bad-argument-type]
               kernel,
               update_mask=self.dynamic_context.update_weight_sparsity,
               apply_mask=self.dynamic_context.apply_sparsity,
@@ -236,11 +236,11 @@ class DenseAqt(nn.Module):
           axes=tuple(scale_axis_names))
       qscale = jnp.asarray(qscale, self.dtype)
       if not self.train:
-        quant_w = quantization.QuantW(qkernel, qscale)
+        quant_w = quantization.QuantW(qkernel, qscale)  # pyrefly: ignore[bad-argument-count]
         kernel = None
 
     inputs = Sparsity(
-        sparsity_hparams=hparams.act_sparsity, name='act_sparsity')(
+        sparsity_hparams=hparams.act_sparsity, name='act_sparsity')(  # pyrefly: ignore[bad-argument-type]
             inputs,
             update_mask=self.dynamic_context.update_act_sparsity,
             apply_mask=self.dynamic_context.apply_sparsity,
@@ -263,23 +263,23 @@ class DenseAqt(nn.Module):
           f'Invalid quantization granularity {weight_quant_granularity}.')
 
     weight_params = QuantOps.WeightParams(
-        prec=hparams.weight_prec,
-        half_shift=hparams.weight_half_shift,
-        axis=weight_quant_axis,
-        expected_scale_shape=expected_scale_shape)
+        prec=hparams.weight_prec,  # pyrefly: ignore[unexpected-keyword]
+        half_shift=hparams.weight_half_shift,  # pyrefly: ignore[unexpected-keyword]
+        axis=weight_quant_axis,  # pyrefly: ignore[unexpected-keyword]
+        expected_scale_shape=expected_scale_shape)  # pyrefly: ignore[unexpected-keyword]
 
     # TODO(wanglisa): add option to control when scale is being recomputed
 
     bounds_params = None
     if hparams.quant_act is not None:
       if isinstance(hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
-        bounds_params = get_bounds.DynamicBounds.Params(quant_axis=None)
+        bounds_params = get_bounds.DynamicBounds.Params(quant_axis=None)  # pyrefly: ignore[unexpected-keyword]
       elif isinstance(hparams.quant_act.bounds, get_bounds.GetBounds.Hyper):
         bounds_params = get_bounds.GetBounds.Params(
-            update_bounds=self.dynamic_context.update_bounds,
-            update_stats=self.train,
-            paxis_name=self.paxis_name,
-            mask=padding_mask)
+            update_bounds=self.dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+            update_stats=self.train,  # pyrefly: ignore[unexpected-keyword]
+            paxis_name=self.paxis_name,  # pyrefly: ignore[unexpected-keyword]
+            mask=padding_mask)  # pyrefly: ignore[unexpected-keyword]
 
     contracting_dims = ((inputs.ndim - 1,), (0,))
     # `((lhs_contracting_dims, rhs_contracting_dims),
@@ -289,7 +289,7 @@ class DenseAqt(nn.Module):
         hparams.quant_act.bounds, get_bounds.DynamicBounds.Hyper):
       y = quantization.flaxformer_dot_general(
           act=inputs,
-          w=kernel,
+          w=kernel,  # pyrefly: ignore[unbound-name]
           dimension_numbers=(contracting_dims, batch_dims),
           weight_params=weight_params,
           act_hparams=hparams.quant_act,
@@ -300,7 +300,7 @@ class DenseAqt(nn.Module):
     else:
       y = quantization.quantized_dot_general(
           act=inputs,
-          w=kernel,
+          w=kernel,  # pyrefly: ignore[unbound-name]
           quant_type=hparams.quant_type,
           weight_params=weight_params,
           act_hparams=hparams.quant_act,
@@ -503,7 +503,7 @@ class DenseGeneralAqt(nn.Module):
       qscale = jnp.asarray(qscale, self.dtype)
       qscale = jnp.reshape(qscale, scale_shape)
       if not self.train:
-        quant_w = quantization.QuantW(qkernel, qscale)
+        quant_w = quantization.QuantW(qkernel, qscale)  # pyrefly: ignore[bad-argument-count]
         kernel = None
 
     contract_ind = tuple(range(0, len(axis)))
@@ -539,17 +539,17 @@ class DenseGeneralAqt(nn.Module):
       raise ValueError(
           f'Invalid quantization granularity {weight_quant_granularity}.')
 
-    bounds_params = get_bounds.DynamicBounds.Params(quant_axis=act_quant_axis)
+    bounds_params = get_bounds.DynamicBounds.Params(quant_axis=act_quant_axis)  # pyrefly: ignore[unexpected-keyword]
 
     weight_params = QuantOps.WeightParams(
-        prec=hparams.weight_prec,
-        half_shift=hparams.weight_half_shift,
-        axis=weight_quant_axis,
-        expected_scale_shape=expected_scale_shape)
+        prec=hparams.weight_prec,  # pyrefly: ignore[unexpected-keyword]
+        half_shift=hparams.weight_half_shift,  # pyrefly: ignore[unexpected-keyword]
+        axis=weight_quant_axis,  # pyrefly: ignore[unexpected-keyword]
+        expected_scale_shape=expected_scale_shape)  # pyrefly: ignore[unexpected-keyword]
 
     out = quantization.flaxformer_dot_general(
         act=inputs,
-        w=kernel,
+        w=kernel,  # pyrefly: ignore[unbound-name]
         dimension_numbers=((axis, contract_ind), ((), ())),
         weight_params=weight_params,
         act_hparams=hparams.quant_act,
@@ -647,7 +647,7 @@ class ConvAqt(nn.Module):
       The convolved data.
     """
     hparams = self.hparams
-    if hparams.weight_prec is not None and hparams.weight_prec > 8:
+    if hparams.weight_prec is not None and hparams.weight_prec > 8:  # pyrefly: ignore[unsupported-operation]
       raise NotImplementedError(
           'If you want to use more than 8bits for quantization, please revisit'
           ' jax.lax.Precision.DEFAULT to determine whether it is still'
@@ -675,9 +675,9 @@ class ConvAqt(nn.Module):
           inputs=inputs,
           hparams=hparams.quant_act,
           bounds_params=get_bounds.GetBounds.Params(
-              update_bounds=self.dynamic_context.update_bounds,
-              update_stats=self.train,
-              paxis_name=self.paxis_name))
+              update_bounds=self.dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+              update_stats=self.train,  # pyrefly: ignore[unexpected-keyword]
+              paxis_name=self.paxis_name))  # pyrefly: ignore[unexpected-keyword]
 
     # Weight quantization
     if hparams.weight_prec is not None:
@@ -689,10 +689,10 @@ class ConvAqt(nn.Module):
       kernel = QuantOps.create_weights_fake_quant(
           kernel,
           weight_params=QuantOps.WeightParams(
-              prec=hparams.weight_prec,
-              half_shift=hparams.weight_half_shift,
-              axis=kernel_reduction_axis,
-              expected_scale_shape=expected_scale_shape),
+              prec=hparams.weight_prec,  # pyrefly: ignore[unexpected-keyword]
+              half_shift=hparams.weight_half_shift,  # pyrefly: ignore[unexpected-keyword]
+              axis=kernel_reduction_axis,  # pyrefly: ignore[unexpected-keyword]
+              expected_scale_shape=expected_scale_shape),  # pyrefly: ignore[unexpected-keyword]
           quantized_type=quantized_type,
           quantize_weights=self.dynamic_context.quantize_weights)
 
@@ -705,13 +705,13 @@ class ConvAqt(nn.Module):
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.ConvMetadataMonkeyPatch(
-          weight_prec=hparams.weight_prec, act_prec=act_prec)
+          weight_prec=hparams.weight_prec, act_prec=act_prec)  # pyrefly: ignore[bad-argument-type]
     with metadata_context:
       y = lax.conv_general_dilated(
           inputs,
           kernel,
           strides,
-          self.padding,
+          self.padding,  # pyrefly: ignore[bad-argument-type]
           lhs_dilation=self.input_dilation,
           rhs_dilation=self.kernel_dilation,
           dimension_numbers=dimension_numbers,
@@ -789,17 +789,17 @@ class EmbedAqt(nn.Module):
     if hparams.quant_act is not None and isinstance(hparams.quant_act.bounds,
                                                     get_bounds.GetBounds.Hyper):
       self.get_bounds_logits = get_bounds.GetBounds(  # pylint: disable=missing-from-attributes
-          hyper=self.hparams.quant_act.bounds)
+          hyper=self.hparams.quant_act.bounds)  # pyrefly: ignore[missing-attribute]
     self.quantized_dot = quantization.QuantizedDot(  # pylint: disable=missing-from-attributes
         act_hparams=hparams.quant_act,
         quant_type=hparams.quant_type,
         dot_precision=None,
         prefer_int8_to_int32_dot=self.dynamic_context.prefer_int8_to_int32_dot,
         weight_params=QuantOps.WeightParams(
-            prec=hparams.weight_prec,
-            axis=(0,),
-            expected_scale_shape=(1, self.embedding.shape[0]),
-            half_shift=hparams.weight_half_shift,
+            prec=hparams.weight_prec,  # pyrefly: ignore[unexpected-keyword]
+            axis=(0,),  # pyrefly: ignore[unexpected-keyword]
+            expected_scale_shape=(1, self.embedding.shape[0]),  # pyrefly: ignore[unexpected-keyword]
+            half_shift=hparams.weight_half_shift,  # pyrefly: ignore[unexpected-keyword]
             ))
 
   def __call__(
@@ -830,7 +830,7 @@ class EmbedAqt(nn.Module):
       self.get_bounds_logits(
           inputs,
           bounds_params=get_bounds.GetBounds.Params(
-              update_stats=False, update_bounds=False, paxis_name=None),
+              update_stats=False, update_bounds=False, paxis_name=None),  # pyrefly: ignore[unexpected-keyword]
       )
 
     weight_prec = hparams.weight_prec
@@ -848,9 +848,9 @@ class EmbedAqt(nn.Module):
       embedding_quant_ops = QuantOps.create_weights_ops(
           embedding,
           weight_params=QuantOps.WeightParams(
-              prec=weight_prec,
-              axis=(1,),
-              half_shift=weight_half_shift,
+              prec=weight_prec,  # pyrefly: ignore[unexpected-keyword]
+              axis=(1,),  # pyrefly: ignore[unexpected-keyword]
+              half_shift=weight_half_shift,  # pyrefly: ignore[unexpected-keyword]
               ))
       embedding_quant_ops.assert_scale_shape_is(shape=(self.num_embeddings, 1))
 
@@ -864,7 +864,7 @@ class EmbedAqt(nn.Module):
       # TODO(malmaud): As part of quantization.py refactor, change
       # 'get_scale_for_aqt' to cleanly support this and hence avoid the need to
       # directly access a protected member of QuantOps.
-      scale = embedding_quant_ops._scale[inputs]  # pylint: disable=protected-access
+      scale = embedding_quant_ops._scale[inputs]  # pylint: disable=protected-access  # pyrefly: ignore[unsupported-operation]
       shape_utils.assert_shapes_equal(scale.shape,
                                       (batch_size, sequence_length, 1))
       shape_utils.assert_shapes_equal(
@@ -908,11 +908,11 @@ class EmbedAqt(nn.Module):
     # TODO(malmaud): Remove the 'mask' field from this struct so we can
     # make this struct a hyperparameter of the EncoderAqt class.
     bounds_params = get_bounds.GetBounds.Params(
-        update_bounds=self.dynamic_context.update_bounds,
-        update_stats=self.train,
-        paxis_name=self.paxis_name,
-        mask=padding_mask,
-        module_name='logits')
+        update_bounds=self.dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+        update_stats=self.train,  # pyrefly: ignore[unexpected-keyword]
+        paxis_name=self.paxis_name,  # pyrefly: ignore[unexpected-keyword]
+        mask=padding_mask,  # pyrefly: ignore[unexpected-keyword]
+        module_name='logits')  # pyrefly: ignore[unexpected-keyword]
 
     out = self.quantized_dot(
         act=query,
@@ -1006,8 +1006,8 @@ class LayerNormAqt(nn.Module):
       bias_param = self.param('bias', self.bias_init, (num_features,))
 
     def quantized_layernorm(x):
-      prec = hparams.quant_hparams.prec
-      fp_quant = QuantOps.FloatQuant(is_scaled=False, fp_spec=prec)
+      prec = hparams.quant_hparams.prec  # pyrefly: ignore[missing-attribute]
+      fp_quant = QuantOps.FloatQuant(is_scaled=False, fp_spec=prec)  # pyrefly: ignore[unexpected-keyword]
       quant_ops = QuantOps.create_symmetric_fp(fp_quant=fp_quant, bounds=None)
 
       def to_quantized(x):
@@ -1039,7 +1039,7 @@ class LayerNormAqt(nn.Module):
           x_quantized,
           axis=-1,
           keepdims=True,
-          prec=hparams.quant_hparams.reduction_prec)
+          prec=hparams.quant_hparams.reduction_prec)  # pyrefly: ignore[missing-attribute]
       x_sum = to_quantized(x_sum_quantized_reduction)
       mean = to_quantized(x_sum * num_features_recip_quantized)
       x_minus_mean = to_quantized(x - mean)
@@ -1048,7 +1048,7 @@ class LayerNormAqt(nn.Module):
           x_sq,
           axis=-1,
           keepdims=True,
-          prec=hparams.quant_hparams.reduction_prec)
+          prec=hparams.quant_hparams.reduction_prec)  # pyrefly: ignore[missing-attribute]
       x_sq_sum = to_quantized(x_sq_sum_quantized_reduction)
       var = to_quantized(x_sq_sum * num_features_recip_quantized)
       # Prevent division by zero.

@@ -251,7 +251,7 @@ class GetBounds(nn.Module):
         return (hyper.mix_coeff * hyper.stddev_coeff * stddev_uncentered +
                 (1 - hyper.mix_coeff) * hyper.absdev_coeff * absdev_uncentered)
     else:  # use new way of computing the bound
-      cams = abs_mean + hyper.cams_stddev_coeff * stddev
-      return (hyper.fixed_bound + hyper.mean_of_max_coeff * mom +
+      cams = abs_mean + hyper.cams_stddev_coeff * stddev  # pyrefly: ignore[unsupported-operation]
+      return (hyper.fixed_bound + hyper.mean_of_max_coeff * mom +  # pyrefly: ignore[unsupported-operation]
               hyper.stddev_coeff * stddev_uncentered +
-              hyper.absdev_coeff * absdev_uncentered + hyper.cams_coeff * cams)
+              hyper.absdev_coeff * absdev_uncentered + hyper.cams_coeff * cams)  # pyrefly: ignore[unsupported-operation]

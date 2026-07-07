@@ -142,17 +142,17 @@ def dot_general_raw_make(
       None, initialize_calibration=initialize_calibration
   )
   dg_quantizer = DefaultDotGeneralQuantizer(
-      lhs=lhs, rhs=rhs, lhs_mid=lhs_mid, rhs_mid=rhs_mid
+      lhs=lhs, rhs=rhs, lhs_mid=lhs_mid, rhs_mid=rhs_mid  # pyrefly: ignore[unexpected-keyword]
   )
 
   return DotGeneralRaw(
-      lhs=lhs_cfg,
-      rhs=rhs_cfg,
-      dg_quantizer=dg_quantizer,
-      dg_accumulator_dtype=dg_accumulator_dtype,
-      local_aqt=local_aqt,
-      jax_scope_name=jax_scope_name,
-      allow_dummy_gradient_into_qtensor=allow_dummy_gradients,
+      lhs=lhs_cfg,  # pyrefly: ignore[unexpected-keyword]
+      rhs=rhs_cfg,  # pyrefly: ignore[unexpected-keyword]
+      dg_quantizer=dg_quantizer,  # pyrefly: ignore[unexpected-keyword]
+      dg_accumulator_dtype=dg_accumulator_dtype,  # pyrefly: ignore[unexpected-keyword]
+      local_aqt=local_aqt,  # pyrefly: ignore[unexpected-keyword]
+      jax_scope_name=jax_scope_name,  # pyrefly: ignore[unexpected-keyword]
+      allow_dummy_gradient_into_qtensor=allow_dummy_gradients,  # pyrefly: ignore[unexpected-keyword]
   )
 
 
@@ -191,7 +191,7 @@ def dot_general_make(
       initialize_calibration=False,
       allow_dummy_gradients=allow_dummy_gradients,
   )
-  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)
+  cfg = DotGeneral(fwd=fwd, dlhs=dlhs, drhs=drhs)  # pyrefly: ignore[unexpected-keyword]
 
   # Surprising: lhs quantization determines what drhs can do.
   if lhs_bits is not None:
@@ -250,7 +250,7 @@ def _get_scale_t(
     rhs_shape: Sequence[int],
 ) -> Sequence[jnp.ndarray]:
   list_scale_t = []
-  for scale in qt.scale:
+  for scale in qt.scale:  # pyrefly: ignore[not-iterable]
     scale_t = transpose_fn(scale, dimension_numbers, lhs_shape, rhs_shape)
     list_scale_t.append(scale_t)
   return list_scale_t
@@ -494,8 +494,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
             raise ValueError(f'Unknown calibration mode: {mode}')
         return calibration_axes
 
-      lhs_calib_axes = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)
-      rhs_calib_axes = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)
+      lhs_calib_axes = _get_calibration_axes(lhs_mode, lhs.ndim, lhs_ca, lhs_ba)  # pyrefly: ignore[bad-argument-type]
+      rhs_calib_axes = _get_calibration_axes(rhs_mode, rhs.ndim, rhs_ca, rhs_ba)  # pyrefly: ignore[bad-argument-type]
     else:
       (lhs_ra, rhs_ra) = (None, None)
       lhs_calib_axes = None
@@ -507,8 +507,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
     if self.lhs_mid_alpha is not None:
       assert self.lhs_mid is not None
       lhs_mid_qt = self.lhs_mid.calibrate(lhs, calibration_axes=lhs_ra)
-      assert len(lhs_mid_qt.scale) == 1, 'you must set some numerics'
-      lhs_mid_scale = dezero(lhs_mid_qt.scale[0])
+      assert len(lhs_mid_qt.scale) == 1, 'you must set some numerics'  # pyrefly: ignore[bad-argument-type]
+      lhs_mid_scale = dezero(lhs_mid_qt.scale[0])  # pyrefly: ignore[unsupported-operation]
       lhs_mid_scale = lhs_mid_scale**self.lhs_mid_alpha
       lhs_mid_scale_t = transpose.lhs_scale_transpose_for_rhs_input(
           lhs_mid_scale, dimension_numbers, rhs.shape
@@ -520,8 +520,8 @@ class DefaultDotGeneralQuantizer(DotGeneralQuantizer):
     if self.rhs_mid_alpha is not None:
       assert self.rhs_mid is not None
       rhs_mid_qt = self.rhs_mid.calibrate(rhs, calibration_axes=rhs_ra)
-      assert len(rhs_mid_qt.scale) == 1, 'you must set some numerics'
-      rhs_mid_scale = dezero(rhs_mid_qt.scale[0])
+      assert len(rhs_mid_qt.scale) == 1, 'you must set some numerics'  # pyrefly: ignore[bad-argument-type]
+      rhs_mid_scale = dezero(rhs_mid_qt.scale[0])  # pyrefly: ignore[unsupported-operation]
       rhs_mid_scale = rhs_mid_scale**self.rhs_mid_alpha
       rhs_mid_scale_t = transpose.rhs_scale_transpose_for_lhs_input(
           rhs_mid_scale, dimension_numbers, lhs.shape
@@ -623,7 +623,7 @@ def quant(
     if input_qtensor is not None:
       if not allow_dummy_gradient_into_qtensor:
         quant_grad = (
-            'Poison. '
+            'Poison. '  # pyrefly: ignore[bad-assignment]
             + 'Gradients are not generally expected in serving. '
             + 'Please set allow_dummy_gradient_into_qtensor to True '
             + 'if this is the intended behavior.'
@@ -669,7 +669,7 @@ def quant(
       rhs_qt_calculated,
       rhs_quant_grad,
   )
-  return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)
+  return (lhs_qt, lhs_quant_grad), (rhs_qt, rhs_quant_grad)  # pyrefly: ignore[bad-return]
 
 
 def _maybe_use_fwd_quant(
@@ -712,7 +712,7 @@ def _maybe_use_fwd_quant(
     # we have some misconfiguration. One way to deal with it is
     # set use_fwd_quant to False.
     scale_t = transpose.rhs_scale_transpose_for_lhs_input(
-        rhs.qx.scale[0], dimension_numbers, lhs.shape
+        rhs.qx.scale[0], dimension_numbers, lhs.shape  # pyrefly: ignore[unsupported-operation]
     )
 
     # Cast rhs scales to lhs dtype when multiplying with lhs. This is to
@@ -722,11 +722,11 @@ def _maybe_use_fwd_quant(
     # rhs qvalue may be integer. It will be quantized again later, so cast
     # its dtype back to dequant dtype.
     # TODO(yichizh): avoid double quantization and evaluate model quality.
-    rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)
+    rhs = rhs.qx.qvalue.astype(rhs.qx.dequant_dtype)  # pyrefly: ignore[missing-attribute]
   else:
-    rhs = rhs.x
+    rhs = rhs.x  # pyrefly: ignore[bad-assignment]
 
-  return lhs, rhs
+  return lhs, rhs  # pyrefly: ignore[bad-return]
 
 
 @utils.flax_slots_kw_only_dataclass
@@ -751,7 +751,7 @@ class DotGeneralRaw:
   # TODO(lew): Remove this function.
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
-    return dot_general_raw_make(*args, **kwargs)
+    return dot_general_raw_make(*args, **kwargs)  # pyrefly: ignore[bad-return]
 
   # TODO(lew): Can we remove MutliTensor and pass rhs_qt instead?
   def __call__(
@@ -812,11 +812,11 @@ class DotGeneralRaw:
           rhs_qt.bias and self.rhs.dequant_mode != DequantMode.THIS_INPUT
       ), msg.format(arg='rhs', mode=self.rhs.dequant_mode)
 
-      lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)
-      lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)
+      lhs_mt = MultiTensor(x=lhs, qx=lhs_qt)  # pyrefly: ignore[unexpected-keyword]
+      lhs_res = TensorRes(mt=lhs_mt, quant_grad=lhs_quant_grad)  # pyrefly: ignore[unexpected-keyword]
 
-      rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)
-      rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)
+      rhs_mt = MultiTensor(x=rhs, qx=rhs_qt)  # pyrefly: ignore[unexpected-keyword]
+      rhs_res = TensorRes(mt=rhs_mt, quant_grad=rhs_quant_grad)  # pyrefly: ignore[unexpected-keyword]
 
       # TODO(lew): mt.x above should be clipped for clipping calibrations
       out = _qtensor_dot_general(
@@ -829,7 +829,7 @@ class DotGeneralRaw:
 
       out = out.dequant()
 
-      res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)
+      res = DotGeneralRes(lhs=lhs_res, rhs=rhs_res)  # pyrefly: ignore[unexpected-keyword]
       if self.local_aqt is not None:
         (lhs_ca, rhs_ca), _ = dimension_numbers
         assert len(lhs_ca) == len(rhs_ca)
@@ -859,7 +859,7 @@ def _qtensor_dot_general(
       output = input_qtensor.qvalue
       if input_qtensor.sparsity_mask is not None:
         output = output * input_qtensor.sparsity_mask
-    return output
+    return output  # pyrefly: ignore[bad-return]
 
   # Dequantize before the lax dg call if in fake quant mode
   lhs_qin = _maybe_dequant(lhs_qt, cfg.lhs)
@@ -886,7 +886,7 @@ def _qtensor_dot_general(
 
   if cfg.lhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert rhs_qin.dtype in dtypes_can_be_scaled
-    for scale in lhs_qt.scale:
+    for scale in lhs_qt.scale:  # pyrefly: ignore[not-iterable]
       transposed_scale = transpose.lhs_scale_transpose_for_rhs_input(
           scale, dimension_numbers, rhs_qt.shape
       )
@@ -895,7 +895,7 @@ def _qtensor_dot_general(
 
   if cfg.rhs.dequant_mode == DequantMode.OTHER_INPUT:
     assert lhs_qin.dtype in dtypes_can_be_scaled
-    for scale in rhs_qt.scale:
+    for scale in rhs_qt.scale:  # pyrefly: ignore[not-iterable]
       transposed_scale = transpose.rhs_scale_transpose_for_lhs_input(
           scale, dimension_numbers, lhs_qt.shape
       )
@@ -928,11 +928,11 @@ def _qtensor_dot_general(
   # TODO(lew): Do we have a correct precision above?
   #   Relevant: https://github.com/google/jax/issues/14022
   out = aqt_tensor.QTensor(
-      qvalue=out,
-      scale=[],
-      scale_t=None,
-      bias=[],
-      dequant_dtype=dequant_dtype,
+      qvalue=out,  # pyrefly: ignore[unexpected-keyword]
+      scale=[],  # pyrefly: ignore[unexpected-keyword]
+      scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+      bias=[],  # pyrefly: ignore[unexpected-keyword]
+      dequant_dtype=dequant_dtype,  # pyrefly: ignore[unexpected-keyword]
   )
   assert out.scale is not None  # pytype help
 
@@ -970,7 +970,7 @@ class DotGeneral:
 
   @classmethod
   def make(cls, *args, **kwargs) -> Self:
-    return dot_general_make(*args, **kwargs)
+    return dot_general_make(*args, **kwargs)  # pyrefly: ignore[bad-return]
 
   def dg_core(
       self,

@@ -154,11 +154,11 @@ class Stats:
         1)  # no effect, but needed for flax.linen.initializers.zeros.
     shape = tuple(shape)
     return cls(
-        n=0,
-        mean=flax.linen.initializers.zeros(key, shape, dtype),
-        mean_abs=flax.linen.initializers.zeros(key, shape, dtype),
-        mean_sq=flax.linen.initializers.zeros(key, shape, dtype),
-        mean_batch_maximum=flax.linen.initializers.zeros(key, shape, dtype),
+        n=0,  # pyrefly: ignore[unexpected-keyword]
+        mean=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
+        mean_abs=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
+        mean_sq=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
+        mean_batch_maximum=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
         mean_batch_minimum=flax.linen.initializers.zeros(key, shape, dtype))  # pytype: disable=wrong-keyword-args  # trace-all-classes
 
   @classmethod
@@ -236,9 +236,9 @@ class Stats:
         samples,
         masked_reduction_fn=masked_mean_of_max)
     return cls(
-        n=new_n,
-        mean=new_mean,
-        mean_abs=new_mean_abs,
-        mean_sq=new_mean_sq,
-        mean_batch_minimum=new_mean_batch_minimum,
+        n=new_n,  # pyrefly: ignore[unexpected-keyword]
+        mean=new_mean,  # pyrefly: ignore[unexpected-keyword]
+        mean_abs=new_mean_abs,  # pyrefly: ignore[unexpected-keyword]
+        mean_sq=new_mean_sq,  # pyrefly: ignore[unexpected-keyword]
+        mean_batch_minimum=new_mean_batch_minimum,  # pyrefly: ignore[unexpected-keyword]
         mean_batch_maximum=new_mean_batch_maximum)  # pytype: disable=wrong-keyword-args  # trace-all-classes

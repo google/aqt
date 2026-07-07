@@ -73,11 +73,11 @@ class AqtConvGeneralTest(parameterized.TestCase):
     # Power-of-2 scales allow FQ and AQT to be exactly the same.
     dg_quantizer = dg_raw_conv.dg_quantizer
     if dg_raw_conv.lhs:
-      _apply_po2_scale(dg_quantizer.lhs)
-      dg_quantizer.lhs.init_calibration()
+      _apply_po2_scale(dg_quantizer.lhs)  # pyrefly: ignore[missing-attribute]
+      dg_quantizer.lhs.init_calibration()  # pyrefly: ignore[missing-attribute]
     if dg_raw_conv.rhs:
-      _apply_po2_scale(dg_quantizer.rhs)
-      dg_quantizer.rhs.init_calibration()
+      _apply_po2_scale(dg_quantizer.rhs)  # pyrefly: ignore[missing-attribute]
+      dg_quantizer.rhs.init_calibration()  # pyrefly: ignore[missing-attribute]
 
     batch_n = 10
     contr_n = 20
@@ -92,8 +92,8 @@ class AqtConvGeneralTest(parameterized.TestCase):
         "padding": "SAME",
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
-    lhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.lhs)(lhs)
-    rhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.rhs)(rhs)
+    lhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.lhs)(lhs)  # pyrefly: ignore[missing-attribute]
+    rhs_fq = aqt_quantizer.make_fake_quant(dg_raw_conv.dg_quantizer.rhs)(rhs)  # pyrefly: ignore[missing-attribute]
     prod_fq = lax_conv(lhs_fq, rhs_fq, **kwargs)
     prod_aqt = aqt_conv_fn(lhs, rhs, **kwargs)
     assert (prod_aqt == prod_fq).all()
@@ -123,11 +123,11 @@ class AqtConvGeneralTest(parameterized.TestCase):
     # Power-of-2 scales allow FQ and AQT to be exactly the same.
     dg_quantizer = dg_raw_conv.dg_quantizer
     if dg_raw_conv.lhs:
-      _apply_po2_scale(dg_quantizer.lhs)
-      dg_quantizer.lhs.init_calibration()
+      _apply_po2_scale(dg_quantizer.lhs)  # pyrefly: ignore[missing-attribute]
+      dg_quantizer.lhs.init_calibration()  # pyrefly: ignore[missing-attribute]
     if dg_raw_conv.rhs:
-      _apply_po2_scale(dg_quantizer.rhs)
-      dg_quantizer.rhs.init_calibration()
+      _apply_po2_scale(dg_quantizer.rhs)  # pyrefly: ignore[missing-attribute]
+      dg_quantizer.rhs.init_calibration()  # pyrefly: ignore[missing-attribute]
 
     batch_n = 10
     contr_n = 20
@@ -144,9 +144,9 @@ class AqtConvGeneralTest(parameterized.TestCase):
         "dimension_numbers": fl._conv_dimension_numbers(lhs.shape),
     }
 
-    lhs_q, _ = dg_raw_conv.dg_quantizer.lhs.quant(
+    lhs_q, _ = dg_raw_conv.dg_quantizer.lhs.quant(  # pyrefly: ignore[missing-attribute]
         lhs, calibration_axes=[0, 1, 2, 3])
-    rhs_q, _ = dg_raw_conv.dg_quantizer.rhs.quant(
+    rhs_q, _ = dg_raw_conv.dg_quantizer.rhs.quant(  # pyrefly: ignore[missing-attribute]
         rhs, calibration_axes=[0, 1, 2])
 
     out_no_quant, _ = aqt_conv_fn(

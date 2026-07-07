@@ -125,12 +125,12 @@ def get_dynamic_context_for_step(
   num_update_sparsity = min(8, num_update_sparsity)
   quantize_acts = step >= activation_bound_start_step
   return quant_config.DynamicContext(
-      update_bounds=update_bounds,
-      quantize_acts=quantize_acts,
-      apply_sparsity=apply_sparsity,
-      update_weight_sparsity=update_weight_sparsity,
-      update_act_sparsity=update_act_sparsity,
-      num_update_sparsity=num_update_sparsity,
-      collect_acts_stats=collect_acts_stats,
-      prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,
+      update_bounds=update_bounds,  # pyrefly: ignore[unexpected-keyword]
+      quantize_acts=quantize_acts,  # pyrefly: ignore[unexpected-keyword]
+      apply_sparsity=apply_sparsity,  # pyrefly: ignore[unexpected-keyword]
+      update_weight_sparsity=update_weight_sparsity,  # pyrefly: ignore[unexpected-keyword]
+      update_act_sparsity=update_act_sparsity,  # pyrefly: ignore[unexpected-keyword]
+      num_update_sparsity=num_update_sparsity,  # pyrefly: ignore[unexpected-keyword]
+      collect_acts_stats=collect_acts_stats,  # pyrefly: ignore[unexpected-keyword]
+      prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,  # pyrefly: ignore[unexpected-keyword]
   )

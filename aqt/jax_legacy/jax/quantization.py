@@ -247,11 +247,11 @@ class QuantOps:
       initial_bounds = bounds
       # We set bounds = -1 to indicate no quantization.
       # TODO(shivaniagrawal): Move away from the hack of setting bound as -1.
-      bounds = jnp.asarray(bounds, SCALE_DTYPE)
+      bounds = jnp.asarray(bounds, SCALE_DTYPE)  # pyrefly: ignore[bad-assignment]
       if not DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING:
         # to avoid log2(0)
-        bounds = jnp.abs(bounds) + jnp.finfo(SCALE_DTYPE).eps
-      scale = jnp.exp2(-jnp.floor(jnp.log2(bounds)))  # Scale to unit binade.
+        bounds = jnp.abs(bounds) + jnp.finfo(SCALE_DTYPE).eps  # pyrefly: ignore[bad-argument-type, bad-assignment]
+      scale = jnp.exp2(-jnp.floor(jnp.log2(bounds)))  # Scale to unit binade.  # pyrefly: ignore[bad-argument-type]
       # NOTE: stop_gradient is needed here to prevent gradient flow through
       # scale when scale is not a constant, but computed as a function of
       # activations or weights.
@@ -261,7 +261,7 @@ class QuantOps:
           prec=fp_quant,
           scale=scale,
           symmetric=True,
-          bounds=initial_bounds,
+          bounds=initial_bounds,  # pyrefly: ignore[bad-argument-type]
           half_shift=False,
       )  # disable half_shift for fp quantization
 
@@ -280,9 +280,9 @@ class QuantOps:
       QuantOps for quantizing/dequantizing signed activations.
     """
     initial_bounds = bounds
-    bounds = jnp.asarray(bounds, SCALE_DTYPE)
+    bounds = jnp.asarray(bounds, SCALE_DTYPE)  # pyrefly: ignore[bad-assignment]
     if not DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING:
-      bounds += jnp.finfo(SCALE_DTYPE).eps  # to avoid div by 0
+      bounds += jnp.finfo(SCALE_DTYPE).eps  # to avoid div by 0  # pyrefly: ignore[unsupported-operation]
     scale = (
         primitives.signed_int_bound(prec=prec, half_shift=half_shift) / bounds
     )
@@ -292,9 +292,9 @@ class QuantOps:
     scale = lax.stop_gradient(scale)
     return cls(  # pytype: disable=wrong-arg-types  # jax-ndarray
         prec=prec,
-        scale=scale,
+        scale=scale,  # pyrefly: ignore[bad-argument-type]
         symmetric=True,
-        bounds=initial_bounds,
+        bounds=initial_bounds,  # pyrefly: ignore[bad-argument-type]
         half_shift=half_shift,
     )
 
@@ -312,18 +312,18 @@ class QuantOps:
       QuantOps for quantizing/dequantizing unsigned activations.
     """
     initial_bounds = bounds
-    bounds = jnp.asarray(bounds, SCALE_DTYPE)
+    bounds = jnp.asarray(bounds, SCALE_DTYPE)  # pyrefly: ignore[bad-assignment]
     if not DISABLE_EPSILON_IN_SCALE_FUN_FOR_TESTING:
-      bounds += jnp.finfo(SCALE_DTYPE).eps  # to avoid div by 0
+      bounds += jnp.finfo(SCALE_DTYPE).eps  # to avoid div by 0  # pyrefly: ignore[unsupported-operation]
     scale = primitives.unsigned_int_bound(prec=prec) / bounds
     # NOTE: stop_gradient is needed here to prevent gradient flow through scale
     # when scale is not a constant, but computed as a function of activations.
     scale = lax.stop_gradient(scale)
     return cls(  # pytype: disable=wrong-arg-types  # jax-ndarray
         prec=prec,
-        scale=scale,
+        scale=scale,  # pyrefly: ignore[bad-argument-type]
         symmetric=False,
-        bounds=initial_bounds,
+        bounds=initial_bounds,  # pyrefly: ignore[bad-argument-type]
         half_shift=False,
     )  # disable half_shift for positive distribution
 
@@ -361,7 +361,7 @@ class QuantOps:
     """
     if isinstance(self._prec, _FloatQuant):
       if self._prec.is_scaled:
-        x = jnp.multiply(x, self._scale).astype(x.dtype)
+        x = jnp.multiply(x, self._scale).astype(x.dtype)  # pyrefly: ignore[bad-argument-type]
       fp_spec = self._prec.fp_spec
       return fp_cast.downcast_sat_ftz(
           x,
@@ -374,7 +374,7 @@ class QuantOps:
         quantize = primitives.round_and_clip_to_signed_int
       else:
         quantize = primitives.floor_and_clip_to_unsigned_int
-      scaled_x = jnp.multiply(x, self._scale)
+      scaled_x = jnp.multiply(x, self._scale)  # pyrefly: ignore[bad-argument-type]
       return quantize(
           scaled_x, prec=self._prec, dtype=dtype, half_shift=self._half_shift
       )
@@ -395,7 +395,7 @@ class QuantOps:
 
     if isinstance(self._prec, _FloatQuant) and not self._prec.is_scaled:
       return x
-    rescaled_x = jnp.divide(x, self._scale)
+    rescaled_x = jnp.divide(x, self._scale)  # pyrefly: ignore[bad-argument-type]
     return rescaled_x.astype(dtype)
 
   # Helper fake quantization
@@ -435,7 +435,7 @@ class QuantOps:
       ops = cls.create_symmetric_fp(bounds=weight_bounds, fp_quant=prec)
     else:
       ops = cls.create_symmetric(
-          bounds=weight_bounds, prec=prec, half_shift=half_shift
+          bounds=weight_bounds, prec=prec, half_shift=half_shift  # pyrefly: ignore[bad-argument-type]
       )
 
 
@@ -547,7 +547,7 @@ class QuantOps:
           hyper=hparams.bounds, name=bounds_params.module_name
       )(
           inputs,
-          bounds_params=bounds_params,
+          bounds_params=bounds_params,  # pyrefly: ignore[bad-argument-type]
       )
     elif isinstance(hparams.bounds, get_bounds.DynamicBounds.Hyper):
       if not bounds_params and not isinstance(
@@ -562,7 +562,7 @@ class QuantOps:
           hyper=hparams.bounds, name=bounds_params.module_name
       )(
           inputs,
-          bounds_params=bounds_params,
+          bounds_params=bounds_params,  # pyrefly: ignore[bad-argument-type]
       )
 
     elif isinstance(hparams.bounds, (float, jnp.ndarray)):
@@ -575,17 +575,17 @@ class QuantOps:
       )
 
     if isinstance(hparams.prec, _FloatQuant):
-      ops = cls.create_symmetric_fp(bounds=clip_bounds, fp_quant=hparams.prec)
+      ops = cls.create_symmetric_fp(bounds=clip_bounds, fp_quant=hparams.prec)  # pyrefly: ignore[bad-argument-type]
     elif (
         hparams.input_distribution == cls.ActHParams.InputDistribution.SYMMETRIC
     ):
-      ops = cls.create_symmetric(
-          bounds=clip_bounds, prec=hparams.prec, half_shift=hparams.half_shift
+      ops = cls.create_symmetric(  # pyrefly: ignore[bad-specialization]
+          bounds=clip_bounds, prec=hparams.prec, half_shift=hparams.half_shift  # pyrefly: ignore[bad-argument-type]
       )
     elif (
         hparams.input_distribution == cls.ActHParams.InputDistribution.POSITIVE
     ):
-      ops = cls.create_positive(bounds=clip_bounds, prec=hparams.prec)
+      ops = cls.create_positive(bounds=clip_bounds, prec=hparams.prec)  # pyrefly: ignore[bad-argument-type, bad-specialization]
     else:
       assert False, "can't happen."
 
@@ -856,18 +856,18 @@ def flaxformer_dot_general(
       weight_scale = quant_w.scale
     else:
       # Calculate 'r' from (s^-1) * w
-      weight_op = QuantOps.create_weights_ops(w, weight_params=weight_params)
+      weight_op = QuantOps.create_weights_ops(w, weight_params=weight_params)  # pyrefly: ignore[bad-argument-type]
       weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access  # pytype: disable=attribute-error
 
       if weight_params.expected_scale_shape:
         shape_utils.assert_shapes_equal(
-            weight_scale.shape, weight_params.expected_scale_shape
+            weight_scale.shape, weight_params.expected_scale_shape  # pyrefly: ignore[bad-argument-type]
         )
 
       # Quantize weight matrix by calculating RoundAndClip(s^-1 * w * t)
       # TODO(malmaud): See comment on 'act_op.to_quantized' above, which
       # applies here as well.
-      weight_quantized = weight_op.to_quantized(w, dtype=input_dtype)
+      weight_quantized = weight_op.to_quantized(w, dtype=input_dtype)  # pyrefly: ignore[bad-argument-type]
   else:
     assert (
         w is not None
@@ -879,7 +879,7 @@ def flaxformer_dot_general(
   metadata_context = contextlib.suppress()
   if flags.FLAGS.metadata_enabled:
     metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-        lhs_prec=None, rhs_prec=weight_prec, rhs_is_weight=True
+        lhs_prec=None, rhs_prec=weight_prec, rhs_is_weight=True  # pyrefly: ignore[bad-argument-type]
     )
   # Use metadata context to annotate op metadata with quantization info
 
@@ -916,13 +916,13 @@ def flaxformer_dot_general(
   # TODO(shivaniagrawal): A proper solution for this would be to have mixed
   # dot(uint8, int8) -> int32 in XLA.
   weight_fits_in_int8 = is_weight_quantized and (
-      weight_prec is not None and weight_prec <= 8
+      weight_prec is not None and weight_prec <= 8  # pyrefly: ignore[unsupported-operation]
   )
   # is_act_quantized might be an instance of a Jax tracer instead of a
   # Python boolean since it is generally computed from a dynamic input to a
   # JITted Jax function. Thus we use '&' instead of 'and'.
   act_prec_fits_int8 = act_prec is not None and (
-      (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8)
+      (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8)  # pyrefly: ignore[unsupported-operation]
   )
   act_fits_in_int8 = is_act_quantized & act_prec_fits_int8
   use_int8_to_int32_dot = (
@@ -1083,7 +1083,7 @@ def quantized_dot_general(
       # corresponding to per-activation-channel scale factors.
       if act_scale.ndim != 0:
         shape_utils.assert_shapes_equal(
-            act_scale.shape, (1,) * (act_scale.ndim - 1) + (num_input_channels,)
+            act_scale.shape, (1,) * (act_scale.ndim - 1) + (num_input_channels,)  # pyrefly: ignore[unbound-name]
         )
         # 'w' has one row per column of 'act_scale'. To scale each row of 'w' by
         # the inverse of the corresponding column in 'act_scale', we first have
@@ -1123,7 +1123,7 @@ def quantized_dot_general(
         weight_scale = quant_w.scale
       else:
         # Calculate 'r' from (s^-1) * w
-        w_scaled_rows = ((1 / act_scale) * w).astype(input_dtype)
+        w_scaled_rows = ((1 / act_scale) * w).astype(input_dtype)  # pyrefly: ignore[unsupported-operation]
         weight_op = QuantOps.create_weights_ops(
             w_scaled_rows, weight_params=weight_params
         )
@@ -1136,7 +1136,7 @@ def quantized_dot_general(
         # here.
         if weight_scale.ndim != 0:
           shape_utils.assert_shapes_equal(
-              weight_scale.shape, (1,) + out_channel_shape
+              weight_scale.shape, (1,) + out_channel_shape  # pyrefly: ignore[unbound-name]
           )
           if act.ndim != 0:
             weight_scale_shape = (1,) * (act.ndim - 1) + out_channel_shape
@@ -1175,13 +1175,13 @@ def quantized_dot_general(
     # TODO(shivaniagrawal): A proper solution for this would be to have mixed
     # dot(uint8, int8) -> int32 in XLA.
     weight_fits_in_int8 = is_weight_quantized and (
-        weight_prec is not None and weight_prec <= 8
+        weight_prec is not None and weight_prec <= 8  # pyrefly: ignore[unsupported-operation]
     )
     # is_act_quantized might be an instance of a Jax tracer instead of a
     # Python boolean since it is generally computed from a dynamic input to a
     # JITted Jax function. Thus we use '&' instead of 'and'.
     act_prec_fits_int8 = act_prec is not None and (
-        (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8)
+        (act_prec == 8 and act_has_symm_distribution) or (act_prec < 8)  # pyrefly: ignore[unsupported-operation]
     )
     act_fits_in_int8 = is_act_quantized & act_prec_fits_int8
     use_int8_to_int32_dot = (
@@ -1191,7 +1191,7 @@ def quantized_dot_general(
     metadata_context = contextlib.suppress()
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True
+          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True  # pyrefly: ignore[bad-argument-type]
       )
 
     with metadata_context:
@@ -1230,7 +1230,7 @@ def quantized_dot_general(
 
     quantized_type = quant_type.to_jax_type()
     w = QuantOps.create_weights_fake_quant(
-        w,
+        w,  # pyrefly: ignore[bad-argument-type]
         weight_params=weight_params,
         quantized_type=quantized_type,
         fake_dependency=fake_dependency,
@@ -1252,7 +1252,7 @@ def quantized_dot_general(
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True
+          lhs_prec=act_prec, rhs_prec=weight_prec, rhs_is_weight=True  # pyrefly: ignore[bad-argument-type]
       )
     with metadata_context:
       out_quantized = lax.dot_general(
@@ -1416,7 +1416,7 @@ def quantized_dynamic_dot_general(
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False
+          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False  # pyrefly: ignore[bad-argument-type]
       )
     with metadata_context:
       out_quantized = lax.dot_general(
@@ -1454,7 +1454,7 @@ def quantized_dynamic_dot_general(
 
     if flags.FLAGS.metadata_enabled:
       metadata_context = compute_cost_utils.DotMetadataMonkeyPatch(
-          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False
+          lhs_prec=lhs_prec, rhs_prec=rhs_prec, rhs_is_weight=False  # pyrefly: ignore[bad-argument-type]
       )
     with metadata_context:
       out = lax.dot_general(
@@ -1503,7 +1503,7 @@ def quantized_sum(
   # GetBounds, which in turn creates state variables to store activation
   # statistics. We do not want to compute statistics for each individual
   # addition within the sum reduction.
-  fp_quant = QuantOps.FloatQuant(is_scaled=False, fp_spec=prec)
+  fp_quant = QuantOps.FloatQuant(is_scaled=False, fp_spec=prec)  # pyrefly: ignore[unexpected-keyword]
   quant_ops = QuantOps.create_symmetric_fp(fp_quant=fp_quant, bounds=None)
 
   if not isinstance(axis, Iterable):

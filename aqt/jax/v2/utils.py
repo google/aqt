@@ -79,7 +79,7 @@ def dataclass_field(default='no default value'):
   if default == 'no default value':
     return dataclasses.field()
   else:
-    return dataclasses.field(default_factory=default)
+    return dataclasses.field(default_factory=default)  # pyrefly: ignore[no-matching-overload]
 
 
 class QuantMode(enum.Enum):

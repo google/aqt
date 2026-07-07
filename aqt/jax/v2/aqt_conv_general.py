@@ -103,8 +103,8 @@ However if there is any other use, we will drop that assumption."""
     rhs_qt = rhs_qt if rhs_qt is not None else rhs_qt_calculated
 
     out = lax.conv_general_dilated(
-        lhs=lhs_qt.qvalue_astype(lhs.dtype).qvalue,
-        rhs=rhs_qt.qvalue_astype(rhs.dtype).qvalue,
+        lhs=lhs_qt.qvalue_astype(lhs.dtype).qvalue,  # pyrefly: ignore[bad-argument-type]
+        rhs=rhs_qt.qvalue_astype(rhs.dtype).qvalue,  # pyrefly: ignore[bad-argument-type]
         window_strides=window_strides,
         padding=padding,
         lhs_dilation=lhs_dilation,
@@ -119,15 +119,15 @@ However if there is any other use, we will drop that assumption."""
     # It seems lucky that original scale has shape suitable for output
     # scaling without any transposition.
     out = aqt_tensor.QTensor(
-        qvalue=out,
-        scale=[],
-        scale_t=None,
-        bias=[],
-        dequant_dtype=jnp.promote_types(lhs.dtype, rhs.dtype),
+        qvalue=out,  # pyrefly: ignore[unexpected-keyword]
+        scale=[],  # pyrefly: ignore[unexpected-keyword]
+        scale_t=None,  # pyrefly: ignore[unexpected-keyword]
+        bias=[],  # pyrefly: ignore[unexpected-keyword]
+        dequant_dtype=jnp.promote_types(lhs.dtype, rhs.dtype),  # pyrefly: ignore[unexpected-keyword]
     )
     assert out.scale is not None  # pytype help
-    out.scale.extend(lhs_qt.scale)
-    out.scale.extend(rhs_qt.scale)
+    out.scale.extend(lhs_qt.scale)  # pyrefly: ignore[bad-argument-type]
+    out.scale.extend(rhs_qt.scale)  # pyrefly: ignore[bad-argument-type]
     out = out.dequant()
 
     # # Future scale granularity optimization.

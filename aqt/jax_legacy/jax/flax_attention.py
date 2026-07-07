@@ -295,7 +295,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
     if quant_hparams is None:
       raise ValueError('quant_hparams must be provided for quantized softmax.')
     fp_quant_config = QuantOps.FloatQuant(
-        is_scaled=False, fp_spec=quant_hparams.prec)
+        is_scaled=False, fp_spec=quant_hparams.prec)  # pyrefly: ignore[unexpected-keyword]
     quant_ops = QuantOps.create_symmetric_fp(
         fp_quant=fp_quant_config, bounds=None)
 
@@ -318,7 +318,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
     return a_softmax.astype(dtype)
 
   # If no params, return accurate Softmax.
-  if softmax_hparams == SoftmaxHParams(None, None,
+  if softmax_hparams == SoftmaxHParams(None, None,  # pyrefly: ignore[bad-argument-count]
                                        None) or softmax_hparams is None:
     return unquantized_softmax(a)
 
@@ -342,7 +342,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
   asubmax = lax.sub(a, amax_singletons)
 
   # Calculate approximated exponential
-  approx_exp = exponential(asubmax, dtype, exp_hparams)
+  approx_exp = exponential(asubmax, dtype, exp_hparams)  # pyrefly: ignore[bad-argument-type]
 
   # If sum_high_bound: Upper clip bound for sum(exp(x-M)).
   asumexp = dimadd(
@@ -357,7 +357,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
     asumexp = jnp.clip(asumexp, sum_low_bound, exp_hparams.sum_high_bound)
 
   # Approximation of reciprocal.
-  arecip = reciprocal(asumexp, dtype, recip_hparams)
+  arecip = reciprocal(asumexp, dtype, recip_hparams)  # pyrefly: ignore[bad-argument-type]
   return lax.mul(approx_exp, arecip).astype(dtype)
 
 
@@ -455,10 +455,10 @@ def dot_product_attention(query,
   depth = query.shape[-1]
   n = key.ndim
   # batch_dims is  <bs, <non-attention dims>, num_heads>
-  batch_dims = tuple(onp.delete(range(n), axis + (n - 1,)))
+  batch_dims = tuple(onp.delete(range(n), axis + (n - 1,)))  # pyrefly: ignore[unsupported-operation]
   # q & k -> (bs, <non-attention dims>, num_heads, <attention dims>, channels)
 
-  qk_perm = batch_dims + axis + (n - 1,)
+  qk_perm = batch_dims + axis + (n - 1,)  # pyrefly: ignore[unsupported-operation]
   key = key.transpose(qk_perm)
   shape_utils.assert_shapes_equal(
       key.shape, (batch_size, num_heads, key_sequence_length, channel_size))
@@ -481,14 +481,14 @@ def dot_product_attention(query,
                                     (batch_size, 1, query_sequence_length, 1))
 
   key_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=dynamic_context.update_bounds,
-      update_stats=train,
-      paxis_name=paxis_name,
-      mask=key_padding_mask_transposed,
-      module_name='K')
+      update_bounds=dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+      update_stats=train,  # pyrefly: ignore[unexpected-keyword]
+      paxis_name=paxis_name,  # pyrefly: ignore[unexpected-keyword]
+      mask=key_padding_mask_transposed,  # pyrefly: ignore[unexpected-keyword]
+      module_name='K')  # pyrefly: ignore[unexpected-keyword]
 
   # v -> (bs, <non-attention dims>, num_heads, channels, <attention dims>)
-  v_perm = batch_dims + (n - 1,) + axis
+  v_perm = batch_dims + (n - 1,) + axis  # pyrefly: ignore[unsupported-operation]
   value = value.transpose(v_perm)
   shape_utils.assert_shapes_equal(
       value.shape, (batch_size, num_heads, channel_size, key_sequence_length))
@@ -504,11 +504,11 @@ def dot_product_attention(query,
             value, mask=value_padding_mask_transposed)
 
   value_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=dynamic_context.update_bounds,
-      update_stats=train,
-      paxis_name=paxis_name,
-      mask=value_padding_mask_transposed,
-      module_name='V')
+      update_bounds=dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+      update_stats=train,  # pyrefly: ignore[unexpected-keyword]
+      paxis_name=paxis_name,  # pyrefly: ignore[unexpected-keyword]
+      mask=value_padding_mask_transposed,  # pyrefly: ignore[unexpected-keyword]
+      module_name='V')  # pyrefly: ignore[unexpected-keyword]
 
   query = query / jnp.sqrt(depth).astype(dtype)
   query = query.transpose(qk_perm)
@@ -521,11 +521,11 @@ def dot_product_attention(query,
             query, mask=query_padding_mask_transposed)
 
   query_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=dynamic_context.update_bounds,
-      update_stats=train,
-      paxis_name=paxis_name,
-      mask=query_padding_mask_transposed,
-      module_name='Q')
+      update_bounds=dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+      update_stats=train,  # pyrefly: ignore[unexpected-keyword]
+      paxis_name=paxis_name,  # pyrefly: ignore[unexpected-keyword]
+      mask=query_padding_mask_transposed,  # pyrefly: ignore[unexpected-keyword]
+      module_name='Q')  # pyrefly: ignore[unexpected-keyword]
 
   batch_dims_t = tuple(range(len(batch_dims)))
   attn_weights = quantized_dynamic_dot_general(
@@ -553,12 +553,12 @@ def dot_product_attention(query,
     attn_weights = attn_weights + bias
 
   # normalize the attention weights
-  norm_dims = tuple(range(attn_weights.ndim - len(axis), attn_weights.ndim))
+  norm_dims = tuple(range(attn_weights.ndim - len(axis), attn_weights.ndim))  # pyrefly: ignore[bad-argument-type]
   attn_weights = softmax(
       attn_weights,
       norm_dims,
       dtype,
-      hparams.softmax,
+      hparams.softmax,  # pyrefly: ignore[bad-argument-type]
       dynamic_context=dynamic_context)
 
   # apply dropout
@@ -588,14 +588,14 @@ def dot_product_attention(query,
         'be set to fix value 1.0 to '
         'match Softmax range.')
   probs_bounds_params = get_bounds.GetBounds.Params(
-      update_bounds=dynamic_context.update_bounds,
-      update_stats=train,
-      paxis_name=paxis_name,
-      mask=attn_mask,
-      module_name='attn_probs')
+      update_bounds=dynamic_context.update_bounds,  # pyrefly: ignore[unexpected-keyword]
+      update_stats=train,  # pyrefly: ignore[unexpected-keyword]
+      paxis_name=paxis_name,  # pyrefly: ignore[unexpected-keyword]
+      mask=attn_mask,  # pyrefly: ignore[unexpected-keyword]
+      module_name='attn_probs')  # pyrefly: ignore[unexpected-keyword]
 
   # compute the new values given the attention weights
-  wv_contracting_dims = (norm_dims, range(value.ndim - len(axis), value.ndim))
+  wv_contracting_dims = (norm_dims, range(value.ndim - len(axis), value.ndim))  # pyrefly: ignore[bad-argument-type]
   y = quantized_dynamic_dot_general(
       lhs_act=attn_weights,
       rhs_act=value,
@@ -812,7 +812,7 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
         cshape = cached_key.value.shape
         indices = [0] * len(cshape)
         i = cache_index.value
-        attn_size = onp.prod(onp.take(cshape, attention_axis))
+        attn_size = onp.prod(onp.take(cshape, attention_axis))  # pyrefly: ignore[no-matching-overload]
 
         *batch_dims, max_length, num_heads, depth_per_head = (  # pylint: disable=unused-variable
             cached_key.value.shape)
@@ -835,10 +835,10 @@ class MultiHeadDotProductAttentionAqt(nn.Module):
     if self.causal_mask:
       if self.decode and is_cache_initialized:
         bias_pre_shape = (1,) * (key.ndim - 1)
-        attn_shape = tuple(onp.take(key.shape, attention_axis))
+        attn_shape = tuple(onp.take(key.shape, attention_axis))  # pyrefly: ignore[no-matching-overload]
         attn_size = onp.prod(attn_shape)
         ii = jnp.arange(attn_size, dtype=jnp.int32)
-        mask = ii < cache_index.value
+        mask = ii < cache_index.value  # pyrefly: ignore[unbound-name]
         mask_components.append(mask.reshape(bias_pre_shape + attn_shape))
       else:
         mask_components.append(_make_causal_mask(key, attention_axis))

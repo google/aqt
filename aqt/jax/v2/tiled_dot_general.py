@@ -130,7 +130,7 @@ class Cfg:
           ret.lhs.remaining_axes.append(make_tiling(in_lhs, tile_size))
         if found_in_rhs:
           ret.rhs.remaining_axes.append(make_tiling(in_rhs, tile_size))
-    return ret
+    return ret  # pyrefly: ignore[bad-return]
 
   def complete_missing(
       self,
@@ -211,9 +211,9 @@ class TilingState:
     tile_axis = tile_axis[0]
 
     msg = f'{self.tiled_shape[tile_axis]=}, {at.tile_size=}, {at.tile_count=}'
-    assert self.tiled_shape[tile_axis] == at.tile_size * at.tile_count, msg
-    self.tiled_shape[tile_axis] = at.tile_size
-    self.tiled_shape.insert(tile_axis, at.tile_count)
+    assert self.tiled_shape[tile_axis] == at.tile_size * at.tile_count, msg  # pyrefly: ignore[unsupported-operation]
+    self.tiled_shape[tile_axis] = at.tile_size  # pyrefly: ignore[unsupported-operation]
+    self.tiled_shape.insert(tile_axis, at.tile_count)  # pyrefly: ignore[bad-argument-type]
 
     # Update tile_map
     for k in self.tile_map:
@@ -429,8 +429,8 @@ def tiled_dot_general_with_tiling_states(
 
   tiled_ca = (xlhs_ca, xrhs_ca)
   tiled_ba = (
-      xlhs_ca_tile + xlhs_ba + xlhs_ra_tile + xlhs_ra_tile_other,
-      xrhs_ca_tile + xrhs_ba + xrhs_ra_tile_other + xrhs_ra_tile,
+      xlhs_ca_tile + xlhs_ba + xlhs_ra_tile + xlhs_ra_tile_other,  # pyrefly: ignore[unsupported-operation]
+      xrhs_ca_tile + xrhs_ba + xrhs_ra_tile_other + xrhs_ra_tile,  # pyrefly: ignore[unsupported-operation]
   )
   tiled_dimension_numbers = (tiled_ca, tiled_ba)
 
@@ -443,13 +443,13 @@ def tiled_dot_general_with_tiling_states(
       f' rhs: rhs.shape={xrhs_x.shape}, rhs_ca={tiled_ca[1]},'
       f' rhs_ba={tiled_ba[1]}, rhs_ra={tiled_rhs_ra} \n'
   )
-  for axis in tiled_ca[0] + tiled_ba[0]:
+  for axis in tiled_ca[0] + tiled_ba[0]:  # pyrefly: ignore[unsupported-operation]
     assert axis >= 0 and axis < xlhs_x.ndim, g_msg
-  for axis in tiled_ca[1] + tiled_ba[1]:
+  for axis in tiled_ca[1] + tiled_ba[1]:  # pyrefly: ignore[unsupported-operation]
     assert axis >= 0 and axis < xrhs_x.ndim, g_msg
 
   out = dot_general(
-      xlhs_x, xrhs_x, tiled_dimension_numbers, precision, preferred_element_type
+      xlhs_x, xrhs_x, tiled_dimension_numbers, precision, preferred_element_type  # pyrefly: ignore[bad-argument-type]
   )
 
   print_dimension_numbers(
@@ -460,21 +460,21 @@ def tiled_dot_general_with_tiling_states(
   assert xlhs.axes_shape(xlhs_ca_tile) == xrhs.axes_shape(xrhs_ca_tile), g_msg
   ca_tile_sh = xlhs.axes_shape(xlhs_ca_tile)
 
-  assert xlhs.axes_shape(xlhs_ba) == xrhs.axes_shape(xrhs_ba), g_msg
-  ba_sh = xlhs.axes_shape(xlhs_ba)
+  assert xlhs.axes_shape(xlhs_ba) == xrhs.axes_shape(xrhs_ba), g_msg  # pyrefly: ignore[bad-argument-type]
+  ba_sh = xlhs.axes_shape(xlhs_ba)  # pyrefly: ignore[bad-argument-type]
 
   assert xlhs.axes_shape(xlhs_ra_tile) == xrhs.axes_shape(
-      xrhs_ra_tile_other
+      xrhs_ra_tile_other  # pyrefly: ignore[bad-argument-type]
   ), g_msg
   lhs_ra_tile_sh = xlhs.axes_shape(xlhs_ra_tile)
 
-  assert xlhs.axes_shape(xlhs_ra_tile_other) == xrhs.axes_shape(
+  assert xlhs.axes_shape(xlhs_ra_tile_other) == xrhs.axes_shape(  # pyrefly: ignore[bad-argument-type]
       xrhs_ra_tile
   ), g_msg
-  rhs_ra_tile_sh = xlhs.axes_shape(xlhs_ra_tile_other)
+  rhs_ra_tile_sh = xlhs.axes_shape(xlhs_ra_tile_other)  # pyrefly: ignore[bad-argument-type]
 
-  lhs_ra_sh = xlhs.axes_shape(xlhs_ra)
-  rhs_ra_sh = xrhs.axes_shape(xrhs_ra)
+  lhs_ra_sh = xlhs.axes_shape(xlhs_ra)  # pyrefly: ignore[bad-argument-type]
+  rhs_ra_sh = xrhs.axes_shape(xrhs_ra)  # pyrefly: ignore[bad-argument-type]
 
   g_msg += f'Tiled dg {out.shape=} \n'
   assert (

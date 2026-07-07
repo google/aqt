@@ -73,7 +73,7 @@ def ragged_dot(
   Returns:
     The result of the ragged dot product.
   """
-  cfg.fwd.dot_general = RaggedDot(group_sizes=group_sizes)
+  cfg.fwd.dot_general = RaggedDot(group_sizes=group_sizes)  # pyrefly: ignore[unexpected-keyword]
   # We want to use the same scale for all the experts in the rhs. We do this by
   # setting the rhs_ca to [0, 1] even though the actual contraction axis is 1.
   dimension_numbers = ([1], [0, 1]), ([], [])

@@ -42,7 +42,7 @@ def load_hlo_proto_from_jax_fn(fn: Callable[..., Any], *fn_args: Any,
   computation = (
       jax.jit(fn).lower(*fn_args, **fn_kwargs).compiler_ir(dialect='hlo')
   )
-  serialized_hlo = computation.as_serialized_hlo_module_proto()
+  serialized_hlo = computation.as_serialized_hlo_module_proto()  # pyrefly: ignore[missing-attribute]
   hlo_module_proto = hlo_pb2.HloModuleProto.FromString(serialized_hlo)
   return hlo_module_proto
 
