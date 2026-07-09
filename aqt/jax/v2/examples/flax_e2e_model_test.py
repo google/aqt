@@ -77,7 +77,7 @@ class MnistTest(parameterized.TestCase):
             "TPU v2": [3.198328018188476562500000000000],
             "TPU v3": [3.198328018188476562500000000000],
             "TPU v4": [3.198297500610351562500000000000],
-            "TPU v5 lite": [3.198297500610351562500000000000],
+            "TPU v5e": [3.198297500610351562500000000000],
         },
         4: {
             "cpu": [
@@ -87,7 +87,7 @@ class MnistTest(parameterized.TestCase):
             "TPU v2": [2.302409172058105468750000000000],
             "TPU v3": [2.302409172058105468750000000000],
             "TPU v4": [2.302409172058105468750000000000],
-            "TPU v5 lite": [2.302409172058105468750000000000],
+            "TPU v5e": [2.302409172058105468750000000000],
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
@@ -306,13 +306,13 @@ class MnistTest(parameterized.TestCase):
             "TPU v2": 2.3,
             "TPU v3": 2.3,
             "TPU v4": 2.3,
-            "TPU v5 lite": 2.3,
+            "TPU v5e": 2.3,
         },
         4: {
             "TPU v2": 2.3,
             "TPU v3": 2.3,
             "TPU v4": 2.3,
-            "TPU v5 lite": 2.3,
+            "TPU v5e": 2.3,
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized
