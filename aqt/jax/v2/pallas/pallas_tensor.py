@@ -154,6 +154,7 @@ def make_qtensor_blockspec(
     return pl.BlockSpec(
         block_shape=tuple(scale_blk_shape),
         index_map=scale_index_map,
+        pipeline_mode=block_spec.pipeline_mode,
     )
 
   return QTensor(
