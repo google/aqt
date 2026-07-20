@@ -87,8 +87,8 @@ def test_jaxpr_dtype(f, dg_raws: list[aqt.DotGeneralRaw], float_dtype):
     #     dg_raw.dg_quantizer, aqt.DefaultDotGeneralQuantizer
     # ), f"Invalid dg_quantizer type. {type(dg_raw.dg_quantizer)=}"
 
-    lhs_dtype = dg_raw.dg_quantizer.lhs.numerics.get_dtype()
-    rhs_dtype = dg_raw.dg_quantizer.rhs.numerics.get_dtype()
+    lhs_dtype = dg_raw.dg_quantizer.lhs.numerics.get_dtype()  # pyrefly: ignore[missing-attribute]
+    rhs_dtype = dg_raw.dg_quantizer.rhs.numerics.get_dtype()  # pyrefly: ignore[missing-attribute]
     assert_dtype_eq(lhs_sa.dtype, lhs_dtype or float_dtype)
     assert_dtype_eq(rhs_sa.dtype, rhs_dtype or float_dtype)
     assert_dtype_eq(out_sa.dtype, dg_raw.dg_accumulator_dtype or float_dtype)
@@ -162,7 +162,7 @@ def _check_result_eq(dgs, *, lhs, rhs, gra):
     if options["check_fwd_lhs_tricky_clip_and_round"]:
       # Test that all the expected were zero anyway
       where_zero_gradient_expected = lhs < 0
-      assert (gl[where_zero_gradient_expected] == 0.0).all()
+      assert (gl[where_zero_gradient_expected] == 0.0).all()  # pyrefly: ignore[unsupported-operation]
 
     good_lr = lr if good_lr is None else good_lr
     good_gl = gl if good_gl is None else good_gl
@@ -230,7 +230,7 @@ def _modify_dg(
   dg = copy.deepcopy(readonly_dg)
   if fwd_lhs_tricky_clip_and_round:
     # Tricky means that we have zero gradient on x < 0
-    dg.fwd.dg_quantizer.lhs.numerics = _TrickyNumerics()
+    dg.fwd.dg_quantizer.lhs.numerics = _TrickyNumerics()  # pyrefly: ignore[missing-attribute]
     dg.fwd.dg_accumulator_dtype = None
 
   def _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode):
@@ -256,8 +256,8 @@ def _modify_dg(
     # have the same numerics when scales are power of two (po2).
     # We are passing dims to config so that we can reuse it in fake_quant.
     # Power-of-2 scales allow FQ and AQT to be exactly the same.
-    _apply_po2_scale(c.dg_quantizer.lhs)
-    _apply_po2_scale(c.dg_quantizer.rhs)
+    _apply_po2_scale(c.dg_quantizer.lhs)  # pyrefly: ignore[missing-attribute]
+    _apply_po2_scale(c.dg_quantizer.rhs)  # pyrefly: ignore[missing-attribute]
 
     _apply_dequant_mode(c, lhs_dequant_mode, rhs_dequant_mode)
     _apply_calibration_mode(c, lhs_calibration_mode, rhs_calibration_mode)
@@ -279,9 +279,9 @@ def _modify_dg(
     disable_quant(dg.drhs)
 
   if use_fwd_quant is not None:
-    if not isinstance(dg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics):
+    if not isinstance(dg.fwd.dg_quantizer.lhs.numerics, no_numerics.NoNumerics):  # pyrefly: ignore[missing-attribute]
       dg.drhs.rhs.use_fwd_quant = use_fwd_quant
-    if not isinstance(dg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics):
+    if not isinstance(dg.fwd.dg_quantizer.rhs.numerics, no_numerics.NoNumerics):  # pyrefly: ignore[missing-attribute]
       dg.dlhs.rhs.use_fwd_quant = use_fwd_quant
 
   if use_mid_quant:
@@ -299,10 +299,10 @@ def _modify_dg(
     dg.drhs.local_aqt = local_aqt
 
     # When using abs-max scaling, this should be a no-op.
-  if isinstance(dg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):
-    dg.fwd.dg_quantizer.lhs.numerics.clip_gradient = clip_gradient
-  if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):
-    dg.fwd.dg_quantizer.rhs.numerics.clip_gradient = clip_gradient
+  if isinstance(dg.fwd.dg_quantizer.lhs.numerics, int_numerics.IntSymmetric):  # pyrefly: ignore[missing-attribute]
+    dg.fwd.dg_quantizer.lhs.numerics.clip_gradient = clip_gradient  # pyrefly: ignore[missing-attribute]
+  if isinstance(dg.fwd.dg_quantizer.rhs.numerics, int_numerics.IntSymmetric):  # pyrefly: ignore[missing-attribute]
+    dg.fwd.dg_quantizer.rhs.numerics.clip_gradient = clip_gradient  # pyrefly: ignore[missing-attribute]
 
   return dg
 
@@ -507,12 +507,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(dg=config.dot_general_make(8, 8), clip_gradient=True),
       dict(
           dg=config.dot_general_make(
-              8, 8, dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)
+              8, 8, dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)  # pyrefly: ignore[unexpected-keyword]
           )
       ),
       dict(
           dg=config.dot_general_make(
-              8, 8, drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)
+              8, 8, drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)  # pyrefly: ignore[unexpected-keyword]
           )
       ),
       # That test could fail numerically because bf16
@@ -535,7 +535,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           dg=fqt_param_dict(
               s=10,
               use_fwd_quant=True,
-              dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+              dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),  # pyrefly: ignore[unexpected-keyword]
           )["dg"],
           dims=(((0, 2), (1, 0)), ((3, 1), (2, 4))),
           # contraction: 2, 5; batch: 4, 3
@@ -674,7 +674,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             "default    ",
             aqt_dg_full(
                 aqt.DequantMode.OUTPUT,
-                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),  # pyrefly: ignore[unexpected-keyword]
             ),
             dict(),
         ),
@@ -682,14 +682,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             "default    ",
             aqt_dg_full(
                 aqt.DequantMode.THIS_INPUT,
-                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),  # pyrefly: ignore[unexpected-keyword]
             ),
             dict(),
         ),
     ])
 
     if isinstance(
-        readonly_dg.fwd.dg_quantizer.lhs.numerics,
+        readonly_dg.fwd.dg_quantizer.lhs.numerics,  # pyrefly: ignore[missing-attribute]
         int_numerics.IntSymmetric,
     ):
       check([
@@ -732,12 +732,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(dg=config.dot_general_make(8, 8), clip_gradient=True),
       dict(
           dg=config.dot_general_make(
-              8, 8, dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)
+              8, 8, dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)  # pyrefly: ignore[unexpected-keyword]
           )
       ),
       dict(
           dg=config.dot_general_make(
-              8, 8, drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)
+              8, 8, drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)  # pyrefly: ignore[unexpected-keyword]
           )
       ),
       # That test could fail numerically because bf16
@@ -874,7 +874,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
             aqt_dg_full(
                 aqt.DequantMode.THIS_INPUT,
                 aqt.CalibrationMode.REMAINING_AXIS,
-                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),  # pyrefly: ignore[unexpected-keyword]
             ),
             dict(),
         ),
@@ -885,7 +885,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
                 aqt.DequantMode.THIS_INPUT,
                 aqt.CalibrationMode.REMAINING_AXIS,
                 aqt.CalibrationMode.REMAINING_AXIS,
-                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),  # pyrefly: ignore[unexpected-keyword]
             ),
             dict(),
         ),
@@ -896,7 +896,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
                 aqt.DequantMode.OTHER_INPUT,
                 aqt.CalibrationMode.REMAINING_AXIS,
                 aqt.CalibrationMode.REMAINING_AXIS,
-                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),
+                local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2),  # pyrefly: ignore[unexpected-keyword]
             ),
             dict(),
         ),
@@ -960,12 +960,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
       dict(dg=config.dot_general_make(8, 8)),
       dict(
           dg=config.dot_general_make(
-              8, 8, dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)
+              8, 8, dlhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)  # pyrefly: ignore[unexpected-keyword]
           )
       ),
       dict(
           dg=config.dot_general_make(
-              8, 8, drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)
+              8, 8, drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=2)  # pyrefly: ignore[unexpected-keyword]
           )
       ),
   ])
@@ -1073,8 +1073,8 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     lhs = rand_unif((10, 20), 1.0, seed)
     rhs = rand_unif((20, 30), 1.0, seed + 1)
     test_jaxpr_dtype(lambda: dg(lhs, rhs), [dg_raw], lhs.dtype)
-    assert dg_raw.dg_quantizer.lhs.numerics.get_dtype() == jnp.int8
-    assert dg_raw.dg_quantizer.rhs.numerics.get_dtype() == jnp.int8
+    assert dg_raw.dg_quantizer.lhs.numerics.get_dtype() == jnp.int8  # pyrefly: ignore[missing-attribute]
+    assert dg_raw.dg_quantizer.rhs.numerics.get_dtype() == jnp.int8  # pyrefly: ignore[missing-attribute]
 
   @parameterized.parameters([
       dict(
@@ -1095,12 +1095,12 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
         fwd_bits=8,
         bwd_bits=8,
         use_stochastic_rounding=False,
-        drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=shard_count),
+        drhs_local_aqt=aqt.LocalAqt(contraction_axis_shard_count=shard_count),  # pyrefly: ignore[unexpected-keyword]
     )
-    dg.fwd.dg_quantizer.lhs.numerics.preserve_max_val = True
-    dg.fwd.dg_quantizer.rhs.numerics.preserve_max_val = True
-    dg.drhs.dg_quantizer.lhs.numerics.preserve_max_val = True
-    dg.drhs.dg_quantizer.rhs.numerics.preserve_max_val = True
+    dg.fwd.dg_quantizer.lhs.numerics.preserve_max_val = True  # pyrefly: ignore[missing-attribute]
+    dg.fwd.dg_quantizer.rhs.numerics.preserve_max_val = True  # pyrefly: ignore[missing-attribute]
+    dg.drhs.dg_quantizer.lhs.numerics.preserve_max_val = True  # pyrefly: ignore[missing-attribute]
+    dg.drhs.dg_quantizer.rhs.numerics.preserve_max_val = True  # pyrefly: ignore[missing-attribute]
     dg_f = lambda lhs, rhs: dg(
         lhs,
         rhs,
@@ -1116,21 +1116,21 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     # TODO(lew): bits=8 started failing in VLP colab due x/x != 1.0 sometimes
     bits = 4
     my_numerics = int_numerics.IntSymmetric(
-        bits=bits,
-        preserve_zero=True,
-        preserve_max_val=False,
-        clip=True,
-        clip_gradient=False,
-        round=True,
-        noise_fn=None,
-        dtype=jnp.int8,
+        bits=bits,  # pyrefly: ignore[unexpected-keyword]
+        preserve_zero=True,  # pyrefly: ignore[unexpected-keyword]
+        preserve_max_val=False,  # pyrefly: ignore[unexpected-keyword]
+        clip=True,  # pyrefly: ignore[unexpected-keyword]
+        clip_gradient=False,  # pyrefly: ignore[unexpected-keyword]
+        round=True,  # pyrefly: ignore[unexpected-keyword]
+        noise_fn=None,  # pyrefly: ignore[unexpected-keyword]
+        dtype=jnp.int8,  # pyrefly: ignore[unexpected-keyword]
     )
     quantizer = aqt_quantizer.Quantizer(
-        numerics=my_numerics,
-        calib_shared_axes="per_tensor",
-        scale_stop_grad=True,
-        calibration=calibration.AbsMaxCalibration,
-        context=utils.Context(key=None, train_step=None),
+        numerics=my_numerics,  # pyrefly: ignore[unexpected-keyword]
+        calib_shared_axes="per_tensor",  # pyrefly: ignore[unexpected-keyword]
+        scale_stop_grad=True,  # pyrefly: ignore[unexpected-keyword]
+        calibration=calibration.AbsMaxCalibration,  # pyrefly: ignore[unexpected-keyword]
+        context=utils.Context(key=None, train_step=None),  # pyrefly: ignore[unexpected-keyword]
     )
     # TODO(lew): Perhaps post_init call could work?
     quantizer.init_calibration()
@@ -1159,9 +1159,9 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
     qx, _ = quantizer.quant(
         x, calibration_axes=[0, 2], tiling_state=tiling_state
     )
-    self.assertEqual(qx.qvalue.shape, (4, 4, 2, 2))
-    self.assertEqual(qx.scale[0].shape, (1, 4, 2, 1))
-    self.assertEqual(qx.scale[0].dtype, jnp.float32)
+    self.assertEqual(qx.qvalue.shape, (4, 4, 2, 2))  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(qx.scale[0].shape, (1, 4, 2, 1))  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(qx.scale[0].dtype, jnp.float32)  # pyrefly: ignore[unsupported-operation]
 
     x = qx.dequant()
     self.assertEqual(x.shape, (4, 4, 4))
@@ -1179,14 +1179,14 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
           drhs_mid_alpha_both=mid_alpha,
       )
       # for exact equality
-      dg.fwd.dg_quantizer.lhs.numerics.preserve_max_val = True
-      dg.fwd.dg_quantizer.rhs.numerics.preserve_max_val = True
+      dg.fwd.dg_quantizer.lhs.numerics.preserve_max_val = True  # pyrefly: ignore[missing-attribute]
+      dg.fwd.dg_quantizer.rhs.numerics.preserve_max_val = True  # pyrefly: ignore[missing-attribute]
       # PO2 scales for exact equality
-      dg.fwd.dg_quantizer.lhs.calibration = functools.partial(
-          dg.fwd.dg_quantizer.lhs.calibration, po2_scale=True
+      dg.fwd.dg_quantizer.lhs.calibration = functools.partial(  # pyrefly: ignore[missing-attribute]
+          dg.fwd.dg_quantizer.lhs.calibration, po2_scale=True  # pyrefly: ignore[missing-attribute]
       )
-      dg.fwd.dg_quantizer.rhs.calibration = functools.partial(
-          dg.fwd.dg_quantizer.rhs.calibration, po2_scale=True
+      dg.fwd.dg_quantizer.rhs.calibration = functools.partial(  # pyrefly: ignore[missing-attribute]
+          dg.fwd.dg_quantizer.rhs.calibration, po2_scale=True  # pyrefly: ignore[missing-attribute]
       )
       return dg
 
