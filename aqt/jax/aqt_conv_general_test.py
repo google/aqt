@@ -88,7 +88,7 @@ class ConvGeneralModule(nn.Module):
 
 class ConvGeneralTest(aqt_conv_test_base.ConvTest):
 
-  def conv_op_quantized(
+  def conv_op_quantized(  # pyrefly: ignore[bad-override]
       self,
       input,  # pylint: disable=redefined-builtin
       filter,  # pylint: disable=redefined-builtin
