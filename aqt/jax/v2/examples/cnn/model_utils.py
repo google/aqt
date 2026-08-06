@@ -196,5 +196,5 @@ def serve(
   )
   # compute test loss
   one_hot = jax.nn.one_hot(sample_label, 10)
-  loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
+  loss = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))  # pyrefly: ignore[bad-argument-type]
   return loss

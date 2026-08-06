@@ -173,7 +173,7 @@ def _calibrate_epoch(
     batch_images = calibrate_ds['image'][perm, ...]
     # Calibration simply updates model during inference. No need to compute loss
     # or gradients.
-    _, model_vars = apply_fn(
+    _, model_vars = apply_fn(  # pyrefly: ignore[bad-assignment]
         model_vars,
         batch_images,
         rngs={'params': jax.random.PRNGKey(0)},
