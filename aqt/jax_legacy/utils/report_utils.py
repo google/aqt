@@ -57,9 +57,9 @@ class MinOrMax(enum.Enum):
   def get_func(self) -> Callable[[onp.ndarray], int]:
     """Returns function associated with enum option. See parent class."""
     if self == MinOrMax.MIN:
-      return onp.nanargmin
+      return onp.nanargmin  # pyrefly: ignore[bad-return]
     elif self == MinOrMax.MAX:
-      return onp.nanargmax
+      return onp.nanargmax  # pyrefly: ignore[bad-return]
     else:
       raise ValueError('MinOrMax enum option not recognized.')
 
