@@ -313,6 +313,7 @@ def radix2_round(
     key: jax.Array,
     stochastic_rounding: bool,
     test_noise_axis=None,
+    rounding_bias: int = 128,
 ):
   """FP stochastic rounding for a given mantissa and exponent. Returns bf16."""
   nexp = cfg.nexp
@@ -355,7 +356,12 @@ def radix2_round(
     noise = noise & man_trunc_mask
   else:
     # example e2m1 in bf16: noise = 0b0000000000100000  (shift = 7-1 - 1)
-    noise = 1 << (man_trunc_bits - 1)  #  represents 0.5 in the container
+    # noise = (1<<7) << (man_trunc_bits - 1 - 7) represents 0.5 in the container
+    shift = man_trunc_bits - 1 - 7
+    if shift < 0:
+      noise = rounding_bias >> (-shift)
+    else:
+      noise = rounding_bias << shift
     noise = jax.lax.convert_element_type(noise, bits_dtype)
   # This noise add might overflow up to sign bit if x(bf16) has max exp.
   # In bf16 this happens if x=nan or x=inf.
