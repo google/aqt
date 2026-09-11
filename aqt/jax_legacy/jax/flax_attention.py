@@ -295,7 +295,7 @@ def softmax(attn_weights, norm_dims, dtype, softmax_hparams: SoftmaxHParams,
     if quant_hparams is None:
       raise ValueError('quant_hparams must be provided for quantized softmax.')
     fp_quant_config = QuantOps.FloatQuant(
-        is_scaled=False, fp_spec=quant_hparams.prec)  # pyrefly: ignore[unexpected-keyword]
+        is_scaled=False, fp_spec=quant_hparams.prec)  # pyrefly: ignore[bad-argument-type, unexpected-keyword]
     quant_ops = QuantOps.create_symmetric_fp(
         fp_quant=fp_quant_config, bounds=None)
 

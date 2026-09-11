@@ -96,7 +96,7 @@ class ResidualBlock(nn.Module):
           kernel_size=(1, 1),
           strides=strides,
           name='proj_conv',
-          hparams=hparams.conv_proj)(
+          hparams=hparams.conv_proj)(  # pyrefly: ignore[bad-argument-type]
               r1)
       r1 = batch_norm(name='proj_bn')(r1)
 

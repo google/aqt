@@ -386,15 +386,15 @@ class AqtDotGeneral(nn.Module):
       lhs_ca, rhs_ca = contr
       lhs_init_wrapper = functools.partial(
           _freezer_qtensor_init_wrapper,
-          contracting_axis=lhs_ca,
+          contracting_axis=lhs_ca,  # pyrefly: ignore[bad-argument-type]
           axis_metadata_wrapper=self.lhs_axis_metadata_wrapper,
-          tile_map=lhs_tile_map,
+          tile_map=lhs_tile_map,  # pyrefly: ignore[bad-argument-type]
       )
       rhs_init_wrapper = functools.partial(
           _freezer_qtensor_init_wrapper,
-          contracting_axis=rhs_ca,
+          contracting_axis=rhs_ca,  # pyrefly: ignore[bad-argument-type]
           axis_metadata_wrapper=self.rhs_axis_metadata_wrapper,
-          tile_map=rhs_tile_map,
+          tile_map=rhs_tile_map,  # pyrefly: ignore[bad-argument-type]
       )
 
       lhs_freezer = general_freezer.Freezer(
@@ -782,13 +782,13 @@ class AqtConvGeneralDilated(nn.Module):
         _freezer_qtensor_init_wrapper,
         contracting_axis=[],
         axis_metadata_wrapper=self.lhs_axis_metadata_wrapper,
-        tile_map=None,
+        tile_map=None,  # pyrefly: ignore[bad-argument-type]
     )
     rhs_init_wrapper = functools.partial(
         _freezer_qtensor_init_wrapper,
         contracting_axis=[],
         axis_metadata_wrapper=self.rhs_axis_metadata_wrapper,
-        tile_map=None,
+        tile_map=None,  # pyrefly: ignore[bad-argument-type]
     )
     lhs_freezer = general_freezer.Freezer(
         name=self.lhs_var_name,

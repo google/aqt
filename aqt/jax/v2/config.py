@@ -230,7 +230,7 @@ def set_constant_calibration(
 ):
   """Sets the static bound for calibration."""
   calibration_cls = functools.partial(
-      calibration.ConstantCalibration, bound=bound, bias=bias
+      calibration.ConstantCalibration, bound=bound, bias=bias  # pyrefly: ignore[unexpected-keyword]
   )
 
   assert isinstance(

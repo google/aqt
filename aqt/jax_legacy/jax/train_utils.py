@@ -130,7 +130,7 @@ def get_dynamic_context_for_step(
       apply_sparsity=apply_sparsity,  # pyrefly: ignore[unexpected-keyword]
       update_weight_sparsity=update_weight_sparsity,  # pyrefly: ignore[unexpected-keyword]
       update_act_sparsity=update_act_sparsity,  # pyrefly: ignore[unexpected-keyword]
-      num_update_sparsity=num_update_sparsity,  # pyrefly: ignore[unexpected-keyword]
+      num_update_sparsity=num_update_sparsity,  # pyrefly: ignore[bad-argument-type, unexpected-keyword]
       collect_acts_stats=collect_acts_stats,  # pyrefly: ignore[unexpected-keyword]
       prefer_int8_to_int32_dot=prefer_int8_to_int32_dot,  # pyrefly: ignore[unexpected-keyword]
   )
