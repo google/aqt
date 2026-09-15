@@ -61,7 +61,7 @@ def quant(
     quantizer.calib_shared_axes = "per_tensor"
   if use_dummy_static_bound:
     quantizer.calibration = functools.partial(  # pyrefly: ignore[bad-assignment]
-        calibration.ConstantCalibration, bound=1.0
+        calibration.ConstantCalibration, bound=1.0  # pyrefly: ignore[unexpected-keyword]
     )
   qx, _ = quantizer.quant(x, calibration_axes=calibration_axes)
   qx.dequant_dtype = jnp.float32
