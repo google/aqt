@@ -631,5 +631,29 @@ class FpTest(parameterized.TestCase):
     y_e0m3, _ = e0m3.vjp_fwd(e0m3_input, context=context)
     assert (y_e1m2 == y_e0m3 * 2).all()
 
+  def test_radix2_ceil(self):
+    x = jnp.array([17, 31, 32, 46, 49, 64, 65], dtype=jnp.bfloat16)
+    cfg = fp_numerics.FpNumericsConfig(
+        nexp=8,
+        minexp=0,
+        nmant=1,
+        has_subnormals=True,
+        has_two_nan=False,
+        has_naninf=False,
+        radix=2,
+    )
+    out = fp_numerics.radix2_round(
+        x,
+        cfg=cfg,
+        key=None,
+        stochastic_rounding=False,
+        test_noise_axis=None,
+        rounding_bias=255,
+    )
+    assert (
+        out == jnp.array([24, 32, 32, 48, 64, 64, 96], dtype=jnp.bfloat16)
+    ).all(), f"{out=}"
+
+
 if __name__ == "__main__":
   absltest.main()
