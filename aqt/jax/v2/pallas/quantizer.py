@@ -55,7 +55,7 @@ def quant(
   # However, pallas requires explicit casting. Therefore, we need to enforce
   # the scale factor and dequant dtype to be float32.
   quantizer = aqt_quantizer.quantizer_make(
-      n_bits, scale_stop_grad=False, scale_dtype=jnp.float32
+      n_bits, scale_stop_grad=False, scale_dtype=jnp.float32  # pyrefly: ignore[bad-argument-type]
   )
   if calibration_axes is None:
     quantizer.calib_shared_axes = "per_tensor"
@@ -64,5 +64,5 @@ def quant(
         calibration.ConstantCalibration, bound=1.0  # pyrefly: ignore[unexpected-keyword]
     )
   qx, _ = quantizer.quant(x, calibration_axes=calibration_axes)
-  qx.dequant_dtype = jnp.float32
+  qx.dequant_dtype = jnp.float32  # pyrefly: ignore[bad-assignment]
   return qx

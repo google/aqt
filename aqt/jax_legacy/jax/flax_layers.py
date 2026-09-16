@@ -386,7 +386,7 @@ class DenseGeneralAqt(nn.Module):
   features: Union[Iterable[int], int]
   use_bias: bool
   axis: Union[Iterable[int], int] = -1
-  dtype: DType = jnp.float32
+  dtype: DType = jnp.float32  # pyrefly: ignore[bad-assignment]
   kernel_init: Initializer = default_kernel_init
   bias_init: Initializer = nn.initializers.zeros
   precision: Any = None

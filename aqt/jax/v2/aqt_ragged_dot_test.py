@@ -154,7 +154,7 @@ class AqtRaggedDotTest(parameterized.TestCase):
   @parameterized.parameters(list(jax.lax.Precision))
   def test_ragged_dot_with_precision(self, precision):
     lhs, rhs, group_sizes = self.make_args(
-        32, 128, 16, 8, jnp.bfloat16, balanced_groups=False
+        32, 128, 16, 8, jnp.bfloat16, balanced_groups=False  # pyrefly: ignore[bad-argument-type]
     )
     with self.assertRaises(AssertionError):
       aqt_ragged_dot.ragged_dot(

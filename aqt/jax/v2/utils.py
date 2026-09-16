@@ -127,10 +127,10 @@ def infer_dtype_from_bits(bits: int) -> None | jnp.dtype:
     The corresponding container dtype for the number of bits provided.
   """
   if bits == 4:
-    return jnp.int4
+    return jnp.int4  # pyrefly: ignore[bad-return]
   else:
     if bits <= 8 and bits >= 2:
-      return jnp.int8
+      return jnp.int8  # pyrefly: ignore[bad-return]
     else:
       return None
 

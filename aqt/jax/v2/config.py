@@ -129,12 +129,12 @@ def set_numerics(
       lhs_numerics.get_dtype() in dtypes_allowed_for_int32_accum
       and rhs_numerics.get_dtype() in dtypes_allowed_for_int32_accum
   ):
-    cfg.dg_accumulator_dtype = jnp.int32
+    cfg.dg_accumulator_dtype = jnp.int32  # pyrefly: ignore[bad-assignment]
   elif (
       lhs_numerics.get_dtype() in fp8_numerics.fp8_map.values()
       or rhs_numerics.get_dtype() in fp8_numerics.fp8_map.values()
   ):
-    cfg.dg_accumulator_dtype = jnp.float32
+    cfg.dg_accumulator_dtype = jnp.float32  # pyrefly: ignore[bad-assignment]
   else:
     cfg.dg_accumulator_dtype = None
 

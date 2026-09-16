@@ -1149,7 +1149,7 @@ class AqtDotGeneralResearchTest(parameterized.TestCase):
 
     # NOTE: The scale dtype must be set to a float dtype when quantizing an
     # integer input, as jax does not support taking the inverse of an integer.
-    quantizer = aqt_quantizer.quantizer_make(bits, scale_dtype=jnp.float32)
+    quantizer = aqt_quantizer.quantizer_make(bits, scale_dtype=jnp.float32)  # pyrefly: ignore[bad-argument-type]
     x = jnp.arange(0, 64).reshape((4, 4, 4))
 
     tiling_state = tiled_dot_general.generate_tiling_state(

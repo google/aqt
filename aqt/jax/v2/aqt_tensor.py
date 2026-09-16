@@ -244,7 +244,7 @@ def zeros(
     shape: Sequence[int],
     *,
     container_dtype: jnp.dtype,
-    dequant_dtype: jnp.dtype = jnp.bfloat16,
+    dequant_dtype: jnp.dtype = jnp.bfloat16,  # pyrefly: ignore[bad-function-definition]
 ) -> QTensor:
   return QTensor(
       qvalue=jnp.zeros(shape, dtype=container_dtype),  # pyrefly: ignore[unexpected-keyword]
@@ -261,7 +261,7 @@ def zeros_with_scale(
     *,
     container_dtype: jnp.dtype,
     scale_dtype: None | jnp.dtype = None,
-    dequant_dtype: jnp.dtype = jnp.bfloat16,
+    dequant_dtype: jnp.dtype = jnp.bfloat16,  # pyrefly: ignore[bad-function-definition]
 ) -> QTensor:
   """Initializes a QTensor with empty qvalue along with empty scale value."""
   scale_shape = list(shape)

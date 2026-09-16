@@ -44,7 +44,7 @@ class AqtEinsum(base_layer.BaseLayer):
           base_layer.WeightHParams(
               shape=[],
               init=base_layer.WeightInit.Constant(0),
-              dtype=jnp.int32,
+              dtype=jnp.int32,  # pyrefly: ignore[bad-argument-type]
           ),
           trainable=False,
       )
