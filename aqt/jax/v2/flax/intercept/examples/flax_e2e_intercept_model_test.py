@@ -72,10 +72,10 @@ class MnistTest(parameterized.TestCase):
     )
     target_loss = {
         8: {
-            "TPU v5 lite": [3.222220420837402343750000000000],
+            "TPU v5e": [3.222220420837402343750000000000],
         },
         4: {
-            "TPU v5 lite": [2.292296886444091796875000000000],
+            "TPU v5e": [2.292296886444091796875000000000],
         },
     }
     # below 3 lines are differences between config_v4/v3 and fully_quantized

@@ -131,14 +131,14 @@ class MyTest(parameterized.TestCase):
             "TPU v2": 3.21,
             "TPU v3": 3.21,
             "TPU v4": 3.21,
-            "TPU v5 lite": 3.21,
+            "TPU v5e": 3.21,
         },
         "e5m2": {
             "cpu": 3.11,
             "TPU v2": 3.22,
             "TPU v3": 3.22,
             "TPU v4": 3.22,
-            "TPU v5 lite": 3.18,
+            "TPU v5e": 3.18,
         },
     }
 
