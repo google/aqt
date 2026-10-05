@@ -159,7 +159,7 @@ class Stats:
         mean_abs=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
         mean_sq=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
         mean_batch_maximum=flax.linen.initializers.zeros(key, shape, dtype),  # pyrefly: ignore[unexpected-keyword]
-        mean_batch_minimum=flax.linen.initializers.zeros(key, shape, dtype))  # pytype: disable=wrong-keyword-args  # trace-all-classes
+        mean_batch_minimum=flax.linen.initializers.zeros(key, shape, dtype))  # pyrefly: ignore[unexpected-keyword]
 
   @classmethod
   def create_updated_stats(cls,
@@ -241,4 +241,4 @@ class Stats:
         mean_abs=new_mean_abs,  # pyrefly: ignore[unexpected-keyword]
         mean_sq=new_mean_sq,  # pyrefly: ignore[unexpected-keyword]
         mean_batch_minimum=new_mean_batch_minimum,  # pyrefly: ignore[unexpected-keyword]
-        mean_batch_maximum=new_mean_batch_maximum)  # pytype: disable=wrong-keyword-args  # trace-all-classes
+        mean_batch_maximum=new_mean_batch_maximum)  # pyrefly: ignore[unexpected-keyword]

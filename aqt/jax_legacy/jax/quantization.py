@@ -290,7 +290,7 @@ class QuantOps:
     # when scale is not a constant, but computed as a function of activations or
     # weights.
     scale = lax.stop_gradient(scale)
-    return cls(  # pytype: disable=wrong-arg-types  # jax-ndarray
+    return cls(
         prec=prec,
         scale=scale,  # pyrefly: ignore[bad-argument-type]
         symmetric=True,
@@ -319,7 +319,7 @@ class QuantOps:
     # NOTE: stop_gradient is needed here to prevent gradient flow through scale
     # when scale is not a constant, but computed as a function of activations.
     scale = lax.stop_gradient(scale)
-    return cls(  # pytype: disable=wrong-arg-types  # jax-ndarray
+    return cls(
         prec=prec,
         scale=scale,  # pyrefly: ignore[bad-argument-type]
         symmetric=False,
@@ -839,7 +839,7 @@ def flaxformer_dot_general(
     # into a  variable called 'act_scale'. We extract it from 'act_op', the
     # QuantOps instance that calculated the scale factors for the activation
     # matrix.
-    act_scale = act_op._scale.astype(input_dtype)  # pylint: disable=protected-access  # pytype: disable=attribute-error
+    act_scale = act_op._scale.astype(input_dtype)  # pylint: disable=protected-access
     if act_scale.ndim == 0:
       act_scale = act_scale * jnp.ones(act_scale_shape, act_scale.dtype)
   else:
@@ -857,7 +857,7 @@ def flaxformer_dot_general(
     else:
       # Calculate 'r' from (s^-1) * w
       weight_op = QuantOps.create_weights_ops(w, weight_params=weight_params)  # pyrefly: ignore[bad-argument-type]
-      weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access  # pytype: disable=attribute-error
+      weight_scale = weight_op._scale.astype(input_dtype)  # pylint: disable=protected-access  # pyrefly: ignore[missing-attribute]
 
       if weight_params.expected_scale_shape:
         shape_utils.assert_shapes_equal(
@@ -1029,7 +1029,7 @@ def quantized_dot_general(
       if weight_params.axis is None:
         out_channel_shape = ()
       else:
-        axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)  # pytype: disable=wrong-arg-types
+        axes = _canonicalize_feature_axes(weight_params.axis, w.ndim)  # pyrefly: ignore[bad-argument-type]
         out_channel_shape = tuple(
             [w.shape[i] for i in range(w.ndim) if i not in axes]
         )
@@ -1503,7 +1503,7 @@ def quantized_sum(
   # GetBounds, which in turn creates state variables to store activation
   # statistics. We do not want to compute statistics for each individual
   # addition within the sum reduction.
-  fp_quant = QuantOps.FloatQuant(is_scaled=False, fp_spec=prec)  # pyrefly: ignore[unexpected-keyword]
+  fp_quant = QuantOps.FloatQuant(is_scaled=False, fp_spec=prec)
   quant_ops = QuantOps.create_symmetric_fp(fp_quant=fp_quant, bounds=None)
 
   if not isinstance(axis, Iterable):
