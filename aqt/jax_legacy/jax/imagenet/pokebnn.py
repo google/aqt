@@ -350,7 +350,7 @@ class PokeBNN(nn.Module):
         }
 
       elif name == 'dense':
-        _, xs, ys, (kwargs, hparams) = op  # pytype: disable=bad-unpacking
+        _, xs, ys, (kwargs, hparams) = op
         adders = hparams.weight_prec * hparams.quant_act.prec
         dense_ace += xs[1] * ys[1] * adders
         dense_stats[name] = {
@@ -462,7 +462,7 @@ def create_pokebnn(hparams, train, **kwargs):
       num_classes=1000,
       hparams=hparams,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, quantize_weights=True),  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, quantize_weights=True),
       train=train,
       paxis_name='batch',
       **kwargs)

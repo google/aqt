@@ -108,7 +108,7 @@ class QTensor:
     if self.is_full():
       assert self.qvalue.shape == tuple(self.tiling_state.tiled_shape), (  # pyrefly: ignore[missing-attribute]
           'The shape of the qvalue should be the same as the tiled shape of'
-          f' the tiling state. However, {self.qvalue.shape=} and'  # pytype: disable=attribute-error
+          f' the tiling state. However, {self.qvalue.shape=} and'
           f' {self.tiling_state.tiled_shape=}'
       )
 
@@ -117,10 +117,10 @@ class QTensor:
 
   def without_qvalue(self) -> Self:
     """Returns a copy of the QTensor without the qvalue."""
-    return self.replace(qvalue=None)  # pytype: disable=attribute-error
+    return self.replace(qvalue=None)  # pyrefly: ignore[missing-attribute]
 
   def astype(self, dtype: jnp.dtype) -> Self:
-    return self.replace(dequant_dtype=dtype)  # pytype: disable=attribute-error
+    return self.replace(dequant_dtype=dtype)  # pyrefly: ignore[missing-attribute]
 
   def quant(self, x) -> Self:
     """Quantizes x into a new QTensor."""
@@ -156,7 +156,7 @@ class QTensor:
 
     # TODO(lew): We should apply numerics here, so that 'quant' function
     # Can be considered a part of API.
-    return self.replace(qvalue=qvalue)  # pytype: disable=attribute-error
+    return self.replace(qvalue=qvalue)  # pyrefly: ignore[missing-attribute]
 
   def dequant(self) -> jnp.ndarray:
     """Dequantizes the QTensor into a jax array."""
@@ -175,8 +175,7 @@ class QTensor:
     assert self.is_full(), _MSG_NO_QVALUE
     self._validate_tiling_state()
 
-    # pytype: disable=attribute-error
-    ret = self.qvalue.astype(self.dequant_dtype)
+    ret = self.qvalue.astype(self.dequant_dtype)  # pyrefly: ignore[missing-attribute]
 
     # dequant(q) = q * s - b
     for s in self.scale:
@@ -196,12 +195,11 @@ class QTensor:
     # In case the scale or bias dtypes are not the same as dequant_dtype, and it
     # is a higher precision.
     ret = ret.astype(self.dequant_dtype)
-    # pytype: enable=attribute-error
-    return ret  # pytype: disable=bad-return-type
+    return ret
 
   def qvalue_astype(self, dtype) -> Self:
     assert self.is_full(), _MSG_NO_QVALUE
-    return self.replace(qvalue=self.qvalue.astype(dtype))  # pytype: disable=attribute-error
+    return self.replace(qvalue=self.qvalue.astype(dtype))  # pyrefly: ignore[missing-attribute]
 
   def __getitem__(self, idx: jax_typing.ArrayLike) -> Self:
     """Returns the indexed subtensor on the first axis."""
@@ -225,7 +223,7 @@ class QTensor:
     self._validate_tiling_state()
     if self.tiling_state is not None:
       return len(self.tiling_state.untiled_shape)
-    return self.qvalue.ndim  # pytype: disable=attribute-error
+    return self.qvalue.ndim  # pyrefly: ignore[missing-attribute]
 
   @property
   def shape(self) -> Sequence[int]:
@@ -233,7 +231,7 @@ class QTensor:
     self._validate_tiling_state()
     if self.tiling_state is not None:
       return tuple(self.tiling_state.untiled_shape)
-    return self.qvalue.shape  # pytype: disable=attribute-error
+    return self.qvalue.shape  # pyrefly: ignore[missing-attribute]
 
   def __len__(self) -> int:
     assert self.qvalue is not None, _MSG_NO_QVALUE

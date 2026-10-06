@@ -19,7 +19,6 @@ from aqt.jax import aqt_tensor
 import jax.numpy as jnp
 
 # pylint: disable=protected-access
-# pytype: disable=attribute-error
 
 
 def possibly_use_quantized_variable(
@@ -44,7 +43,7 @@ def possibly_use_quantized_variable(
   """
   if quantizer.config is not None and quantizer.config.use_quantized_variable and not train:
     qx = quantizer.quantized_variable.value
-    qx = qx.astype(x.dtype)
+    qx = qx.astype(x.dtype)  # pyrefly: ignore[missing-attribute]
     return qx
   return x
 
@@ -55,7 +54,7 @@ def should_int8_quantize(
   """Determines whether or not to quantize."""
 
   if lhs_quantizer.config is None or rhs_quantizer.config is None:
-    return jnp.bool_(False)
+    return jnp.bool_(False)  # pyrefly: ignore[bad-return]
 
   lhs_configs = lhs_quantizer.config.tensor_configs
   rhs_configs = rhs_quantizer.config.tensor_configs
@@ -69,8 +68,8 @@ def should_int8_quantize(
           rhs_config.quant_config.bits <= 8):
         should_quantize |= (
             aqt_tensor.is_config_active(lhs_config,
-                                        lhs_quantizer._last_update.value)
+                                        lhs_quantizer._last_update.value)  # pyrefly: ignore[bad-argument-type]
             & aqt_tensor.is_config_active(rhs_config,
-                                          rhs_quantizer._last_update.value))
+                                          rhs_quantizer._last_update.value))  # pyrefly: ignore[bad-argument-type]
 
   return should_quantize

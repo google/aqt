@@ -431,7 +431,7 @@ def emulated_fp(t, fp_metadata):
   assert isinstance(fp_metadata, FPMetadata)
   assert t.dtype in [tf.bfloat16, tf.float32]
 
-  with tf.name_scope('emulated_fp'):  # pyrefly: ignore[bad-instantiation]
+  with tf.name_scope('emulated_fp'):
     v = handle_mantissa(
         t,
         mantissa_bits=fp_metadata.mantissa_bits,
@@ -475,7 +475,7 @@ def emulated_e8mn(t, fp_metadata):
   assert fp_metadata.mantissa_bits <= 6 and fp_metadata.mantissa_bits >= 0
   assert t.dtype in [tf.bfloat16, tf.float32]
 
-  with tf.name_scope('emulated_e8mn'):  # pyrefly: ignore[bad-instantiation]
+  with tf.name_scope('emulated_e8mn'):
     return xla.reduce_precision(t, fp_metadata.exponent_bits,
                                 fp_metadata.mantissa_bits)
 

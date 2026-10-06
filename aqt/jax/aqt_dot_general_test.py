@@ -95,8 +95,8 @@ class DotGeneralModule(nn.Module):
     rhs_quantizer = aqt_tensor.TensorQuantizer(list(self.rhs_shape),
                                                self.rhs_config)
 
-    lhs_quantizer.update(lhs, None, 0)  # pytype: disable=wrong-arg-types  # jax-ndarray
-    rhs_quantizer.update(rhs, None, 0)  # pytype: disable=wrong-arg-types  # jax-ndarray
+    lhs_quantizer.update(lhs, None, 0)  # pyrefly: ignore[bad-argument-type]
+    rhs_quantizer.update(rhs, None, 0)  # pyrefly: ignore[bad-argument-type]
 
     return lambda lhs, rhs, dimension_numbers: aqt_ops.aqt_dot_general(
         lhs,

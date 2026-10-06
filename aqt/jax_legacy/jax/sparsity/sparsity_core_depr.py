@@ -182,7 +182,7 @@ def sr_ste_fwd(
   # pylint:enable=g-long-lambda
   return (  # pyrefly: ignore[bad-return]
       updated_inputs,
-      updated_mask,  # pytype: disable=bad-return-type  # jax-ndarray
+      updated_mask,
       jnp.array(SparseHParams.sparse_ste_weight),
   ), (inputs, updated_mask, jnp.array(SparseHParams.sparse_ste_weight))
 
@@ -309,7 +309,7 @@ def apply_sparsity(
 ) -> jnp.ndarray:
   """Returns sparsified inputs based on sparsity hparams."""
   mask = get_sparsity_mask(inputs, sparsity_hparams, n_sparsity, m_sparsity)
-  return jnp.where(mask.value, inputs, jnp.zeros(inputs.shape, inputs.dtype))  # pytype: disable=attribute-error  # jax-ndarray
+  return jnp.where(mask.value, inputs, jnp.zeros(inputs.shape, inputs.dtype))  # pyrefly: ignore[missing-attribute]
 
 
 def get_sparsity_mask(

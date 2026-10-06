@@ -146,7 +146,7 @@ class StatsConfig(_BaseConfig):
 
   safe_divide: bool = False
 
-  def validate(self, data_shape: List[Optional[int]],  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+  def validate(self, data_shape: List[Optional[int]],  # pyrefly: ignore[bad-override]
                dynamic: bool = False):
     """Validates this StatsConfig for the provided data shape.
 
@@ -320,7 +320,7 @@ class AqtScheduleConfig(_BaseConfig):
     else:
       return FloatConfig
 
-  def validate(self, data_shape: List[Optional[int]]):  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+  def validate(self, data_shape: List[Optional[int]]):  # pyrefly: ignore[bad-override]
     """Validates this AqtScheduleConfig for the provided data shape."""
     # The output value of quantization_mode is unused.
     if not self.allow_int_small_float:

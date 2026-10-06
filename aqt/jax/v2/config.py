@@ -151,7 +151,7 @@ def set_fwd_rhs_dtype_int2(cfg: DotGeneral):
   assert cfg.fwd.dg_quantizer.rhs.numerics.bits == 2  # pyrefly: ignore[missing-attribute]
   # Disable pytype check since jnp.int2 is only dynamically to jax
   # when ml_dtypes package has it.
-  cfg.fwd.dg_quantizer.rhs.numerics.dtype = jnp.int2  # pytype: disable=module-attr
+  cfg.fwd.dg_quantizer.rhs.numerics.dtype = jnp.int2  # pyrefly: ignore[missing-attribute]
 
 
 def set_accumulator_dtype(

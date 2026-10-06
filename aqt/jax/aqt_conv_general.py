@@ -25,7 +25,6 @@ from jax import lax
 import jax.numpy as jnp
 
 # pylint: disable=protected-access
-# pytype: disable=attribute-error
 
 
 @functools.partial(
@@ -87,7 +86,7 @@ def _conv_general_aqt(
                   (lhs, rhs))
 
 
-@_conv_general_aqt.defjvp  # pytype: disable=wrong-arg-types
+@_conv_general_aqt.defjvp  # pyrefly: ignore[bad-argument-type]
 def _conv_general_aqt_jvp(
     lhs_quantizer: aqt_tensor.TensorQuantizer,  #
     rhs_quantizer: aqt_tensor.TensorQuantizer,
@@ -138,7 +137,7 @@ def _conv_general_aqt_jvp(
       differentiable_conv_general,  #
       (lhs, rhs),
       (lhs_dot, rhs_dot))
-  return y, y_tangent  # pytype: disable=bad-return-type  # jax-ndarray
+  return y, y_tangent  # pyrefly: ignore[bad-return]
 
 
 def _validate_dilation_argument(
@@ -193,7 +192,7 @@ def _validate_inputs(
         'filter_quantizer.config.tensor_configs',
         filter_quantizer.config.tensor_configs)
 
-  input_spec, filter_spec, _ = dimension_numbers  # pytype: disable=attribute-error
+  input_spec, filter_spec, _ = dimension_numbers  # pyrefly: ignore[not-iterable]
   _, *input_contracted_dims = input_spec
   _, *filter_contracted_dims = filter_spec
 

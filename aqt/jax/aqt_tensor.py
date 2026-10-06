@@ -199,7 +199,7 @@ def is_config_active(
     should_q &= config.begin_at_event <= event_count
   if config.end_at_event is not None:
     should_q &= event_count < config.end_at_event
-  return should_q  # pytype: disable=bad-return-type  # jnp-type
+  return should_q  # pyrefly: ignore[bad-return]
 
 
 class TensorQuantizer(nn.Module):
@@ -381,7 +381,7 @@ class TensorQuantizer(nn.Module):
 
     first_event = jnp.array(self._last_update.value == jnp.iinfo(jnp.int32).min)
 
-    return was_previously_inactive | first_event  # pytype: disable=bad-return-type  # jnp-type
+    return was_previously_inactive | first_event  # pyrefly: ignore[bad-return]
 
   def _to_quant(self, x: jnp.ndarray, train: bool) -> jnp.ndarray:
     """Quantizes x with active quant config, if any, else act as identity."""
@@ -461,7 +461,7 @@ class TensorQuantizer(nn.Module):
     """Returns scales to quantize/dequantize the active quant config, if any, else ones."""
     if self.config is None:
       scale = inv_scale = jnp.array(1.0, dtype=jnp.float32)
-      return scale, inv_scale  # pytype: disable=bad-return-type  # jax-ndarray
+      return scale, inv_scale  # pyrefly: ignore[bad-return]
 
     if not train and self.config.inference_config_index is not None:
       inference_config = self.config.tensor_configs[
@@ -487,4 +487,4 @@ class TensorQuantizer(nn.Module):
         jnp.ones_like(self._inv_scale.value),
     )
 
-    return scale, inv_scale  # pytype: disable=bad-return-type  # jax-ndarray
+    return scale, inv_scale  # pyrefly: ignore[bad-return]

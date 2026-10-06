@@ -163,7 +163,7 @@ def create_model(key, input_shape, target_shape,
   model = models.Transformer(
       **transformer_kwargs,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=FLAGS.collect_acts_stats),  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, collect_acts_stats=FLAGS.collect_acts_stats),
       hparams=hparams,
       use_bfloat16=False,
       train=False,
@@ -175,7 +175,7 @@ def create_model(key, input_shape, target_shape,
       jnp.zeros(input_shape, jnp.float32),
       jnp.zeros(target_shape, jnp.float32),
   )
-  init_state, params = flax.core.pop(variables, 'params')  # pytype: disable=attribute-error
+  init_state, params = flax.core.pop(variables, 'params')
   return params, init_state
 
 
@@ -449,7 +449,7 @@ def get_jax_computation_of_model(transformer_kwargs: Mapping[str, Any],
   model = models.Transformer(
       **transformer_kwargs,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False),  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, collect_acts_stats=False),
       train=False,
       hparams=hparams.model_hparams,
       use_bfloat16=False,
@@ -695,7 +695,7 @@ def initialize_cache(batch_size: int, transformer_kwargs: Dict[str, Any],
       should_decode=True,
       train=False,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False),  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, collect_acts_stats=False),
       dropout_rate=0.0,
       attention_dropout_rate=0.0,
       use_bfloat16=False).init(
@@ -835,7 +835,7 @@ class TrainingState:
         model_dir, (self.optimizer, unreplicated_flax_state, self.dropout_rngs,
                     self.transformer_kwargs),
         step,
-        prefix=prefix)  # pytype: disable=wrong-arg-types
+        prefix=prefix)
 
   def restore_checkpoint(self,
                          *,
@@ -887,11 +887,11 @@ def get_dynamic_context(hparams: training_hparams.TrainingHParams, step: int,
       collect_acts_stats=collect_acts_stats,
       prefer_int8_to_int32_dot=hparams.prefer_int8_to_int32_dot)
   if not train:
-    dynamic_context = dataclasses.replace(dynamic_context, update_bounds=False)  # pyrefly: ignore[bad-specialization]
-    dynamic_context = dataclasses.replace(dynamic_context, apply_sparsity=True)  # pyrefly: ignore[bad-specialization]
-    dynamic_context = dataclasses.replace(  # pyrefly: ignore[bad-specialization]
+    dynamic_context = dataclasses.replace(dynamic_context, update_bounds=False)
+    dynamic_context = dataclasses.replace(dynamic_context, apply_sparsity=True)
+    dynamic_context = dataclasses.replace(
         dynamic_context, update_act_sparsity=True)
-    dynamic_context = dataclasses.replace(  # pyrefly: ignore[bad-specialization]
+    dynamic_context = dataclasses.replace(
         dynamic_context, update_weight_sparsity=False)
   return jax_utils.replicate(dynamic_context)
 

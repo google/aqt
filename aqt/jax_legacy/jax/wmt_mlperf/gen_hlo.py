@@ -96,7 +96,7 @@ def encoder_from_file(config: config_dict.ConfigDict,
       dropout_rate=0.1,
       attention_dropout_rate=0.1,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False, quantize_acts=True))  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, collect_acts_stats=False, quantize_acts=True))
   init_state = model.init(rng, jnp.ones(input_shape, jnp.float32))
 
   def _fn(state, inputs):
@@ -181,7 +181,7 @@ def encoder_n_32(layers: int):
       dropout_rate=0.1,
       attention_dropout_rate=0.1,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False, quantize_acts=True))  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, collect_acts_stats=False, quantize_acts=True))
   init_state = model.init(rng, jnp.ones(input_shape, jnp.float32))
 
   def _fn(state, inputs):
@@ -252,7 +252,7 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
       hparams=model_hparams,
       train=False,
       dynamic_context=quant_config.DynamicContext(
-          update_bounds=False, collect_acts_stats=False, quantize_acts=True),  # pyrefly: ignore[unexpected-keyword]
+          update_bounds=False, collect_acts_stats=False, quantize_acts=True),
       should_decode=True,
       use_bfloat16=False,
       dropout_rate=0.0,
@@ -261,8 +261,8 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
                               jnp.ones(decode_shape, jnp.float32))
   if FLAGS.checkpoint:
     model = _restore_from_checkpoint(model, FLAGS.checkpoint)
-  state, cache = pop(state, 'cache')  # pytype: disable=attribute-error
-  state, params = pop(state, 'params')  # pytype: disable=attribute-error
+  state, cache = pop(state, 'cache')
+  state, params = pop(state, 'params')
   input_dummy = jnp.ones(encode_shape)
   if FLAGS.checkpoint:
 
@@ -277,7 +277,7 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
           transformer_kwargs=transformer_kwargs,
           hparams=model_hparams,
           dynamic_context=quant_config.DynamicContext(
-              update_bounds=False, quantize_acts=True))  # pyrefly: ignore[unexpected-keyword]
+              update_bounds=False, quantize_acts=True))
 
     computation = (
         jax.jit(_with_weights).lower(input_dummy).compiler_ir(dialect='hlo')
@@ -295,7 +295,7 @@ def transformer(config: config_dict.ConfigDict, batch_size: int,
           transformer_kwargs=transformer_kwargs,
           hparams=model_hparams,
           dynamic_context=quant_config.DynamicContext(
-              update_bounds=False, quantize_acts=True))  # pyrefly: ignore[unexpected-keyword]
+              update_bounds=False, quantize_acts=True))
 
     computation = (
         jax.jit(_without_weights)

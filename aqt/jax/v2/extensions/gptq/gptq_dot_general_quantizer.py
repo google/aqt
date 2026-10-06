@@ -101,7 +101,7 @@ def _recover_kernel_from_gptq_result(
   kernel = kernel.astype(kernel_dtype)
   if act_order:
     assert perm is not None
-    invperm = jnp.argsort(perm)  # pytype: disable=wrong-arg-types
+    invperm = jnp.argsort(perm)  # pyrefly: ignore[bad-argument-type]
     kernel = kernel.reshape((-1, kernel.shape[-1]))
     kernel = kernel[invperm, :]
   kernel = kernel.reshape(kernel_feature_grouped_shape)
@@ -313,7 +313,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
     if quant_mode == utils.QuantMode.TRAIN:
       # During training, we should not allow collecting hinvs and updating
       # weights using it.
-      return super(GptqDotGeneralQuantizer, self).calibrate(  # pytype: disable=attribute-error
+      return super(GptqDotGeneralQuantizer, self).calibrate(
           lhs, rhs, dimension_numbers, lhs_mode, rhs_mode
       )
 
@@ -383,7 +383,7 @@ class GptqDotGeneralQuantizer(aqt_dot_general.DefaultDotGeneralQuantizer):
       lhs_ca, rhs_ca = rhs_ca, lhs_ca
 
     # Retrieve the scales using the updated lhs and rhs.
-    return super(GptqDotGeneralQuantizer, self).calibrate(  # pytype: disable=attribute-error
+    return super(GptqDotGeneralQuantizer, self).calibrate(
         lhs, rhs, dimension_numbers, lhs_mode, rhs_mode
     )
 

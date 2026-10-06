@@ -40,7 +40,7 @@ from typing_extensions import Self  # for python version < 3.11
 
 try:
   # jax v0.5.1 or newer
-  from jax._src.numpy import einsum as jax_einsum  # pylint: disable=g-import-not-at-top  # pytype: disable=import-error
+  from jax._src.numpy import einsum as jax_einsum  # pylint: disable=g-import-not-at-top
 except ImportError:
   # jax v0.5.0 or older
   from jax._src.numpy import lax_numpy as jax_einsum  # pylint: disable=g-import-not-at-top
@@ -228,11 +228,11 @@ class DotGeneralRes:
 
 def einsum(eqn: str, lhs: jnp.ndarray, rhs: jnp.ndarray, dg=lax.dot_general):
   """A copy of jnp.einsum but without the default jit so as to be injectable."""
-  operands, contractions = jax_einsum._default_poly_einsum_handler(  # pylint: disable=protected-access  # pytype: disable=module-attr
+  operands, contractions = jax_einsum._default_poly_einsum_handler(  # pylint: disable=protected-access  # pyrefly: ignore[missing-attribute]
       eqn, lhs, rhs, einsum_call=True, use_blas=True, optimize='optimal'
   )
-  contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)  # pytype: disable=attribute-error
-  return jax.named_call(jax_einsum._einsum, name=eqn)(  # pylint: disable=protected-access  # pytype: disable=module-attr
+  contractions = tuple((a, frozenset(b), c) for a, b, c, *_ in contractions)
+  return jax.named_call(jax_einsum._einsum, name=eqn)(  # pylint: disable=protected-access  # pyrefly: ignore[missing-attribute]
       operands,
       contractions,
       precision=None,
@@ -783,7 +783,7 @@ class DotGeneralRaw:
           self.dg_quantizer.assert_calib_shared_axes_value(None, None, msg)
 
         lhs, rhs, dimension_numbers = _apply_local_aqt(
-            self.local_aqt,  # pytype: disable=attribute-error
+            self.local_aqt,
             lhs,
             rhs,
             dimension_numbers,
@@ -996,7 +996,7 @@ class DotGeneral:
           lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self
       )
     else:
-      out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self)  # pytype: disable=wrong-arg-types
+      out, res = _dg_core(lhs, rhs, lhs_qt, rhs_qt, dimension_numbers, self)
     return out, res
 
   def __call__(
