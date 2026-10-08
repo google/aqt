@@ -42,6 +42,10 @@ def _dummy_dataset(ds_size, image_rng, label_rng):
 
 class MnistTest(parameterized.TestCase):
 
+  def setUp(self):
+    super().setUp()
+    jax.config.update("jax_accurate_erf_inv", True)
+
   # Unable to use config_v4() in parameters since it needs jax.device info.
   # TODO(aqt): Move config_v4() into parameters once int4 works for cpu.
   @parameterized.parameters([
@@ -75,9 +79,9 @@ class MnistTest(parameterized.TestCase):
                 3.123473167419433593750000000000,
             ],
             "TPU v2": [3.198328018188476562500000000000],
-            "TPU v3": [3.198328018188476562500000000000],
-            "TPU v4": [3.198297500610351562500000000000],
-            "TPU v5 lite": [3.198297500610351562500000000000],
+            "TPU v3": [3.198387622833251953125000000000],
+            "TPU v4": [3.198730945587158203125000000000],
+            "TPU v5 lite": [3.198735237121582031250000000000],
         },
         4: {
             "cpu": [

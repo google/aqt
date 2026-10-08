@@ -31,6 +31,10 @@ jax.config.update("jax_use_direct_linearize", False)
 
 class MnistTest(parameterized.TestCase):
 
+  def setUp(self):
+    super().setUp()
+    jax.config.update("jax_accurate_erf_inv", True)
+
   # Unable to use config_v4() in parameters since it needs jax.device info.
   # TODO(aqt): Move confiv_v4() into parameters once int4 works for cpu.
   @parameterized.parameters([
@@ -72,7 +76,7 @@ class MnistTest(parameterized.TestCase):
     )
     target_loss = {
         8: {
-            "TPU v5 lite": [3.222220420837402343750000000000],
+            "TPU v5 lite": [3.222220182418823242187500000000],
         },
         4: {
             "TPU v5 lite": [2.292296886444091796875000000000],
