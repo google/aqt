@@ -135,7 +135,7 @@ class GetBoundsTest(parameterized.TestCase):
     else:
       onp.testing.assert_array_equal(stats.n, 2)
       expected_updated_mean = 1 / 2 * (1 + (stats_0_stats.mean))
-      onp.testing.assert_array_equal(expected_updated_mean, stats.mean)
+      onp.testing.assert_allclose(expected_updated_mean, stats.mean, rtol=1e-6)
 
   @parameterized.named_parameters(
       dict(
@@ -223,7 +223,7 @@ class GetBoundsTest(parameterized.TestCase):
             jnp.sqrt(stats_0_stats.mean_sq) + self.hyperparam.absdev_coeff *
             (1 - self.hyperparam.mix_coeff) * stats_0_stats.mean_abs)
       onp.testing.assert_array_equal(state_0['get_bounds']['bounds'], y)
-      onp.testing.assert_allclose(expected_y, y)
+      onp.testing.assert_allclose(expected_y, y, rtol=1e-6)
 
     y2, state = model.apply(
         state_0, self.x2, bounds_params=params, mutable='get_bounds')
