@@ -1188,7 +1188,7 @@ class QuantizedSumTest(parameterized.TestCase):
       dict(exp_min=-2**7, exp_max=2**7, sig_bits=23, expected_result=100.001),
       # In this low precision case, the addition of .001 to the accumulator will
       # have no effect after quantization
-      dict(exp_min=-2**3, exp_max=2**3, sig_bits=1, expected_result=100.0))
+      dict(exp_min=-2**3, exp_max=2**3, sig_bits=4, expected_result=100.0))
   def test_quantized_sum(self, exp_min, exp_max, sig_bits, expected_result):
     x = jnp.array([0.001, 100.0])
     prec = QuantOps.FloatQuant.FloatPrec(exp_min, exp_max, sig_bits)
