@@ -53,7 +53,7 @@ def ragged_dot(
     group_sizes: jnp.ndarray,
     precision: jax.lax.PrecisionLike = None,
     preferred_element_type: jnp.dtype | None = None,
-    cfg: aqt_dot_general.DotGeneral = config.config_v4(),
+    cfg: aqt_dot_general.DotGeneral | None = None,
 ):
   """Quantized version of jax.lax.ragged_dot.
 
@@ -73,6 +73,8 @@ def ragged_dot(
   Returns:
     The result of the ragged dot product.
   """
+  if cfg is None:
+    cfg = config.config_v4()
   cfg.fwd.dot_general = RaggedDot(group_sizes=group_sizes)  # pyrefly: ignore[unexpected-keyword]
   # We want to use the same scale for all the experts in the rhs. We do this by
   # setting the rhs_ca to [0, 1] even though the actual contraction axis is 1.
