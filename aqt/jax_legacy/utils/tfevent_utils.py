@@ -156,12 +156,12 @@ def get_parsed_tfevents(dir_path: str,
                 values=onp.array([]),
                 wall_times=onp.array([]))
           event_series_dict[tag_str].steps = onp.append(  # pyrefly: ignore[missing-attribute]
-              event_series_dict[tag_str].steps, event.step)
+              event_series_dict[tag_str].steps, event.step)  # pyrefly: ignore[missing-attribute]
           event_series_dict[tag_str].values = onp.append(  # pyrefly: ignore[missing-attribute]
-              event_series_dict[tag_str].values,
+              event_series_dict[tag_str].values,  # pyrefly: ignore[missing-attribute]
               float(tf.make_ndarray(value.tensor)))
           event_series_dict[tag_str].wall_times = onp.append(  # pyrefly: ignore[missing-attribute]
-              event_series_dict[tag_str].wall_times, event.wall_time)
+              event_series_dict[tag_str].wall_times, event.wall_time)  # pyrefly: ignore[missing-attribute]
 
   for tag_str in event_series_dict:
     # Sort and deduplicate entries with the same step, keeping one with latest

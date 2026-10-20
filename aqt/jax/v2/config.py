@@ -279,9 +279,9 @@ def set_use_fwd_quant(
   assert cfg.drhs.dg_quantizer.lhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
   assert cfg.drhs.dg_quantizer.rhs_mid_alpha is None, msg  # pyrefly: ignore[missing-attribute]
   if dlhs_use_fwd_quant != SKIP:
-    cfg.dlhs.rhs.use_fwd_quant = dlhs_use_fwd_quant
+    cfg.dlhs.rhs.use_fwd_quant = dlhs_use_fwd_quant  # pyrefly: ignore[bad-assignment]
   if drhs_use_fwd_quant != SKIP:
-    cfg.drhs.rhs.use_fwd_quant = drhs_use_fwd_quant
+    cfg.drhs.rhs.use_fwd_quant = drhs_use_fwd_quant  # pyrefly: ignore[bad-assignment]
 
 
 def set_use_mid_quant(

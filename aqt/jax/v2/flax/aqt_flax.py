@@ -637,8 +637,8 @@ class AqtEinsum(nn.Module):
     # will be overwritten by get_tensor()
     # TODO(lew): We can pass QTensor to lax_numpy._einsum if we add some
     # specific methods to QTensor.
-    lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g  # pyrefly: ignore[missing-attribute]
-    rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g  # pyrefly: ignore[missing-attribute]
+    lhs_in = jnp.zeros_like(lhs_g.qvalue) if lhs_is_qt else lhs_g  # pyrefly: ignore[bad-argument-type, missing-attribute]
+    rhs_in = jnp.zeros_like(rhs_g.qvalue) if rhs_is_qt else rhs_g  # pyrefly: ignore[bad-argument-type, missing-attribute]
 
     # Set the types of dummy input to the same as original input, to prevent it
     # from being rejected by assertions in aqt_dot_general.py, line 522-526 and

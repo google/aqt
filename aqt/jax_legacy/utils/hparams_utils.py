@@ -181,7 +181,7 @@ def load_hparams_from_config_dict(hparams_classname: Type[T],
 
   hparams = load_dataclass_from_config_dict(hparams_classname, config_dict)
   hparams.model_hparams = load_dataclass_from_dict(model_classname,  # pyrefly: ignore[missing-attribute]
-                                                   hparams.model_hparams)
+                                                   hparams.model_hparams)  # pyrefly: ignore[missing-attribute]
   return hparams
 
 
